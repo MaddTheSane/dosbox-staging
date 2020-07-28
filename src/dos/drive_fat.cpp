@@ -30,10 +30,6 @@
 #include "bios.h"
 #include "bios_disk.h"
 
-//--Added 2011-04-18 by Alun Bestor to fix FAT image endianness bugs
-#import "BXCoalfaceDrives.h"
-//--endif
-
 #define IMGTYPE_FLOPPY 0
 #define IMGTYPE_ISO    1
 #define IMGTYPE_HDD	   2
