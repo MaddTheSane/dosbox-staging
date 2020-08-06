@@ -129,7 +129,7 @@ typedef void (APIENTRYP PFNGLVERTEXATTRIBPOINTERPROC) (GLuint index, GLint size,
 
 /* Apple defines these functions in their GL header (as core functions)
  * so we can't use their names as function pointers. We can't link
- * directly as some platforms may not have them. So they get their own 
+ * directly as some platforms may not have them. So they get their own
  * namespace here to keep the official names but avoid collisions.
  */
 namespace gl2 {
@@ -242,11 +242,6 @@ enum PRIORITY_LEVELS {
 /* Alias for indicating, that new window should not be user-resizable: */
 constexpr bool FIXED_SIZE = false;
 
-struct Dimensions {
-	int width;
-	int height;
-};
-
 struct SDL_Block {
 	bool initialized = false;
 	bool active;							//If this isn't set don't draw
@@ -341,7 +336,7 @@ struct SDL_Block {
 		bool middle_will_release = true;
 		bool has_focus = false;
 	} mouse;
-	int  ppscale_x, ppscale_y; /* x and y scales for pixel-perfect     */
+	SDL_Point pp_scale = {1, 1};
 	bool double_h, double_w;   /* double-height and double-width flags */
 	SDL_Rect updateRects[1024];
 #if defined (WIN32)
@@ -355,7 +350,9 @@ struct SDL_Block {
 
 static SDL_Block sdl;
 
-static SDL_Rect CalculateViewport(int win_width, int win_height);
+static SDL_Point calc_pp_scale(int width, int heigth);
+static SDL_Rect calc_viewport(int width, int height);
+
 static void CleanupSDLResources();
 static void HandleVideoResize(int width, int height);
 
@@ -400,7 +397,7 @@ void OPENGL_ERROR(const char* message) {
 		LOG_MSG("%X",r);
 	} while ( (r=glGetError()) != GL_NO_ERROR);
 }
-#else 
+#else
 void OPENGL_ERROR(const char*) {
 	return;
 }
@@ -755,8 +752,43 @@ SDL_Rect GFX_GetSDLSurfaceSubwindowDims(Bit16u width, Bit16u height)
 	return rect;
 }
 
+static SDL_Window *setup_window_pp(SCREEN_TYPES screen_type, bool resizable)
+{
+	assert(sdl.window);
+
+	int w = 0;
+	int h = 0;
+
+	SDL_GetWindowSize(sdl.window, &w, &h);
+
+	sdl.pp_scale = calc_pp_scale(w, h);
+
+	LOG_MSG("MAIN: Pixel-perfect scaling (%dx%d): %dx%d (PAR %#.3g) -> %dx%d (PAR %#.3g)",
+	        sdl.pp_scale.x, sdl.pp_scale.y, sdl.draw.width, sdl.draw.height,
+	        sdl.draw.pixel_aspect, sdl.pp_scale.x * sdl.draw.width,
+	        sdl.pp_scale.y * sdl.draw.height,
+	        static_cast<double>(sdl.pp_scale.y) / sdl.pp_scale.x);
+
+	const int imgw = sdl.pp_scale.x * sdl.draw.width;
+	const int imgh = sdl.pp_scale.y * sdl.draw.height;
+	const int wndw = (sdl.desktop.fullscreen ? w : imgw);
+	const int wndh = (sdl.desktop.fullscreen ? h : imgh);
+
+	sdl.clip.w = imgw;
+	sdl.clip.h = imgh;
+	sdl.clip.x = (wndw - imgw) / 2;
+	sdl.clip.y = (wndh - imgh) / 2;
+
+	sdl.window = SetWindowMode(screen_type, wndw, wndh,
+	                           sdl.desktop.fullscreen, resizable);
+	return sdl.window;
+}
+
 static SDL_Window *SetupWindowScaled(SCREEN_TYPES screen_type, bool resizable)
 {
+	if (sdl.scaling_mode == SmPerfect)
+		return setup_window_pp(screen_type, resizable);
+
 	Bit16u fixedWidth;
 	Bit16u fixedHeight;
 
@@ -886,64 +918,22 @@ static bool LoadGLShaders(const char *src, GLuint *vertex, GLuint *fragment) {
 }
 #endif
 
-/* Get the maximum area available for drawing: */
-/* TODO: The current implementation will not let the pixel-perfect mode to  */
-/*       to apply even the simplest 1:2 and 2:1 corrections at the original */
-/*       window resolution, therefore: consider a special case for PP mode. */
-static Dimensions GetAvailableArea(int width, int height)
+static SDL_Point calc_pp_scale(int avw, int avh)
 {
-	if (sdl.desktop.fullscreen) {
-		if (sdl.desktop.full.fixed)
-			return {sdl.desktop.full.width, sdl.desktop.full.height};
-	} else {
-		if (sdl.desktop.window.width > 0 && sdl.desktop.window.height > 0)
-			return {sdl.desktop.window.width, sdl.desktop.window.height};
-	}
+	assert(sdl.draw.width > 0);
+	assert(sdl.draw.height > 0);
+	assert(sdl.draw.pixel_aspect > 0.0);
 
-	const double par = sdl.draw.pixel_aspect;
-	if (par > 1.0)
-		height = iround(height * par);
-	if (par < 1.0)
-		width = iround(width / par);
-
-	return {width, height};
-}
-
-// ATT: aspect is the final aspect ratio of the image including its pixel dimensions and PAR
-/*static void GetActualArea( Bit16u av_w, Bit16u av_h, Bit16u *w, Bit16u *h, double aspect )
-{	double as_x, as_y;
-
-	if( aspect > 1.0 )
-	{	as_y =     aspect; as_x = 1.0;  } else
-	{	as_x = 1.0/aspect; as_y = 1.0;  }
-
-	if( av_h / as_y < av_w / as_x )
-	{	*h = av_h; *w = round( (double)av_h / aspect );  } else
-	{	*w = av_w; *h = round( (double)av_w * aspect );  }
-}*/
-
-/* Initialise pixel-perfect mode: */
-static bool InitPp(Bit16u avw, Bit16u avh)
-{
-	bool   ok;
-	/* TODO: consider reading apsect importance from the .ini-file */
-	ok = pp_getscale(
-		sdl.draw.width, sdl.draw.height,
-		sdl.draw.pixel_aspect,
-		avw, avh,
-		1.14, /* relative importance of aspect ratio */
-		&sdl.ppscale_x,
-		&sdl.ppscale_y
-	) == 0;
-	if (ok) {
-		const double newpar = (double)sdl.ppscale_y / sdl.ppscale_x;
-		LOG_MSG("MAIN: Pixel-perfect scaling (%dx%d): "
-		        "%dx%d (PAR %#.3g) -> %dx%d (PAR %#.3g)",
-		        sdl.ppscale_x, sdl.ppscale_y, sdl.draw.width, sdl.draw.height,
-		        sdl.draw.pixel_aspect, sdl.ppscale_x * sdl.draw.width,
-		        sdl.ppscale_y * sdl.draw.height, newpar);
-	}
-	return ok;
+	int x = 0;
+	int y = 0;
+	constexpr double aspect_weight = 1.14;
+	const int err = pp_getscale(sdl.draw.width, sdl.draw.height,
+	                            sdl.draw.pixel_aspect, avw, avh,
+	                            aspect_weight, &x, &y);
+	if (err == 0)
+		return {x, y};
+	else
+		return {1, 1};
 }
 
 Bitu GFX_SetSize(Bitu width, Bitu height, Bitu flags,
@@ -965,22 +955,11 @@ Bitu GFX_SetSize(Bitu width, Bitu height, Bitu flags,
 	sdl.double_h = (flags & GFX_DBL_H) > 0;
 	sdl.double_w = (flags & GFX_DBL_W) > 0;
 
-	const Dimensions available = GetAvailableArea(sdl.draw.width, sdl.draw.height);
-
 	LOG_MSG("MAIN: Draw resolution: %dx%d,%s%s pixel aspect ratio: %#.2f",
 	        sdl.draw.width, sdl.draw.height,
 	        sdl.double_w ? " double-width," : "",
 	        sdl.double_h ? " double-height," : "",
 	        pixel_aspect);
-	LOG_MSG("MAIN: Emulator resolution: %dx%d",
-	        available.width, available.height);
-
-	if (sdl.scaling_mode == SmPerfect) {
-		if (!InitPp(available.width, available.height)) {
-			LOG_MSG("Failed to initialise pixel-perfect mode, reverting to surface.");
-			goto dosurface;
-		}
-	}
 
 	switch (sdl.desktop.want_type) {
 dosurface:
@@ -1060,36 +1039,11 @@ dosurface:
 		break; // SCREEN_SURFACE
 
 	case SCREEN_TEXTURE: {
-		/* TODO: set up all ScalingMode-related settings here. Currently, the */
-		/*       interpolation hint is set at the reading of settings.    */
-		if (sdl.scaling_mode != SmPerfect) {
-			if (!SetupWindowScaled(SCREEN_TEXTURE, false)) {
-				LOG_MSG("SDL: Can't set video mode, falling "
-				        "back to surface");
-				goto dosurface;
-			}
-		} else {
-			const int imgw = sdl.ppscale_x * sdl.draw.width;
-			const int imgh = sdl.ppscale_y * sdl.draw.height;
-
-			int wndw, wndh;
-			if (sdl.desktop.fullscreen) {
-				wndw = available.width;
-				wndh = available.height;
-			} else {
-				wndh = imgh;
-				wndw = imgw;
-			}
-
-			sdl.clip.w = imgw;
-			sdl.clip.h = imgh;
-			sdl.clip.x = (wndw - imgw) / 2;
-			sdl.clip.y = (wndh - imgh) / 2;
-
-			sdl.window = SetWindowMode(SCREEN_TEXTURE, wndw, wndh,
-			                           sdl.desktop.fullscreen,
-			                           FIXED_SIZE);
+		if (!SetupWindowScaled(SCREEN_TEXTURE, false)) {
+			LOG_MSG("MAIN: Can't initialise 'texture' window");
+			E_Exit("Creating window failed");
 		}
+
 		if (sdl.render_driver != "auto")
 			SDL_SetHint(SDL_HINT_RENDER_DRIVER, sdl.render_driver.c_str());
 		sdl.renderer = SDL_CreateRenderer(sdl.window, -1,
@@ -1293,7 +1247,7 @@ dosurface:
 			           sdl.clip.w,
 			           sdl.clip.h);
 		} else if (sdl.desktop.window.resizable) {
-			sdl.clip = CalculateViewport(windowWidth, windowHeight);
+			sdl.clip = calc_viewport(windowWidth, windowHeight);
 			glViewport(sdl.clip.x, sdl.clip.y, sdl.clip.w, sdl.clip.h);
 		} else {
 			/* We don't just pass sdl.clip.y as-is, so we cover the case of non-vertical
@@ -1308,7 +1262,7 @@ dosurface:
 		if (sdl.opengl.texture > 0) {
 			glDeleteTextures(1,&sdl.opengl.texture);
 		}
- 		glGenTextures(1,&sdl.opengl.texture);
+		glGenTextures(1, &sdl.opengl.texture);
 		glBindTexture(GL_TEXTURE_2D,sdl.opengl.texture);
 		// No borders
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
@@ -1411,7 +1365,7 @@ void GFX_ToggleMouseCapture(void) {
 	 */
 	if (!sdl.mouse.has_focus)
 		return;
-	
+
 	assertm(sdl.mouse.control_choice != NoMouse,
 	        "SDL: Mouse capture is invalid when NoMouse is configured [Logic Bug]");
 
@@ -1419,8 +1373,9 @@ void GFX_ToggleMouseCapture(void) {
 	if (SDL_SetRelativeMouseMode(mouse_is_captured) != 0) {
 		SDL_ShowCursor(SDL_ENABLE);
 		E_Exit("SDL: failed to %s relative-mode [SDL Bug]",
-   		       mouse_is_captured ? "put the mouse in" : "take the mouse out of");
- 	}
+		       mouse_is_captured ? "put the mouse in"
+		                         : "take the mouse out of");
+	}
 	LOG_MSG("SDL: %s the mouse", mouse_is_captured ? "captured" : "released");
 }
 
@@ -1430,7 +1385,7 @@ static void ToggleMouseCapture(bool pressed) {
 	GFX_ToggleMouseCapture();
 }
 
-/*  
+/*
  *  Assesses the following:
  *   - current window size (full or not),
  *   - mouse capture state, (yes or no).
@@ -1518,7 +1473,7 @@ void GFX_SwitchFullScreen()
 	sticky_keys(sdl.desktop.fullscreen);
 #endif
 	sdl.desktop.fullscreen = !sdl.desktop.fullscreen;
- 	GFX_ResetScreen();
+	GFX_ResetScreen();
 	sdl.desktop.switching_fullscreen = false;
 }
 
@@ -1533,8 +1488,8 @@ static void SwitchFullScreen(bool pressed)
 // can be achieved via GFX_SetSize call), and specifically - properly initialized
 // output-specific bits (sdl.surface, sdl.texture, sdl.opengl.framebuf, or
 // sdl.openg.pixel_buffer_object fields).
-// 
-// If everything is prepared correctly, this function returns true, assigns 
+//
+// If everything is prepared correctly, this function returns true, assigns
 // 'pixels' output parameter to to a buffer (with format specified via earlier
 // GFX_SetSize call), and assigns 'pitch' to a number of bytes used for a single
 // pixels row in 'pixels' buffer.
@@ -1878,7 +1833,7 @@ static SDL_Window *SetDefaultWindowMode()
 	                     sdl.desktop.want_resizable_window);
 }
 
-/* 
+/*
  * Please leave the Splash screen stuff in working order.
  * We spend a lot of time making DOSBox.
  */
@@ -2025,7 +1980,7 @@ static void SetupWindowResolution(const char *val)
 	sdl.desktop.window.use_original_size = true;
 }
 
-static SDL_Rect CalculateViewport(int win_width, int win_height)
+static SDL_Rect calc_viewport_fit(int win_width, int win_height)
 {
 	assert(sdl.draw.width > 0);
 	assert(sdl.draw.height > 0);
@@ -2053,6 +2008,26 @@ static SDL_Rect CalculateViewport(int win_width, int win_height)
 		const int x = (win_width - w) / 2;
 		return {x, 0, w, h};
 	}
+}
+
+static SDL_Rect calc_viewport_pp(int win_width, int win_height)
+{
+	sdl.pp_scale = calc_pp_scale(win_width, win_height);
+
+	const int w = sdl.pp_scale.x * sdl.draw.width;
+	const int h = sdl.pp_scale.y * sdl.draw.height;
+	const int x = (win_width - w) / 2;
+	const int y = (win_height - h) / 2;
+
+	return {x, y, w, h};
+}
+
+static SDL_Rect calc_viewport(int width, int height)
+{
+	if (sdl.scaling_mode == SmPerfect)
+		return calc_viewport_pp(width, height);
+	else
+		return calc_viewport_fit(width, height);
 }
 
 //extern void UI_Run(bool);
@@ -2155,6 +2130,10 @@ static void GUI_StartUp(Section * sec) {
 	} else if (output == "openglnb") {
 		sdl.desktop.want_type=SCREEN_OPENGL;
 		sdl.scaling_mode = SmNearest;
+		sdl.opengl.bilinear = false;
+	} else if (output == "openglpp") {
+		sdl.desktop.want_type = SCREEN_OPENGL;
+		sdl.scaling_mode = SmPerfect;
 		sdl.opengl.bilinear = false;
 #endif
 	} else {
@@ -2333,8 +2312,8 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
 		        || !mouse_is_captured)) {
 
 			GFX_ToggleMouseCapture();
- 			break;	// Don't pass click to mouse handler
- 		}
+			break; // Don't pass click to mouse handler
+		}
 		switch (button->button) {
 		case SDL_BUTTON_LEFT:
 			Mouse_ButtonPressed(0);
@@ -2394,7 +2373,7 @@ static void HandleVideoResize(int width, int height)
 
 #if C_OPENGL
 	if (sdl.desktop.window.resizable && sdl.desktop.type == SCREEN_OPENGL) {
-		sdl.clip = CalculateViewport(width, height);
+		sdl.clip = calc_viewport(width, height);
 		glViewport(sdl.clip.x, sdl.clip.y, sdl.clip.w, sdl.clip.h);
 		return;
 	}
@@ -2505,16 +2484,17 @@ void GFX_Events() {
 				continue;
 
 			case SDL_WINDOWEVENT_RESIZED:
-				DEBUG_LOG_MSG("SDL: Window has been resized to %dx%d",
-				              event.window.data1,
-				              event.window.data2);
+				// DEBUG_LOG_MSG("SDL: Window has been resized to %dx%d",
+				//               event.window.data1,
+				//               event.window.data2);
 				HandleVideoResize(event.window.data1,
 				                  event.window.data2);
 				continue;
 
 			case SDL_WINDOWEVENT_EXPOSED:
-				DEBUG_LOG_MSG("SDL: Window has been exposed "
-				              "and should be redrawn");
+				// DEBUG_LOG_MSG("SDL: Window has been exposed "
+				//               "and should be redrawn");
+
 				/* FIXME: below is not consistently true :(
 				 * seems incorrect on KDE and sometimes on MATE
 				 *
@@ -2553,11 +2533,11 @@ void GFX_Events() {
 				break;
 
 			case SDL_WINDOWEVENT_ENTER:
-				DEBUG_LOG_MSG("SDL: Window has gained mouse focus");
+				// DEBUG_LOG_MSG("SDL: Window has gained mouse focus");
 				continue;
 
 			case SDL_WINDOWEVENT_LEAVE:
-				DEBUG_LOG_MSG("SDL: Window has lost mouse focus");
+				// DEBUG_LOG_MSG("SDL: Window has lost mouse focus");
 				continue;
 
 			case SDL_WINDOWEVENT_SHOWN:
@@ -2577,7 +2557,8 @@ void GFX_Events() {
 #endif
 
 			case SDL_WINDOWEVENT_SIZE_CHANGED:
-				DEBUG_LOG_MSG("SDL: The window size has changed");
+				// DEBUG_LOG_MSG("SDL: The window size has changed");
+
 				// The window size has changed either as a
 				// result of an API call or through the system
 				// or user changing the window size.
@@ -2600,7 +2581,7 @@ void GFX_Events() {
 
 #if SDL_VERSION_ATLEAST(2, 0, 5)
 			case SDL_WINDOWEVENT_TAKE_FOCUS:
-				DEBUG_LOG_MSG("SDL: Window is being offered a focus");
+				// DEBUG_LOG_MSG("SDL: Window is being offered a focus");
 				// should SetWindowInputFocus() on itself or a
 				// subwindow, or ignore
 				continue;
@@ -2812,6 +2793,7 @@ void Config_Add_SDL() {
 #if C_OPENGL
 		"opengl",
 		"openglnb",
+		"openglpp",
 #endif
 		0
 	};
@@ -2824,10 +2806,10 @@ void Config_Add_SDL() {
 	Pstring->Set_help("What video system to use for output.");
 	Pstring->Set_values(outputs);
 
-	Pstring = sdl_sec->Add_string("texture_renderer", always, "auto");
-	Pstring->Set_help("Choose a renderer driver if output=texture or texturenb.\n"
-	                  "Use output=auto for an automatic choice.");
-	Pstring->Set_values(Get_SDL_TextureRenderers());
+	pstring = sdl_sec->Add_string("texture_renderer", always, "auto");
+	pstring->Set_help("Choose a renderer driver when using a texture output mode.\n"
+	                  "Use texture_renderer=auto for an automatic choice.");
+	pstring->Set_values(Get_SDL_TextureRenderers());
 
 	// Define mouse control settings
 	Pmulti = sdl_sec->Add_multi("capture_mouse", always, " ");
@@ -3168,8 +3150,8 @@ int main(int argc, char* argv[]) {
 			if(freopen(STDOUT_FILE, "w", stdout) == NULL)
 				no_stdout = true; // No stdout so don't write messages
 			freopen(STDERR_FILE, "w", stderr);
-			setvbuf(stdout, NULL, _IOLBF, BUFSIZ);	/* Line buffered */
-			setbuf(stderr, NULL);					/* No buffering */
+			setvbuf(stdout, NULL, _IOLBF, BUFSIZ); // Line buffered
+			setvbuf(stderr, NULL, _IONBF, BUFSIZ); // No buffering
 		} else {
 			if (AllocConsole()) {
 				fclose(stdin);

@@ -1,4 +1,6 @@
 /*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
  *  Copyright (C) 2002-2020  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -16,6 +18,10 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#ifndef DOSBOX_MIDI_WIN32_H
+#define DOSBOX_MIDI_WIN32_H
+
+#include "midi_handler.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -25,6 +31,8 @@
 #include <string>
 #include <sstream>
 
+#include "programs.h"
+
 class MidiHandler_win32: public MidiHandler {
 private:
 	HMIDIOUT m_out;
@@ -32,9 +40,12 @@ private:
 	HANDLE m_event;
 	bool isOpen;
 public:
-	MidiHandler_win32() : MidiHandler(),isOpen(false) {};
-	const char * GetName(void) { return "win32";};
-	bool Open(const char * conf) {
+	MidiHandler_win32() : MidiHandler(), isOpen(false) {}
+
+	const char *GetName() const override { return "win32"; }
+
+	bool Open(const char *conf) override
+	{
 		if (isOpen) return false;
 		m_event = CreateEvent (NULL, true, true, NULL);
 		MMRESULT res = MMSYSERR_NOERROR;
@@ -70,18 +81,23 @@ public:
 		if (res != MMSYSERR_NOERROR) return false;
 		isOpen=true;
 		return true;
-	};
+	}
 
-	void Close(void) {
+	void Close() override
+	{
 		if (!isOpen) return;
 		isOpen=false;
 		midiOutClose(m_out);
 		CloseHandle (m_event);
-	};
-	void PlayMsg(Bit8u * msg) {
-		midiOutShortMsg(m_out, *(Bit32u*)msg);
-	};
-	void PlaySysex(Bit8u * sysex,Bitu len) {
+	}
+
+	void PlayMsg(const uint8_t *msg) override
+	{
+		midiOutShortMsg(m_out, read_unaligned_uint32(msg));
+	}
+
+	void PlaySysex(uint8_t *sysex, size_t len) override
+	{
 		if (WaitForSingleObject (m_event, 2000) == WAIT_TIMEOUT) {
 			LOG(LOG_MISC,LOG_ERROR)("Can't send midi message");
 			return;
@@ -102,7 +118,9 @@ public:
 			return;
 		}
 	}
-	void ListAll(Program* base) {
+
+	void ListAll(Program *base) override
+	{
 		unsigned int total = midiOutGetNumDevs();
 		for(unsigned int i = 0;i < total;i++) {
 			MIDIOUTCAPS mididev;
@@ -114,4 +132,4 @@ public:
 
 MidiHandler_win32 Midi_win32;
 
-
+#endif

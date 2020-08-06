@@ -852,14 +852,15 @@ void Config::Init() {
 	}
 }
 
-void Section::AddInitFunction(SectionFunction func,bool canchange) {
-	initfunctions.push_back(Function_wrapper(func,canchange));
+void Section::AddInitFunction(SectionFunction func, bool canchange)
+{
+	initfunctions.emplace_back(func, canchange);
 }
 
-void Section::AddDestroyFunction(SectionFunction func,bool canchange) {
-	destroyfunctions.push_front(Function_wrapper(func,canchange));
+void Section::AddDestroyFunction(SectionFunction func, bool canchange)
+{
+	destroyfunctions.emplace_front(func, canchange);
 }
-
 
 void Section::ExecuteInit(bool initall) {
 	typedef std::list<Function_wrapper>::iterator func_it;
@@ -1245,8 +1246,8 @@ bool CommandLine::FindEntry(char const * const name,cmd_it & it,bool neednext) {
 
 }
 
-
-CommandLine::CommandLine(int argc,char const * const argv[]) {
+CommandLine::CommandLine(int argc, char const *const argv[])
+{
 	if (argc>0) {
 		file_name=argv[0];
 	}
@@ -1256,6 +1257,7 @@ CommandLine::CommandLine(int argc,char const * const argv[]) {
 		i++;
 	}
 }
+
 Bit16u CommandLine::Get_arglength() {
 	if (cmds.empty()) return 0;
 	Bit16u i=1;
@@ -1264,8 +1266,8 @@ Bit16u CommandLine::Get_arglength() {
 	return --i;
 }
 
-
-CommandLine::CommandLine(char const * const name,char const * const cmdline) {
+CommandLine::CommandLine(const char *name, const char *cmdline)
+{
 	if (name) file_name=name;
 	/* Parse the cmds and put them in the list */
 	bool inword,inquote;char c;

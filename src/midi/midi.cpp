@@ -1,4 +1,6 @@
 /*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
  *  Copyright (C) 2002-2020  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -27,11 +29,12 @@
 #include "SDL.h"
 
 #include "cross.h"
-#include "support.h"
-#include "setup.h"
-#include "mapper.h"
-#include "pic.h"
 #include "hardware.h"
+#include "mapper.h"
+#include "midi_handler.h"
+#include "pic.h"
+#include "setup.h"
+#include "support.h"
 #include "timer.h"
 
 //--Added 2011-09-25 by Alun Bestor to let Boxer hook into MIDI messaging

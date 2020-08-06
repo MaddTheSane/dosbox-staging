@@ -35,6 +35,7 @@
 #include "support.h"
 #include "control.h"
 #include "paging.h"
+#include "../ints/int10.h"
 
 // clang-format off
 static SHELL_Cmd cmd_list[] = {
@@ -537,6 +538,62 @@ static std::string to_search_pattern(const char *arg)
 	return pattern;
 }
 
+// Map a vector of dir contents to a vector of word widths.
+static std::vector<int> to_name_lengths(const std::vector<DtaResult> &dir_contents,
+                                        int padding)
+{
+	std::vector<int> ret;
+	ret.reserve(dir_contents.size());
+	for (const auto &entry : dir_contents) {
+		const int len = static_cast<int>(strlen(entry.name));
+		ret.push_back(len + padding);
+	}
+	return ret;
+}
+
+static std::vector<int> calc_column_widths(const std::vector<int> &word_widths,
+                                           int min_col_width)
+{
+	assert(min_col_width > 0);
+
+	// Actual terminal width (number of text columns) using current text
+	// mode; in practice it's either 40, 80, or 132.
+	const int term_width = real_readw(BIOSMEM_SEG, BIOSMEM_NB_COLS);
+
+	// Use term_width-1 because we never want to print line up to the actual
+	// limit; this would cause unnecessary line wrapping
+	const size_t max_columns = (term_width - 1) / min_col_width;
+	std::vector<int> col_widths(max_columns);
+
+	// This function returns true when column number is too high to fit
+	// words into a terminal width.  If it returns false, then the first
+	// coln integers in col_widths vector describe the column widths.
+	auto too_many_columns = [&](size_t coln) -> bool {
+		std::fill(col_widths.begin(), col_widths.end(), 0);
+		if (coln <= 1)
+			return false;
+		int max_line_width = 0; // tally of the longest line
+		int c = 0;              // current columnt
+		for (const int width : word_widths) {
+			const int old_col_width = col_widths[c];
+			const int new_col_width = std::max(old_col_width, width);
+			col_widths[c] = new_col_width;
+			max_line_width += (new_col_width - old_col_width);
+			if (max_line_width >= term_width)
+				return true;
+			c = (c + 1) % coln;
+		}
+		return false;
+	};
+
+	size_t col_count = max_columns;
+	while (too_many_columns(col_count)) {
+		col_count--;
+		col_widths.pop_back();
+	}
+	return col_widths;
+}
+
 void DOS_Shell::CMD_DIR(char * args) {
 	HELP("DIR");
 	char numformat[16];
@@ -628,13 +685,21 @@ void DOS_Shell::CMD_DIR(char * args) {
 	}
 
 	// Helper function to handle 'Press any key to continue' message
-	// regardless of specific formatting below.
-	// Call it whenever a newline gets printed.
+	// regardless of user-selected formatting of DIR command output.
 	//
-	// TODO: DIR code assumes, that terminal size is 80x25
+	// Call it whenever a newline gets printed to potentially display
+	// this one-line message.
+	//
+	// For some strange reason number of columns stored in BIOS segment
+	// is exact, while number of rows is 0-based (so 80x25 mode is
+	// represented as 80x24).  It's convenient for us, as it means we can
+	// get away with (p_count % term_rows) instead of
+	// (p_count % (term_rows - 1)).
+	//
+	const int term_rows = real_readb(BIOSMEM_SEG, BIOSMEM_NB_ROWS);
 	auto show_press_any_key = [&]() {
 		p_count += 1;
-		if (optP && (p_count % 24) == 0)
+		if (optP && (p_count % term_rows) == 0)
 			CMD_PAUSE(empty_string);
 	};
 
@@ -797,13 +862,14 @@ void DOS_Shell::CMD_DIR(char * args) {
 		}
 		FormatNumber(free_space, numformat);
 		WriteOut(MSG_Get("SHELL_CMD_DIR_BYTES_FREE"), dir_count, numformat);
-		show_press_any_key();
 	}
 	dos.dta(save_dta);
 }
 
 void DOS_Shell::CMD_LS(char *args)
 {
+	using namespace std::string_literals;
+
 	HELP("LS");
 
 	const RealPt original_dta = dos.dta();
@@ -811,60 +877,68 @@ void DOS_Shell::CMD_LS(char *args)
 	DOS_DTA dta(dos.dta());
 
 	const std::string pattern = to_search_pattern(args);
-	bool ret = DOS_FindFirst(pattern.c_str(), 0xffff & ~DOS_ATTR_VOLUME);
-	if (!ret) {
+	if (!DOS_FindFirst(pattern.c_str(), 0xffff & ~DOS_ATTR_VOLUME)) {
 		WriteOut(MSG_Get("SHELL_CMD_LS_PATH_ERR"), trim(args));
 		dos.dta(original_dta);
 		return;
 	}
 
-	std::vector<DtaResult> results;
+	std::vector<DtaResult> dir_contents;
 	// reserve space for as many as we can fit into a single memory page
 	// nothing more to it; make it larger if necessary
-	results.reserve(MEM_PAGE_SIZE / sizeof(DtaResult));
+	dir_contents.reserve(MEM_PAGE_SIZE / sizeof(DtaResult));
 
 	do {
 		DtaResult result;
 		dta.GetResult(result.name, result.size, result.date,
 		              result.time, result.attr);
-		results.push_back(result);
-	} while ((ret = DOS_FindNext()) == true);
+		if (result.name == "."s || result.name == ".."s)
+			continue;
+		dir_contents.push_back(result);
+	} while (DOS_FindNext());
+
+	const int column_sep = 2; // chars separating columns
+	const auto word_widths = to_name_lengths(dir_contents, column_sep);
+	const auto column_widths = calc_column_widths(word_widths, column_sep + 1);
+	const size_t cols = column_widths.size();
 
 	size_t w_count = 0;
 
-	for (const auto &entry : results) {
+	for (const auto &entry : dir_contents) {
 		std::string name = entry.name;
 		const bool is_dir = entry.attr & DOS_ATTR_DIRECTORY;
-
-		if (name == "." || name == "..")
-			continue;
+		const size_t col = w_count % cols;
+		const int cw = column_widths[col];
 
 		if (is_dir) {
 			upcase(name);
-			WriteOut("\033[34;1m%-15s\033[0m", name.c_str());
+			WriteOut("\033[34;1m%-*s\033[0m", cw, name.c_str());
 		} else {
 			lowcase(name);
 			if (is_executable_filename(name))
-				WriteOut("\033[32;1m%-15s\033[0m", name.c_str());
+				WriteOut("\033[32;1m%-*s\033[0m", cw, name.c_str());
 			else
-				WriteOut("%-15s", name.c_str());
+				WriteOut("%-*s", cw, name.c_str());
 		}
 
 		++w_count;
-		if (w_count % 5 == 0)
+		if (w_count % cols == 0)
 			WriteOut_NoParsing("\n");
 	}
 	dos.dta(original_dta);
 }
 
 struct copysource {
-	std::string filename;
-	bool concat;
-	copysource(std::string filein,bool concatin):
-		filename(filein),concat(concatin){ };
-	copysource():filename(""),concat(false){ };
-};
+	std::string filename = "";
+	bool concat = false;
 
+	copysource() = default;
+
+	copysource(const std::string &file, bool cat)
+	        : filename(file),
+	          concat(cat)
+	{}
+};
 
 void DOS_Shell::CMD_COPY(char * args) {
 	//--Modified 2009-02-24 by Alun Bestor to show help text when no arguments were given
@@ -1356,7 +1430,7 @@ void DOS_Shell::CMD_DATE(char * args) {
 	}
 	WriteOut("%s %s\n",day, buffer);
 	if (!dateonly) WriteOut(MSG_Get("SHELL_CMD_DATE_SETHLP"));
-};
+}
 
 void DOS_Shell::CMD_TIME(char * args) {
 	HELP("TIME");
@@ -1396,7 +1470,7 @@ void DOS_Shell::CMD_TIME(char * args) {
 		WriteOut(MSG_Get("SHELL_CMD_TIME_NOW"));
 		WriteOut("%2u:%02u:%02u,%02u\n",reg_ch,reg_cl,reg_dh,reg_dl);
 	}
-};
+}
 
 void DOS_Shell::CMD_SUBST (char * args) {
 /* If more that one type can be substed think of something else
@@ -1571,22 +1645,21 @@ void DOS_Shell::CMD_PATH(char *args){
 	}
 }
 
-void DOS_Shell::CMD_VER(char *args) {
+void DOS_Shell::CMD_VER(char *args)
+{
 	HELP("VER");
 	if (args && strlen(args)) {
-		char* word = StripWord(args);
-		if (strcasecmp(word,"set")) return;
+		char *word = StripWord(args);
+		if (strcasecmp(word, "set"))
+			return;
 		word = StripWord(args);
-		if (!*args && !*word) { //Reset
-			dos.version.major = 5;
-			dos.version.minor = 0;
-		} else if (*args == 0 && *word && (strchr(word,'.') != 0)) { //Allow: ver set 5.1
-			const char * p = strchr(word,'.');
-			dos.version.major = (Bit8u)(atoi(word));
-			dos.version.minor = (Bit8u)(atoi(p+1));
-		} else { //Official syntax: ver set 5 2
-			dos.version.major = (Bit8u)(atoi(word));
-			dos.version.minor = (Bit8u)(atoi(args));
-		}
-	} else WriteOut(MSG_Get("SHELL_CMD_VER_VER"),VERSION,dos.version.major,dos.version.minor);
+		const auto new_version = DOS_ParseVersion(word, args);
+		if (new_version.major || new_version.minor) {
+			dos.version.major = new_version.major;
+			dos.version.minor = new_version.minor;
+		} else
+			WriteOut(MSG_Get("SHELL_CMD_VER_INVALID"));
+	} else
+		WriteOut(MSG_Get("SHELL_CMD_VER_VER"), VERSION,
+		         dos.version.major, dos.version.minor);
 }

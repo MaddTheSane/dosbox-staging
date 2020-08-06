@@ -1,4 +1,6 @@
 /*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
  *  Copyright (C) 2002-2020  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -16,6 +18,10 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#ifndef DOSBOX_MIDI_COREAUDIO_H
+#define DOSBOX_MIDI_COREAUDIO_H
+
+#include "midi_handler.h"
 
 #include <AudioToolbox/AUGraph.h>
 #include <CoreServices/CoreServices.h>
@@ -57,11 +63,20 @@ class MidiHandler_coreaudio : public MidiHandler {
 private:
 	AUGraph m_auGraph;
 	AudioUnit m_synth;
-        const char *soundfont;
+	const char *soundfont;
+
 public:
-	MidiHandler_coreaudio() : m_auGraph(0), m_synth(0) {}
-	const char * GetName(void) { return "coreaudio"; }
-	bool Open(const char * conf) {
+	MidiHandler_coreaudio()
+	        : MidiHandler(),
+	          m_auGraph(0),
+	          m_synth(0),
+	          soundfont(nullptr)
+	{}
+
+	const char *GetName() const override { return "coreaudio"; }
+
+	bool Open(const char *conf) override
+	{
 		OSStatus err = 0;
 
 		if (m_auGraph)
@@ -173,7 +188,8 @@ public:
 		return false;
 	}
 
-	void Close(void) {
+	void Close() override
+	{
 		if (m_auGraph) {
 			AUGraphStop(m_auGraph);
 			DisposeAUGraph(m_auGraph);
@@ -181,11 +197,13 @@ public:
 		}
 	}
 
-	void PlayMsg(Bit8u * msg) {
+	void PlayMsg(const uint8_t *msg) override
+	{
 		MusicDeviceMIDIEvent(m_synth, msg[0], msg[1], msg[2], 0);
-	}	
+	}
 
-	void PlaySysex(Bit8u * sysex, Bitu len) {
+	void PlaySysex(uint8_t *sysex, size_t len) override
+	{
 		MusicDeviceSysEx(m_synth, sysex, len);
 	}
 };
@@ -193,3 +211,5 @@ public:
 #undef RequireNoErr
 
 MidiHandler_coreaudio Midi_coreaudio;
+
+#endif

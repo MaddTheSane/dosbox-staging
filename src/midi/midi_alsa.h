@@ -1,4 +1,6 @@
 /*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
  *  Copyright (C) 2002-2020  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -16,6 +18,10 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#ifndef DOSBOX_MIDI_ALSA_H
+#define DOSBOX_MIDI_ALSA_H
+
+#include "midi_handler.h"
 
 #define ALSA_PCM_OLD_HW_PARAMS_API
 #define ALSA_PCM_OLD_SW_PARAMS_API
@@ -83,13 +89,16 @@ public:
 	MidiHandler_alsa(const MidiHandler_alsa &) = delete; // prevent copying
 	MidiHandler_alsa &operator=(const MidiHandler_alsa &) = delete; // prevent assignment
 
-	const char* GetName(void) { return "alsa"; }
-	void PlaySysex(Bit8u * sysex,Bitu len) {
+	const char *GetName() const override { return "alsa"; }
+
+	void PlaySysex(uint8_t *sysex, size_t len) override
+	{
 		snd_seq_ev_set_sysex(&ev, len, sysex);
 		send_event(1);
 	}
 
-	void PlayMsg(Bit8u * msg) {
+	void PlayMsg(const uint8_t *msg) override
+	{
 		ev.type = SND_SEQ_EVENT_OSS;
 
 		ev.data.raw32.d[0] = msg[0];
@@ -134,20 +143,22 @@ public:
 			send_event(1);
 			break;
 		}
-	}	
+	}
 
-	void Close(void) {
+	void Close() override
+	{
 		if (seq_handle)
 			snd_seq_close(seq_handle);
 	}
 
-	bool Open(const char * conf) {
+	bool Open(const char *conf) override
+	{
 		char var[10];
 		unsigned int caps;
 		bool defaultport = true; //try 17:0. Seems to be default nowadays
 
 		// try to use port specified in config file
-		if (conf && conf[0]) { 
+		if (conf && conf[0]) {
 			safe_strncpy(var, conf, 10);
 			if (!parse_addr(var, &seq_client, &seq_port)) {
 				LOG_MSG("ALSA: Invalid alsa port %s", var);
@@ -165,11 +176,11 @@ public:
 			LOG_MSG("ALSA: Can't open sequencer");
 			return false;
 		}
-	
+
 		my_client = snd_seq_client_id(seq_handle);
 		snd_seq_set_client_name(seq_handle, "DOSBOX");
 		snd_seq_set_client_group(seq_handle, "input");
-	
+
 		caps = SND_SEQ_PORT_CAP_READ;
 		if (seq_client == SND_SEQ_ADDRESS_SUBSCRIBERS)
 			caps = ~SND_SEQ_PORT_CAP_SUBS_READ;
@@ -181,7 +192,7 @@ public:
 			LOG_MSG("ALSA: Can't create ALSA port");
 			return false;
 		}
-	
+
 		if (seq_client != SND_SEQ_ADDRESS_SUBSCRIBERS) {
 			/* subscribe to MIDI port */
 			if (snd_seq_connect_to(seq_handle, my_port, seq_client, seq_port) < 0) {
@@ -209,3 +220,5 @@ public:
 };
 
 MidiHandler_alsa Midi_alsa;
+
+#endif
