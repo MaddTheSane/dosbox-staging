@@ -8,7 +8,7 @@
 #define C_DEBUG 0
 
 /* Define to 1 to enable screenshots, requires libpng */
-#define C_SSHOT 0
+#define C_SSHOT 1
 
 /* Define to 1 to use opengl display output support */
 #define C_OPENGL 1
@@ -38,6 +38,9 @@
 
 /* Enable memory function inlining in */
 #define C_CORE_INLINE 1
+
+/* Define to 1 to enable FluidSynth MIDI synthesiser */
+#define C_FLUIDSYNTH 1
 
 /* Enable the FPU module, still only for beta testing */
 #define C_FPU 1

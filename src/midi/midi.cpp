@@ -78,8 +78,9 @@ MidiHandler Midi_none;
 /* Include different midi drivers, lowest ones get checked first for default.
    Each header provides an independent midi interface. */
 
-//--Disabled 2011-09-25 by Alun Bestor: all MIDI handling is now done by Boxer
+#include "midi_fluidsynth.h"
 
+//--Disabled 2011-09-25 by Alun Bestor: all MIDI handling is now done by Boxer
 //#if defined(MACOSX)
 //
 //#if defined(C_SUPPORTS_COREMIDI)
@@ -105,7 +106,6 @@ MidiHandler Midi_none;
 //#include "midi_alsa.h"
 //
 //#endif
-
 //--End of modifications
 
 struct DB_Midi {
@@ -227,11 +227,14 @@ void MIDI_RawOutByte(uint8_t data)
 //}
 //--End of modifications
 
-class MIDI:public Module_base{
+class MIDI : public Module_base {
 public:
-	MIDI(Section* configuration):Module_base(configuration){
+	MIDI(Section *configuration) : Module_base(configuration)
+	{
 		Section_prop * section=static_cast<Section_prop *>(configuration);
-		const char * dev=section->Get_string("mididevice");
+		std::string dev = section->Get_string("mididevice");
+		lowcase(dev);
+
 		std::string fullconf=section->Get_string("midiconfig");
 		//--Added 2011-09-25 by Alun Bestor to let Boxer pick up on the suggested MIDI device
 		boxer_suggestMIDIHandler(dev, fullconf.c_str());
@@ -254,39 +257,47 @@ public:
 		midi.status=0x00;
 		midi.cmd_pos=0;
 		midi.cmd_len=0;
+		// Value "default" exists for backwards-compatibility.
+		// TODO: Rewrite this logic without using goto
 		//--Modified 2011-09-25 by Alun Bestor: DOSBox's MIDI handlers are all disabled,
 		//so skip straight to the 'none' handler.
 		goto getdefault;
 		//--End of modifications
-		if (!strcasecmp(dev,"default")) goto getdefault;
+		if (dev == "auto" || dev == "default")
+			goto getdefault;
 		handler=handler_list;
 		while (handler) {
-			if (!strcasecmp(dev,handler->GetName())) {
+			if (dev == handler->GetName()) {
 				if (!handler->Open(conf)) {
-					LOG_MSG("MIDI: Can't open device:%s with config:%s.",dev,conf);
+					LOG_MSG("MIDI: Can't open device: %s with config: '%s'",
+					        dev.c_str(), conf);
 					goto getdefault;
 				}
 				midi.handler=handler;
 				midi.available=true;
-				LOG_MSG("MIDI: Opened device:%s",handler->GetName());
+				LOG_MSG("MIDI: Opened device: %s",
+				        handler->GetName());
 				return;
 			}
 			handler=handler->next;
 		}
-		LOG_MSG("MIDI: Can't find device:%s, finding default handler.",dev);
+		LOG_MSG("MIDI: Can't find device: %s, using default handler.",
+		        dev.c_str());
 getdefault:
 		handler=handler_list;
 		while (handler) {
 			if (handler->Open(conf)) {
 				midi.available=true;
 				midi.handler=handler;
-				LOG_MSG("MIDI: Opened device:%s",handler->GetName());
+				LOG_MSG("MIDI: Opened device: %s",
+				        handler->GetName());
 				return;
 			}
 			handler=handler->next;
 		}
 		/* This shouldn't be possible */
 	}
+
 	~MIDI(){
 		if(midi.available) midi.handler->Close();
 		midi.available = false;

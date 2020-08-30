@@ -33,7 +33,7 @@ jobs:
 
   build_clang_static_analyser:
     name: Clang static analyzer
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: run_linters
     steps:
       - uses: actions/checkout@v2
@@ -87,20 +87,20 @@ jobs:
   dynamic_matrix:
     name: ${{ matrix.conf.name }} dynamic sanitizers
     needs: run_linters
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
         conf:
           - name: Clang
             sanitizers: USAN
-            usan:  86
+            usan:  0  # cleared out in our existing tests
             tsan:  -1
             uasan: -1
           - name: GCC
             sanitizers: TSAN UASAN
             usan:  -1
             tsan:  0  # our test does not trigger multiple threads yet
-            uasan: 34
+            uasan: 14
     steps:
       - uses: actions/checkout@v2
       - run:  sudo apt-get update

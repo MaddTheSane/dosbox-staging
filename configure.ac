@@ -31,6 +31,13 @@ m4_pattern_forbid([^AC_])
 m4_pattern_forbid([^AH_])
 m4_pattern_forbid([^AX_])
 
+dnl Configure POSIX thread support
+m4_pattern_allow(AX_PTHREAD_ZOS_MISSING)
+m4_pattern_allow(AX_PTHREAD_CC_IS_CLANG)
+AX_PTHREAD
+LIBS="$PTHREAD_LIBS $LIBS"
+CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
+
 dnl Check for SDL
 SDL_VERSION=2.0.0
 AM_PATH_SDL($SDL_VERSION,
@@ -100,6 +107,7 @@ AC_CHECK_SIZEOF(int *)
 
 dnl Require compiler with C++14 support.
 dnl Allow GNU extensions to work around MinGW bugs around POSIX compatibility.
+AC_LANG(C++)
 AX_CXX_COMPILE_STDCXX_14(ext, mandatory)
 
 dnl some semi complex check for sys/socket so it works on darwin as well
@@ -203,21 +211,6 @@ int x=10;if( __builtin_expect ((x==1),0) ) ;
 ]])], [ AC_MSG_RESULT(yes);AC_DEFINE(C_HAS_BUILTIN_EXPECT)],AC_MSG_RESULT(no))
 #switch language back
 AC_LANG_POP(C++)
-
-dnl test if compiler supports -mno-ms-bitfields as it is bugged
-# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=52991
-BACKUP_CFLAGS="$CFLAGS"
-CFLAGS="-mno-ms-bitfields"
-AC_MSG_CHECKING(if compiler supports -mno-ms-bitfields)
-AC_COMPILE_IFELSE([AC_LANG_SOURCE([
-void blah(){
-;
-}
-])],[
-AC_MSG_RESULT([yes])
-CXXFLAGS="$CXXFLAGS -mno-ms-bitfields"
-],[AC_MSG_RESULT([no])])
-CFLAGS="$BACKUP_CFLAGS"
 
 dnl When on macOS, enable support for Apple's Core MIDI and/or Core Audio if our compiler can #include their headers
 case "$host" in
@@ -532,6 +525,39 @@ AS_IF([test "x${enable_opus_cdda}" != "xno"],
 
 AM_CONDITIONAL(USE_OPUS, test "${HAVE_OPUS}" = "yes")
 
+
+dnl FluidSynth software MIDI synthesiser
+dnl ------------------------------------
+dnl
+AH_TEMPLATE(C_FLUIDSYNTH, [Define to 1 to enable FluidSynth MIDI synthesiser])
+AC_ARG_ENABLE(fluidsynth,
+              AS_HELP_STRING([--disable-fluidsynth],
+                             [Disable FluidSynth integration]))
+
+if test "${enable_fluidsynth}" != "no" ; then
+    AC_MSG_CHECKING(for FluidSynth >= 2.0.0)
+    AC_COMPILE_IFELSE(
+        [AC_LANG_SOURCE([
+            #include <fluidsynth.h>
+            static_assert(FLUIDSYNTH_VERSION_MAJOR >= 2, "");
+        ])],
+        [AC_MSG_RESULT(yes); USE_FLUIDSYNTH=yes],
+        [AC_MSG_RESULT(no);
+         AC_MSG_NOTICE(You can turn it off with --disable-fluidsynth);
+         AC_MSG_ERROR(FluidSynth >= 2.0.0 not found)])
+fi
+
+if test "${USE_FLUIDSYNTH}" = "yes" ; then
+    AC_DEFINE(C_FLUIDSYNTH,1)
+    LIBS="$LIBS -lfluidsynth"
+else
+    AC_DEFINE(C_FLUIDSYNTH,0)
+    AC_MSG_WARN([FluidSynth integration disabled])
+fi
+
+
+dnl OpenGL support
+dnl --------------
 AH_TEMPLATE(C_OPENGL,[Define to 1 to use opengl display output support])
 AC_CHECK_LIB(GL, main, have_gl_lib=yes, have_gl_lib=no , )
 AC_CHECK_LIB(opengl32, main, have_opengl32_lib=yes,have_opengl32_lib=no , )

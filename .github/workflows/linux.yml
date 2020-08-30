@@ -20,34 +20,36 @@ jobs:
           - name: GCC, Ubuntu 16.04
             os: ubuntu-16.04
             flags: -c gcc
-            max_warnings: 312
+            config_flags: --disable-fluidsynth
+            max_warnings: 279
           - name: GCC, Ubuntu 18.04
             os: ubuntu-18.04
             flags: -c gcc
-            max_warnings: 311
+            config_flags: --disable-fluidsynth
+            max_warnings: 278
           - name: GCC, Ubuntu 20.04
             os: ubuntu-20.04
             flags: -c gcc
-            max_warnings: 311
+            max_warnings: 278
           - name: Clang, Ubuntu 20.04
             os: ubuntu-20.04
             flags: -c clang -v 10
-            max_warnings: 28
+            max_warnings: 8
           - name: Ubuntu, +debug
-            os: ubuntu-latest
+            os: ubuntu-20.04
             flags: -c gcc
             config_flags: --enable-debug
-            max_warnings: 421
+            max_warnings: 388
           - name: Ubuntu, +dynrec, -dyn_x86
-            os: ubuntu-latest
+            os: ubuntu-20.04
             flags: -c gcc
             config_flags: --disable-dynamic-x86
-            max_warnings: 308
+            max_warnings: 275
           - name: Ubuntu, +dynrec, +debug, -dyn_x86
-            os: ubuntu-latest
+            os: ubuntu-20.04
             flags: -c gcc
             config_flags: --disable-dynamic-x86 --enable-debug
-            max_warnings: 455
+            max_warnings: 422
 
     steps:
       - uses: actions/checkout@v2
@@ -127,9 +129,11 @@ jobs:
           set -x
           ./autogen.sh
           ./configure \
-              CFLAGS="$FLAGS" CXXFLAGS="$FLAGS" \
-              LDFLAGS="$FLAGS $LINKFLAGS -flto=$(nproc)" \
-              --enable-png-static
+              --enable-png-static \
+              --disable-fluidsynth \
+              CFLAGS="$FLAGS" \
+              CXXFLAGS="$FLAGS" \
+              LDFLAGS="$FLAGS $LINKFLAGS -flto=$(nproc)"
           make -j "$(nproc)"
           strip src/dosbox
       - name: Package

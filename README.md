@@ -72,6 +72,7 @@ Other differences:
 | **Modem phonebook file** | Yes (`phonebookfile=<name>`)                 | N/A
 | **Autotype command**     | Yes<sup>[10]</sup>                           | N/A
 | **Startup verbosity**    | Yes<sup>[11]</sup>                           | N/A
+| **GUS Enhancements**     | Yes<sup>[12]</sup>                           | N/A
 
 [OPL]:https://en.wikipedia.org/wiki/Yamaha_YMF262
 [CGA]:https://en.wikipedia.org/wiki/Color_Graphics_Adapter
@@ -81,6 +82,7 @@ Other differences:
 [9]:https://github.com/dosbox-staging/dosbox-staging/commit/ffe3c5ab7fb5e28bae78f07ea987904f391a7cf8
 [10]:https://github.com/dosbox-staging/dosbox-staging/commit/239396fec83dbba6a1eb1a0f4461f4a427d2be38
 [11]: https://github.com/dosbox-staging/dosbox-staging/pull/477
+[12]: https://github.com/dosbox-staging/dosbox-staging/wiki/Gravis-UltraSound-Enhancements
 
 ## Stable release builds
 
@@ -106,19 +108,19 @@ Install build dependencies appropriate for your OS:
 
 ``` shell
 # Fedora
-sudo dnf install gcc-c++ automake alsa-lib-devel libpng-devel \
-                 SDL2-devel SDL2_net-devel opusfile-devel
+sudo dnf install gcc-c++ automake alsa-lib-devel libpng-devel SDL2-devel \
+                 SDL2_net-devel opusfile-devel fluidsynth-devel
 ```
 
 ``` shell
 # Debian, Ubuntu
 sudo apt install build-essential automake libasound2-dev libpng-dev \
-                 libsdl2-dev libsdl2-net-dev libopusfile-dev
+                 libsdl2-dev libsdl2-net-dev libopusfile-dev libfluidsynth-dev
 ```
 
 ``` shell
 # Arch, Manjaro
-sudo pacman -S gcc automake alsa-lib libpng sdl2 sdl2_net opusfile
+sudo pacman -S gcc automake alsa-lib libpng sdl2 sdl2_net opusfile fluidsynth
 ```
 
 ``` shell
@@ -126,8 +128,10 @@ sudo pacman -S gcc automake alsa-lib libpng sdl2 sdl2_net opusfile
 xcode-select --install
 brew install autogen automake libpng sdl2 sdl2_net opusfile
 ```
+*Note: FluidSynth as a library is not available on macOS via brew.
+Use `--disable-fluidsynth` configure flag to disable the feature.*
 
-Following flags are suggested for local optimised builds:
+Compilation flags suggested for local optimised builds:
 
 ``` shell
 git clone https://github.com/dosbox-staging/dosbox-staging.git
@@ -139,8 +143,8 @@ cd dosbox-staging
 make -j$(nproc)
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md#build-dosbox-staging)
-for compilation flags more suited for development.
+See [CONTRIBUTING.md](CONTRIBUTING.md#build-dosbox-staging) for compilation
+flags more suited for development.
 
 ### Windows - Visual Studio (2019 or newer)
 
@@ -150,7 +154,7 @@ and run:
 
 ``` powershell
 PS:\> .\vcpkg integrate install
-PS:\> .\vcpkg install --triplet x64-windows libpng sdl2 sdl2-net opusfile
+PS:\> .\vcpkg install --triplet x64-windows libpng sdl2 sdl2-net opusfile fluidsynth
 ```
 
 These two steps will ensure that MSVC finds and links all dependencies.

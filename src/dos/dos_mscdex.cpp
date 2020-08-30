@@ -63,19 +63,54 @@ static MountType MSCDEX_GetMountType(const char *path);
 class DOS_DeviceHeader : public MemStruct {
 public:
 	DOS_DeviceHeader(PhysPt ptr) { pt = ptr; }
-	
-	void	SetNextDeviceHeader	(RealPt ptr)	{ sSave(sDeviceHeader,nextDeviceHeader,ptr);	};
-	RealPt	GetNextDeviceHeader	(void)			{ return sGet(sDeviceHeader,nextDeviceHeader);	};
-	void	SetAttribute		(Bit16u atr)	{ sSave(sDeviceHeader,devAttributes,atr);		};
-	void	SetDriveLetter		(Bit8u letter)	{ sSave(sDeviceHeader,driveLetter,letter);		};
-	void	SetNumSubUnits		(Bit8u num)		{ sSave(sDeviceHeader,numSubUnits,num);			};
-	Bit8u	GetNumSubUnits		(void)			{ return sGet(sDeviceHeader,numSubUnits);		};
-	void	SetName				(char const* _name)	{ MEM_BlockWrite(pt+offsetof(sDeviceHeader,name),_name,8); };
-	void	SetInterrupt		(Bit16u ofs)	{ sSave(sDeviceHeader,interrupt,ofs);			};
-	void	SetStrategy			(Bit16u ofs)	{ sSave(sDeviceHeader,strategy,ofs);			};
+
+	void SetNextDeviceHeader(RealPt ptr)
+	{
+		SSET_DWORD(sDeviceHeader, nextDeviceHeader, ptr);
+	}
+
+	RealPt GetNextDeviceHeader() const
+	{
+		return SGET_DWORD(sDeviceHeader, nextDeviceHeader);
+	}
+
+	void SetAttribute(uint16_t atr)
+	{
+		SSET_WORD(sDeviceHeader, devAttributes, atr);
+	}
+
+	void SetDriveLetter(uint8_t letter)
+	{
+		SSET_BYTE(sDeviceHeader, driveLetter, letter);
+	}
+
+	void SetNumSubUnits(uint8_t num)
+	{
+		SSET_BYTE(sDeviceHeader, numSubUnits, num);
+	}
+
+	uint8_t GetNumSubUnits() const
+	{
+		return SGET_BYTE(sDeviceHeader, numSubUnits);
+	}
+
+	void SetName(const char *new_name)
+	{
+		MEM_BlockWrite(pt + offsetof(sDeviceHeader, name), new_name, 8);
+	}
+
+	void SetInterrupt(uint16_t ofs)
+	{
+		SSET_WORD(sDeviceHeader, interrupt, ofs);
+	}
+
+	void SetStrategy(uint16_t offset)
+	{
+		SSET_WORD(sDeviceHeader, strategy, offset);
+	}
 
 public:
-	#ifdef _MSC_VER
+#ifdef _MSC_VER
 	#pragma pack(1)
 	#endif
 	struct sDeviceHeader {
@@ -1273,21 +1308,25 @@ bool device_MSCDEX::WriteToControlChannel(PhysPt bufptr,Bit16u size,Bit16u * ret
 	return false;
 }
 
+// TODO: this functions modifies physicalPath despite several callers passing it
+// a const char*. Figure out if a copy can suffice or if the it really should
+// change it upstream (in which case we should drop const and fix the callers).
 int MSCDEX_AddDrive(char driveLetter, const char* physicalPath, Bit8u& subUnit)
 {
-	int result = mscdex->AddDrive(driveLetter-'A',(char*)physicalPath,subUnit);
+	int result = mscdex->AddDrive(drive_index(driveLetter),
+	                              const_cast<char*>(physicalPath), subUnit);
 	return result;
 }
 
 int MSCDEX_RemoveDrive(char driveLetter)
 {
 	if(!mscdex) return 0;
-	return mscdex->RemoveDrive(driveLetter-'A');
+	return mscdex->RemoveDrive(drive_index(driveLetter));
 }
 
 bool MSCDEX_HasDrive(char driveLetter)
 {
-	return mscdex->HasDrive(driveLetter-'A');
+	return mscdex->HasDrive(drive_index(driveLetter));
 }
 
 void MSCDEX_ReplaceDrive(CDROM_Interface* cdrom, Bit8u subUnit)
@@ -1297,7 +1336,7 @@ void MSCDEX_ReplaceDrive(CDROM_Interface* cdrom, Bit8u subUnit)
 
 Bit8u MSCDEX_GetSubUnit(char driveLetter)
 {
-	return mscdex->GetSubUnit(driveLetter-'A');
+	return mscdex->GetSubUnit(drive_index(driveLetter));
 }
 
 bool MSCDEX_GetVolumeName(Bit8u subUnit, char* name)

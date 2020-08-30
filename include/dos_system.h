@@ -144,23 +144,27 @@ private:
 
 class localFile : public DOS_File {
 public:
-	localFile                   (const char* name, FILE * handle);
-	localFile                   (const localFile&) = delete; // prevent copying
-	localFile& operator=        (const localFile&) = delete; // prevent assignment
-	bool Read                   (Bit8u * data,Bit16u * size);
-	bool Write                  (Bit8u * data,Bit16u * size);
-	bool Seek                   (Bit32u * pos,Bit32u type);
-	bool Close                  (void);
-	Bit16u GetInformation       (void);
-	bool UpdateDateTimeFromHost (void);
-	void Flush                  (void);
+	localFile(const char *name, FILE *handle);
+	localFile(const localFile &) = delete;            // prevent copying
+	localFile &operator=(const localFile &) = delete; // prevent assignment
+	bool Read(uint8_t *data, uint16_t *size);
+	bool Write(uint8_t *data, uint16_t *size);
+	bool Seek(uint32_t *pos, uint32_t type);
+	bool Close();
+	uint16_t GetInformation();
+	bool UpdateDateTimeFromHost();
+	void Flush();
 	//--Added 2011-11-03 by Alun Bestor to let Boxer inform open file handles
 	//that their physical backing media will be removed.
 	void willBecomeUnavailable(void);
 	//--End of modifications
-	void SetFlagReadOnlyMedium  () { read_only_medium = true; }
-	FILE * fhandle; //todo handle this properly
+	void SetFlagReadOnlyMedium() { read_only_medium = true; }
+	FILE *fhandle = nullptr; // todo handle this properly
 private:
+	long stream_pos = 0;
+	bool ftell_and_check();
+	void fseek_and_check(int whence);
+	bool fseek_to_and_check(long pos, int whence);
 	bool read_only_medium;
 	enum { NONE,READ,WRITE } last_action;
 };
