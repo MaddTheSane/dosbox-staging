@@ -208,8 +208,8 @@ opcode& opcode::setabsaddr(void* addr) {
 
 opcode& opcode::setea(int rbase, int rscale, Bitu scale, Bits off) {
 	if (reg>=8) rex |= 0x44;
-	if (rbase>=8) rex |= 0x41, rbase &= 7;
-	if (rscale>=8) rex |= 0x42, rscale &= 7;
+	if (rbase>=8) {rex |= 0x41; rbase &= 7;}
+	if (rscale>=8) {rex |= 0x42; rscale &= 7;}
 	modrm = (reg&7)<<3;
 	offset = off;
 
