@@ -21,41 +21,53 @@ jobs:
             os: ubuntu-16.04
             flags: -c gcc
             config_flags: --disable-fluidsynth
-            max_warnings: 279
+            max_warnings: 61
           - name: GCC, Ubuntu 18.04
             os: ubuntu-18.04
             flags: -c gcc
             config_flags: --disable-fluidsynth
-            max_warnings: 278
+            max_warnings: 63
           - name: GCC, Ubuntu 20.04
             os: ubuntu-20.04
             flags: -c gcc
-            max_warnings: 278
+            max_warnings: 63
           - name: Clang, Ubuntu 20.04
             os: ubuntu-20.04
             flags: -c clang -v 10
             max_warnings: 8
+          - name: Ubuntu, +tests
+            os: ubuntu-20.04
+            config_flags: --enable-tests
+            add_packages: libgtest-dev
+            flags: -c gcc
+            run_tests: true
+            max_warnings: -1
           - name: Ubuntu, +debug
             os: ubuntu-20.04
             flags: -c gcc
             config_flags: --enable-debug
-            max_warnings: 388
+            max_warnings: 173
           - name: Ubuntu, +dynrec, -dyn_x86
             os: ubuntu-20.04
             flags: -c gcc
             config_flags: --disable-dynamic-x86
-            max_warnings: 275
+            max_warnings: 63
           - name: Ubuntu, +dynrec, +debug, -dyn_x86
             os: ubuntu-20.04
             flags: -c gcc
             config_flags: --disable-dynamic-x86 --enable-debug
-            max_warnings: 422
+            max_warnings: 210
+          - name: Ubuntu, -network
+            os: ubuntu-20.04
+            flags: -c gcc
+            config_flags: --disable-network
+            max_warnings: 61
 
     steps:
       - uses: actions/checkout@v2
       - run:  sudo apt-get update
       - name: Install C++ compiler and libraries
-        run:  sudo apt-get install -y $(./scripts/list-build-dependencies.sh -m apt ${{ matrix.conf.flags }})
+        run:  sudo apt-get install -y $(./scripts/list-build-dependencies.sh -m apt ${{ matrix.conf.flags }}) ${{ matrix.conf.add_packages }}
       - name:  Prepare compiler cache
         id:    prep-ccache
         shell: bash
@@ -75,7 +87,11 @@ jobs:
         run:  ./scripts/log-env.sh
       - name: Build
         run:  ./scripts/build.sh -t Debug ${{ matrix.conf.flags }} ${{ matrix.conf.config_flags }}
+      - name: Run tests
+        if:   matrix.conf.run_tests
+        run:  ./tests/tests
       - name: Summarize warnings
+        if:   matrix.conf.run_tests != true
         env:
           MAX_WARNINGS: ${{ matrix.conf.max_warnings }}
         run:  ./scripts/count-warnings.py build.log

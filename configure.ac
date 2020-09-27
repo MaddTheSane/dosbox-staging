@@ -5,6 +5,10 @@ AC_PREREQ(2.50)
 AC_CONFIG_SRCDIR(README)
 AC_CONFIG_MACRO_DIR([m4])
 
+dnl Turn on less verbose makefiles by default
+dnl Change to 'no' or comment-out when debugging the buildsystem
+AM_SILENT_RULES([yes])
+
 dnl Check for pkg-config
 PKG_PROG_PKG_CONFIG
 
@@ -17,8 +21,9 @@ AM_INIT_AUTOMAKE([foreign])
 AC_CONFIG_HEADER(config.h)
 
 dnl Checks for programs.
+AM_PROG_AR
 AC_PROG_MAKE_SET
-AC_PROG_CC
+AC_PROG_CC_C99
 AC_PROG_CPP
 AC_PROG_CXX
 AC_PROG_INSTALL
@@ -91,24 +96,18 @@ else
   AC_MSG_RESULT([no])
 fi
 
-dnl Checks for header files.
-
 dnl Checks for typedefs, structures, and compiler characteristics.
-AC_C_CONST
 AC_C_INLINE
-AC_TYPE_SIZE_T
+AC_C_BIGENDIAN
 AC_STRUCT_TM
-AC_CHECK_SIZEOF(unsigned char)
-AC_CHECK_SIZEOF(unsigned short)
-AC_CHECK_SIZEOF(unsigned int)
-AC_CHECK_SIZEOF(unsigned long)
-AC_CHECK_SIZEOF(unsigned long long)
 AC_CHECK_SIZEOF(int *)
 
 dnl Require compiler with C++14 support.
 dnl Allow GNU extensions to work around MinGW bugs around POSIX compatibility.
 AC_LANG(C++)
 AX_CXX_COMPILE_STDCXX_14(ext, mandatory)
+
+dnl Checks for header files.
 
 dnl some semi complex check for sys/socket so it works on darwin as well
 AC_CHECK_HEADERS([stdlib.h sys/types.h])
@@ -192,12 +191,6 @@ AC_MSG_CHECKING(if compiler allows __attribute__((always_inline)) )
 AC_COMPILE_IFELSE([AC_LANG_SOURCE([ inline void __attribute__((always_inline)) test(){}
 ])],[ AC_MSG_RESULT(yes);AC_DEFINE(C_ATTRIBUTE_ALWAYS_INLINE)],AC_MSG_RESULT(no))
 
-AH_TEMPLATE([C_ATTRIBUTE_FASTCALL],[Determines if the compiler supports fastcall attribute.])
-AC_MSG_CHECKING(if compiler allows __attribute__((fastcall)) )
-AC_COMPILE_IFELSE([AC_LANG_SOURCE([ void __attribute__((fastcall)) test(){}
-])],[ AC_MSG_RESULT(yes);AC_DEFINE(C_ATTRIBUTE_FASTCALL)],AC_MSG_RESULT(no))
-
-
 CFLAGS="$OLDCFLAGS"
 
 
@@ -232,11 +225,6 @@ case "$host" in
    [Compiler supports Core Audio headers])],
    AC_MSG_RESULT(no);AC_MSG_WARN([Compiler can't compile Apple headers. CoreAudio functionality disabled. Please use the Apple compiler!]))
    ;;
-
-  *)
-   AC_MSG_CHECKING(if compiler supports Apple's MIDI headers)
-   AC_MSG_RESULT([no, not on Apple])
-   ;;
 esac
 
 dnl enable disable alsa and pass it's cflags to CXXFLAGS
@@ -251,9 +239,6 @@ if test x$alsa_midi = xtrue ; then
   AM_PATH_ALSA(0.9.0, AC_DEFINE(HAVE_ALSA,1,[Define to 1 to use ALSA for MIDI]) , : )
   CXXFLAGS="$CXXFLAGS $ALSA_CFLAGS"
 fi
-
-#Check for big endian machine, should #define WORDS_BIGENDIAN if so
-AC_C_BIGENDIAN
 
 #Features to enable/disable
 AH_TEMPLATE(C_DEBUG,[Define to 1 to enable internal debugger, requires ncurses or pdcurses])
@@ -298,7 +283,7 @@ fi
 
 dnl The target cpu checks for dynamic cores
 AH_TEMPLATE(C_TARGETCPU,[The type of cpu this target has])
-AC_MSG_CHECKING(for target cpu type) 
+AC_MSG_CHECKING(for target cpu type)
 case "$host_cpu" in
   x86_64 | amd64)
     AC_DEFINE(C_TARGETCPU,X86_64)
@@ -361,18 +346,15 @@ AC_COMPILE_IFELSE([AC_LANG_SOURCE([
 #if SIZEOF_INT_P != 4
 #error size intp is not 4, this not something to worry about
 #endif
-void blah() {
-;
-}
+void blah() {}
 ])],[c_sizep=4],[c_sizep=0])
-
 
 dnl automake 1.14 and upwards rewrite the host to have always 64 bit unless i386 as host is passed
 dnl this can make building a 32 bit executable a bit tricky, as dosbox relies on the host to select the
 dnl dynamic/dynrec core
-AC_MSG_CHECKING([whether Apple user wants to override the build process to produce a 32 bit binary])
 case "$host" in
   *-*-darwin*)
+   AC_MSG_CHECKING([whether Apple user wants to override the build process to produce a 32 bit binary])
    if test x$c_targetcpu = xx86_64 -a x$c_sizep = x4 ; then
      AC_MSG_RESULT(yes)
      AC_DEFINE(C_TARGETCPU,X86)
@@ -381,17 +363,14 @@ case "$host" in
      AC_MSG_RESULT(no)
    fi
    ;;
-  *)
-   AC_MSG_RESULT([no, not on Apple])
-   ;;
 esac
 
 AC_ARG_ENABLE(dynamic-core,AC_HELP_STRING([--disable-dynamic-core],[Disable all dynamic cores]),,enable_dynamic_core=yes)
 
 AH_TEMPLATE(C_DYNAMIC_X86,[Define to 1 to use x86/x64 dynamic cpu core])
 AC_ARG_ENABLE(dynamic-x86,AC_HELP_STRING([--disable-dynamic-x86],[Disable x86/x64 dynamic cpu core]),,enable_dynamic_x86=yes)
-AC_MSG_CHECKING(whether x86 dynamic cpu core will be enabled) 
-if test x$enable_dynamic_x86 = xno -o x$enable_dynamic_core = xno; then 
+AC_MSG_CHECKING(whether x86 dynamic cpu core will be enabled)
+if test x$enable_dynamic_x86 = xno -o x$enable_dynamic_core = xno; then
    AC_MSG_RESULT(no)
 else
   if test x$c_targetcpu = xx86 -o x$c_targetcpu = xx86_64; then
@@ -416,7 +395,7 @@ dnl x86 only enable it if dynamic-x86 is disabled.
     else
         AC_MSG_RESULT([no, using dynamic-x86])
     fi
-  else 
+  else
     if test x$c_targetcpu = xarm -o x$c_targetcpu = xppc64le -o x$c_targetcpu = xpowerpc ; then
       AC_DEFINE(C_DYNREC,1)
       AC_MSG_RESULT(yes)
@@ -589,6 +568,47 @@ else
    AC_MSG_RESULT(no)
 fi
 
+dnl Unit Tests
+dnl ----------
+dnl 
+AC_ARG_ENABLE([tests],
+              AS_HELP_STRING([--enable-tests],
+                             [Build Unit Tests (requires Google Test framework)]))
+
+if test "${enable_tests}" = "yes" ; then
+    PREGTEST_CXXFLAGS="$CXXFLAGS"
+    dnl Start with checking if gtest is available as a static lib
+    dnl this will work e.g. on Debian or Ubuntu
+    AC_MSG_CHECKING(for Google Test framework (static lib))
+    CXXFLAGS="-Wl,-Bstatic -lgtest_main -lgtest -Wl,-Bdynamic"
+    AC_LINK_IFELSE(
+        [AC_LANG_SOURCE([
+            #include <gtest/gtest.h>
+	    namespace { TEST(Foo, Bar) { ASSERT_TRUE(true); } }
+        ])],
+        [AC_MSG_RESULT(yes); HAVE_GTEST=yes; HAVE_GTEST_STATIC=yes],
+        [AC_MSG_RESULT(no)])
+    dnl Also check if maybe it's available as a shared lib
+    dnl this will work e.g. on Fedora or Arch
+    AC_MSG_CHECKING(for Google Test framework (shared lib))
+    CXXFLAGS="-lgtest_main -lgtest"
+    AC_LINK_IFELSE(
+        [AC_LANG_SOURCE([
+            #include <gtest/gtest.h>
+	    namespace { TEST(Foo, Bar) { ASSERT_TRUE(true); } }
+        ])],
+        [AC_MSG_RESULT(yes); HAVE_GTEST=yes],
+        [AC_MSG_RESULT(no)])
+    dnl Fail loudly if gtest is missing
+    AS_IF([test "${HAVE_GTEST}" != "yes"],
+        [AC_MSG_ERROR(Google Test framework not found!)])
+    dnl Restore C++ compilation flags
+    CXXFLAGS="$PREGTEST_CXXFLAGS"
+fi
+
+AM_CONDITIONAL(BUILD_TESTS, test "${HAVE_GTEST}" = "yes")
+AM_CONDITIONAL(USE_GTEST_STATIC, test "${HAVE_GTEST_STATIC}" = "yes")
+
 dnl Check for mprotect. Needed for 64 bits linux
 AH_TEMPLATE(C_HAVE_MPROTECT,[Define to 1 if you have the mprotect function])
 AC_CHECK_HEADER([sys/mman.h], [
@@ -661,7 +681,7 @@ esac
 
 AH_TOP([
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2019-2020  The dosbox-staging team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -685,14 +705,10 @@ AH_BOTTOM([#if C_ATTRIBUTE_ALWAYS_INLINE
 #define INLINE inline
 #endif])
 
-AH_BOTTOM([#if C_ATTRIBUTE_FASTCALL
-#define DB_FASTCALL __attribute__((fastcall))
-#else
-#define DB_FASTCALL
-#endif])
-
 AC_CONFIG_FILES([
 Makefile
+docs/Makefile
+include/Makefile
 src/Makefile
 src/cpu/Makefile
 src/cpu/core_full/Makefile
@@ -718,7 +734,6 @@ src/misc/Makefile
 src/shell/Makefile
 src/platform/Makefile
 src/platform/visualc/Makefile
-include/Makefile
-docs/Makefile
+tests/Makefile
 ])
 AC_OUTPUT

@@ -90,20 +90,23 @@ static inline int16_t MIXER_CLIP(Bits SAMP)
 }
 
 static struct {
-	int32_t work[MIXER_BUFSIZE][2];
+	int32_t work[MIXER_BUFSIZE][2] = {{0}};
 	//Write/Read pointers for the buffer
-	Bitu pos,done;
-	Bitu needed, min_needed, max_needed;
-	//For every millisecond tick how many samples need to be generated
-	Bit32u tick_add;
-	Bit32u tick_counter;
-	float mastervol[2];
-	MixerChannel * channels;
-	bool nosound;
-	Bit32u freq;
-	Bit32u blocksize;
-	//Note: As stated earlier, all sdl code shall rather be in sdlmain
-	SDL_AudioDeviceID sdldevice;
+	Bitu pos = 0;
+	Bitu done = 0;
+	Bitu needed = 0;
+	Bitu min_needed = 0;
+	Bitu max_needed = 0;
+	// For every millisecond tick how many samples need to be generated
+	uint32_t tick_add = 0;
+	uint32_t tick_counter = 0;
+	float mastervol[2] = {1.0f, 1.0f};
+	MixerChannel *channels = nullptr;
+	bool nosound = false;
+	uint32_t freq = 0;
+	uint16_t blocksize = 0; // matches SDL AudioSpec.samples type
+	// Note: As stated earlier, all sdl code shall rather be in sdlmain
+	SDL_AudioDeviceID sdldevice = {};
 } mixer;
 
 Bit8u MixTemp[MIXER_BUFSIZE];
@@ -125,6 +128,16 @@ MixerChannel * MIXER_AddChannel(MIXER_Handler handler, Bitu freq, const char * n
 	chan->MapChannels(0, 1);
 	chan->Enable(false);
 	mixer.channels=chan;
+
+	const auto mix_rate = mixer.freq;
+	const auto chan_rate = chan->GetSampleRate();
+	if (chan_rate == mix_rate)
+		LOG_MSG("MIXER: %s channel operating at %u Hz without resampling",
+		        name, chan_rate);
+	else
+		LOG_MSG("MIXER: %s channel operating at %u Hz and %s to the output rate",
+		        name, chan_rate,
+		        chan_rate > mix_rate ? "downsampling" : "upsampling");
 	return chan;
 }
 
@@ -250,12 +263,29 @@ void MixerChannel::Enable(const bool should_enable)
 	MIXER_UnlockAudioDevice();
 }
 
-void MixerChannel::SetFreq(Bitu freq) {
-	freq_add=(freq<<FREQ_SHIFT)/mixer.freq;
+void MixerChannel::SetFreq(Bitu freq)
+{
+	if (!freq) {
+		// If the channel rate is zero, then avoid resampling by running
+		// the channel at the same rate as the mixer
+		assert(mixer.freq > 0);
+		freq = mixer.freq;
+	}
+	freq_add = (freq << FREQ_SHIFT) / mixer.freq;
 	interpolate = (freq != mixer.freq);
 	sample_rate = static_cast<uint32_t>(freq);
 	envelope.Update(sample_rate, peak_amplitude,
 	                ENVELOPE_MAX_EXPANSION_OVER_MS, ENVELOPE_EXPIRES_AFTER_S);
+}
+
+bool MixerChannel::IsInterpolated() const
+{
+	return interpolate;
+}
+
+uint32_t MixerChannel::GetSampleRate() const
+{
+	return sample_rate;
 }
 
 void MixerChannel::SetPeakAmplitude(const uint32_t peak)
@@ -851,9 +881,10 @@ void MIXER_Init(Section* sec) {
 
 	Section_prop * section=static_cast<Section_prop *>(sec);
 	/* Read out config section */
-	mixer.freq=section->Get_int("rate");
+
 	mixer.nosound=section->Get_bool("nosound");
-	mixer.blocksize=section->Get_int("blocksize");
+	mixer.freq = static_cast<uint32_t>(section->Get_int("rate"));
+	mixer.blocksize = static_cast<uint16_t>(section->Get_int("blocksize"));
 
 	/* Initialize the internal stuff */
 	mixer.channels=0;
@@ -867,12 +898,12 @@ void MIXER_Init(Section* sec) {
 	SDL_AudioSpec spec;
 	SDL_AudioSpec obtained;
 
-	spec.freq=mixer.freq;
+	spec.freq = static_cast<int>(mixer.freq);
 	spec.format=AUDIO_S16SYS;
 	spec.channels=2;
 	spec.callback=MIXER_CallBack;
-	spec.userdata=NULL;
-	spec.samples=(Uint16)mixer.blocksize;
+	spec.userdata = nullptr;
+	spec.samples = mixer.blocksize;
 
 	mixer.tick_counter=0;
 	if (mixer.nosound) {
@@ -885,19 +916,35 @@ void MIXER_Init(Section* sec) {
 		mixer.tick_add=calc_tickadd(mixer.freq);
 		TIMER_AddTickHandler(MIXER_Mix_NoSound);
 	} else {
-		if((static_cast<Bit16s>(mixer.freq) != obtained.freq) || (mixer.blocksize != obtained.samples))
-			LOG_MSG("MIXER: Got different values from SDL: freq %d, blocksize %d",obtained.freq,obtained.samples);
-		mixer.freq=obtained.freq;
-		mixer.blocksize=obtained.samples;
-		mixer.tick_add=calc_tickadd(mixer.freq);
+		// Does SDL want a different playback rate?
+		assert(obtained.freq > 0 &&
+		       static_cast<unsigned>(obtained.freq) < UINT32_MAX);
+		const auto obtained_freq = static_cast<uint32_t>(obtained.freq);
+		if (obtained_freq != mixer.freq) {
+			LOG_MSG("MIXER: SDL changed the playback rate from %u to %u Hz",
+			        mixer.freq, obtained_freq);
+			mixer.freq = obtained_freq;
+		}
+
+		// Does SDL want a different blocksize?
+		const auto obtained_blocksize = obtained.samples;
+		if (obtained_blocksize != mixer.blocksize) {
+			LOG_MSG("MIXER: SDL changed the blocksize from %u to %u bytes",
+			        mixer.blocksize, obtained_blocksize);
+			mixer.blocksize = obtained_blocksize;
+		}
+		mixer.tick_add = calc_tickadd(mixer.freq);
 		TIMER_AddTickHandler(MIXER_Mix);
 		SDL_PauseAudioDevice(mixer.sdldevice, 0);
+
+		LOG_MSG("MIXER: Negotiated a %u-Hz output rate and %u-byte blocksize",
+		        mixer.freq, mixer.blocksize);
 	}
-	mixer.min_needed=section->Get_int("prebuffer");
-	if (mixer.min_needed>100) mixer.min_needed=100;
-	mixer.min_needed=(mixer.freq*mixer.min_needed)/1000;
-	mixer.max_needed=mixer.blocksize * 2 + 2*mixer.min_needed;
-	mixer.needed=mixer.min_needed+1;
+	const auto requested_prebuffer = section->Get_int("prebuffer");
+	mixer.min_needed = static_cast<uint16_t>(clamp(requested_prebuffer, 0, 100));
+	mixer.min_needed = (mixer.freq * mixer.min_needed) / 1000;
+	mixer.max_needed = mixer.blocksize * 2 + 2 * mixer.min_needed;
+	mixer.needed = mixer.min_needed + 1;
 	PROGRAMS_MakeFile("MIXER.COM",MIXER_ProgramStart);
 }
 

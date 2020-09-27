@@ -58,6 +58,7 @@ enum ResTypes {
 #define TEL_SERVER 1
 
 bool MODEM_ReadPhonebook(const std::string &filename);
+void MODEM_ClearPhonebook();
 
 class CFifo {
 public:
@@ -211,14 +212,19 @@ public:
 	std::unique_ptr<CFifo> tqueue;
 
 protected:
-	char cmdbuf[255] = {0};
+	// The AT command line can consist of a 99-character command sequence
+	// including the AT prefix followed by "D<phone/hostname>", where the
+	// hostname can reach a length of up to 253 characters.
+	// AT<97-chars>D<253-chars> is a string of up to 353 characters plus a
+	// null.
+	char cmdbuf[354] = {0};
 	bool commandmode = false; // true: interpret input as commands
 	bool echo = false;        // local echo on or off
 	bool oldDTRstate = false;
 	bool ringing = false;
 	bool numericresponse = false; // true: send control response as number.
 	                              // false: send text (i.e. NO DIALTONE)
-	bool telnetmode = false; // Default to direct null modem connection;
+	bool telnet_mode = false; // Default to direct null modem connection;
 	                         // Telnet mode interprets IAC
 	bool connected = false;
 	uint32_t doresponse = 0;

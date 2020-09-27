@@ -119,7 +119,7 @@ bool Overlay_Drive::RemoveDir(char * dir) {
 			if (logoverlay) LOG_MSG("RemoveDir found %s",name);
 			if (empty && strcmp(".",name ) && strcmp("..",name)) 
 				empty = false; //Neither . or .. so directory not empty.
-		} while ( (ret=this->FindNext(dta)) );
+		} while (this->FindNext(dta));
 		//Always exhaust list, so drive_cache entry gets invalidated/reused.
 		//FindNext is done, restore error code to old value. DOS_RemoveDir will set the right one if needed.
 		dos.errorcode = olderror;
@@ -197,13 +197,16 @@ bool Overlay_Drive::TestDir(char * dir) {
 	return localDrive::TestDir(dir);
 }
 
-
-class OverlayFile: public localFile {
+class OverlayFile : public localFile {
 public:
-	OverlayFile(const char* name, FILE * handle):localFile(name,handle){
-		overlay_active = false;
-		if (logoverlay) LOG_MSG("constructing OverlayFile: %s",name);
+	OverlayFile(const char *name, FILE *handle, const char *basedir)
+	        : localFile(name, handle, basedir),
+	          overlay_active(false)
+	{
+		if (logoverlay)
+			LOG_MSG("constructing OverlayFile: %s", name);
 	}
+
 	bool Write(Bit8u * data,Bit16u * size) {
 		Bit32u f = flags&0xf;
 		if (!overlay_active && (f == OPEN_READWRITE || f == OPEN_WRITE)) {
@@ -297,16 +300,35 @@ static OverlayFile* ccc(DOS_File* file) {
 	localFile* l = dynamic_cast<localFile*>(file);
 	if (!l) E_Exit("overlay input file is not a localFile");
 	//Create an overlayFile
-	OverlayFile* ret = new OverlayFile(l->GetName(),l->fhandle);
+	OverlayFile *ret = new OverlayFile(l->GetName(), l->fhandle,
+	                                   l->GetBaseDir());
 	ret->flags = l->flags;
 	ret->refCtr = l->refCtr;
 	delete l;
 	return ret;
 }
 
-Overlay_Drive::Overlay_Drive(const char * startdir,const char* overlay, Bit16u _bytes_sector,Bit8u _sectors_cluster,Bit16u _total_clusters,Bit16u _free_clusters,Bit8u _mediaid,Bit8u &error)
-:localDrive(startdir,_bytes_sector,_sectors_cluster,_total_clusters,_free_clusters,_mediaid),special_prefix("DBOVERLAY") {
-	optimize_cache_v1 = true; //Try to not reread overlay files on deletes. Ideally drive_cache should be improved to handle deletes properly.
+Overlay_Drive::Overlay_Drive(const char *startdir,
+                             const char *overlay,
+                             uint16_t _bytes_sector,
+                             uint8_t _sectors_cluster,
+                             uint16_t _total_clusters,
+                             uint16_t _free_clusters,
+                             uint8_t _mediaid,
+                             uint8_t &error)
+        : localDrive(startdir,
+                     _bytes_sector,
+                     _sectors_cluster,
+                     _total_clusters,
+                     _free_clusters,
+                     _mediaid),
+          deleted_files_in_base{},
+          deleted_paths_in_base{},
+          overlap_folder(),
+          DOSnames_cache{},
+          DOSdirs_cache{},
+          special_prefix("DBOVERLAY")
+{
 	//Currently this flag does nothing, as the current behavior is to not reread due to caching everything.
 #if defined (WIN32)	
 	if (strcasecmp(startdir,overlay) == 0) {
@@ -430,7 +452,7 @@ bool Overlay_Drive::FileOpen(DOS_File * * file,char * name,Bit32u flags) {
 	bool fileopened = false;
 	if (hand) {
 		if (logoverlay) LOG_MSG("overlay file opened %s",newname);
-		*file=new localFile(name,hand);
+		*file = new localFile(name, hand, overlaydir);
 		(*file)->flags=flags;
 		fileopened = true;
 	} else {
@@ -468,7 +490,7 @@ bool Overlay_Drive::FileCreate(DOS_File * * file,char * name,Bit16u /*attributes
 		if (logoverlay) LOG_MSG("File creation in overlay system failed %s",name);
 		return false;
 	}
-	*file = new localFile(name,f);
+	*file = new localFile(name, f, overlaydir);
 	(*file)->flags = OPEN_READWRITE;
 	OverlayFile* of = ccc(*file);
 	of->overlay_active = true;
@@ -476,7 +498,7 @@ bool Overlay_Drive::FileCreate(DOS_File * * file,char * name,Bit16u /*attributes
 	*file = of;
 	//create fake name for the drive cache
 	char fakename[CROSS_LEN];
-	safe_strcpy(fakename, basedir);
+	safe_strcpy(fakename, overlaydir);
 	safe_strcat(fakename, name);
 	CROSS_FILENAME(fakename);
 	dirCache.AddEntry(fakename,true); //add it.

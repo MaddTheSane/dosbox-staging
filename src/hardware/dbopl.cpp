@@ -222,26 +222,35 @@ static inline Bits MakeVolume( Bitu wave, Bitu volume ) {
 	return (sig >> exp);
 };
 
-static Bits DB_FASTCALL WaveForm0( Bitu i, Bitu volume ) {
+static Bits WaveForm0(Bitu i, Bitu volume)
+{
 	Bits neg = 0 - (( i >> 9) & 1);//Create ~0 or 0
 	Bitu wave = SinTable[i & 511];
 	return (MakeVolume( wave, volume ) ^ neg) - neg;
 }
-static Bits DB_FASTCALL WaveForm1( Bitu i, Bitu volume ) {
+
+static Bits WaveForm1(Bitu i, Bitu volume)
+{
 	Bit32u wave = SinTable[i & 511];
 	wave |= ( ( (i ^ 512 ) & 512) - 1) >> ( 32 - 12 );
 	return MakeVolume( wave, volume );
 }
-static Bits DB_FASTCALL WaveForm2( Bitu i, Bitu volume ) {
+
+static Bits WaveForm2(Bitu i, Bitu volume)
+{
 	Bitu wave = SinTable[i & 511];
 	return MakeVolume( wave, volume );
 }
-static Bits DB_FASTCALL WaveForm3( Bitu i, Bitu volume ) {
+
+static Bits WaveForm3(Bitu i, Bitu volume)
+{
 	Bitu wave = SinTable[i & 255];
 	wave |= ( ( (i ^ 256 ) & 256) - 1) >> ( 32 - 12 );
 	return MakeVolume( wave, volume );
 }
-static Bits DB_FASTCALL WaveForm4( Bitu i, Bitu volume ) {
+
+static Bits WaveForm4(Bitu i, Bitu volume)
+{
 	//Twice as fast
 	i <<= 1;
 	Bits neg = 0 - (( i >> 9) & 1);//Create ~0 or 0
@@ -249,18 +258,24 @@ static Bits DB_FASTCALL WaveForm4( Bitu i, Bitu volume ) {
 	wave |= ( ( (i ^ 512 ) & 512) - 1) >> ( 32 - 12 );
 	return (MakeVolume( wave, volume ) ^ neg) - neg;
 }
-static Bits DB_FASTCALL WaveForm5( Bitu i, Bitu volume ) {
+
+static Bits WaveForm5(Bitu i, Bitu volume)
+{
 	//Twice as fast
 	i <<= 1;
 	Bitu wave = SinTable[i & 511];
 	wave |= ( ( (i ^ 512 ) & 512) - 1) >> ( 32 - 12 );
 	return MakeVolume( wave, volume );
 }
-static Bits DB_FASTCALL WaveForm6( Bitu i, Bitu volume ) {
+
+static Bits WaveForm6(Bitu i, Bitu volume)
+{
 	Bits neg = 0 - (( i >> 9) & 1);//Create ~0 or 0
 	return (MakeVolume( 0, volume ) ^ neg) - neg;
 }
-static Bits DB_FASTCALL WaveForm7( Bitu i, Bitu volume ) {
+
+static Bits WaveForm7(Bitu i, Bitu volume)
+{
 	//Negative is reversed here
 	Bits neg = (( i >> 9) & 1) - 1;
 	Bitu wave = (i << 3);
@@ -595,43 +610,55 @@ Bits INLINE Operator::GetSample( Bits modulation ) {
 	}
 }
 
-Operator::Operator() {
-	chanData = 0;
-	freqMul = 0;
-	waveIndex = 0;
-	waveAdd = 0;
-	waveCurrent = 0;
-	keyOn = 0;
-	ksr = 0;
-	reg20 = 0;
-	reg40 = 0;
-	reg60 = 0;
-	reg80 = 0;
-	regE0 = 0;
-	SetState( OFF );
-	rateZero = (1 << OFF);
-	sustainLevel = ENV_MAX;
-	currentLevel = ENV_MAX;
-	totalLevel = ENV_MAX;
-	volume = ENV_MAX;
-	releaseAdd = 0;
+Operator::Operator()
+        : volHandler(nullptr),
+#if (DBOPL_WAVE == WAVE_HANDLER)
+          waveHandler(nullptr),
+#else
+          waveBase(nullptr),
+          waveMask(0),
+          waveStart(0),
+#endif
+          waveIndex(0),
+          waveAdd(0),
+          waveCurrent(0),
+          chanData(0),
+          freqMul(0),
+          vibrato(0),
+          sustainLevel(ENV_MAX),
+          totalLevel(ENV_MAX),
+          currentLevel(ENV_MAX),
+          volume(ENV_MAX),
+          attackAdd(0),
+          decayAdd(0),
+          releaseAdd(0),
+          rateIndex(0),
+          rateZero(1 << OFF),
+          keyOn(0),
+          reg20(0),
+          reg40(0),
+          reg60(0),
+          reg80(0),
+          regE0(0),
+          state(0),
+          tremoloMask(0),
+          vibStrength(0),
+          ksr(0)
+{
+	SetState(OFF);
 }
 
-/*
-	Channel
-*/
-
-Channel::Channel() {
-	old[0] = old[1] = 0;
-	chanData = 0;
-	regB0 = 0;
-	regC0 = 0;
-	maskLeft = -1;
-	maskRight = -1;
-	feedback = 31;
-	fourMask = 0;
-	synthHandler = &Channel::BlockTemplate< sm2FM >;
-}
+Channel::Channel()
+        : synthHandler(&Channel::BlockTemplate<sm2FM>),
+          chanData(0),
+          old{0, 0},
+          feedback(31),
+          regB0(0),
+          regC0(0),
+          fourMask(0),
+          maskLeft(-1),
+          maskRight(-1)
+{}
 
 void Channel::SetChanData( const Chip* chip, Bit32u data ) {
 	Bit32u change = chanData ^ data;
@@ -975,18 +1002,6 @@ Channel* Channel::BlockTemplate( Chip* chip, Bit32u samples, Bit32s* output ) {
 	return 0;
 }
 
-/*
-	Chip
-*/
-
-Chip::Chip() {
-	reg08 = 0;
-	reg04 = 0;
-	regBD = 0;
-	reg104 = 0;
-	opl3Active = 0;
-}
-
 INLINE Bit32u Chip::ForwardNoise() {
 	noiseCounter += noiseAdd;
 	Bitu count = noiseCounter >> LFO_SH;
@@ -1088,7 +1103,6 @@ void Chip::WriteBD( Bit8u val ) {
 		chan[8].op[1].KeyOff( 0x2 );
 	}
 }
-
 
 #define REGOP( _FUNC_ )															\
 	index = ( ( reg >> 3) & 0x20 ) | ( reg & 0x1f );								\

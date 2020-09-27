@@ -429,12 +429,8 @@ public:
 		if (type == "floppy") incrementFDD();
 		return;
 showusage:
-#if defined (WIN32)
-	   WriteOut(MSG_Get("PROGRAM_MOUNT_USAGE"),"d:\\dosprogs","d:\\dosprogs");
-#else
-	   WriteOut(MSG_Get("PROGRAM_MOUNT_USAGE"),"~/dosprogs","~/dosprogs");
-#endif
-		return;
+	WriteOut(MSG_Get("SHELL_CMD_MOUNT_HELP_LONG"));
+	return;
 	}
 };
 
@@ -1075,16 +1071,16 @@ void LOADFIX::Run(void)
 			char filename[128];
 			safe_strncpy(filename,temp_line.c_str(),128);
 			// Setup commandline
-			bool ok;
-			char args[256];
+			char args[256+1];
 			args[0] = 0;
-			do {
-				ok = cmd->FindCommand(commandNr++,temp_line);
-				if (sizeof(args) - strlen(args) - 1 < temp_line.length() + 1)
-					break;
+			bool found = cmd->FindCommand(commandNr++,temp_line);
+			while (found) {
+				if (strlen(args)+temp_line.length()+1>256) break;
 				safe_strcat(args, temp_line.c_str());
-				safe_strcat(args, " ");
-			} while (ok);
+				found = cmd->FindCommand(commandNr++,temp_line);
+				if (found)
+					safe_strcat(args, " ");
+			}
 			// Use shell to start program
 			DOS_Shell shell;
 			shell.Execute(filename,args);
@@ -1196,6 +1192,14 @@ public:
 	void Run(void) {
 		//Hack To allow long commandlines
 		ChangeToLongCmd();
+
+		// Usage
+		if (!cmd->GetCount() || cmd->FindExist("/?", false) ||
+		    cmd->FindExist("-h", false) || cmd->FindExist("--help", false)) {
+			WriteOut(MSG_Get("SHELL_CMD_IMGMOUNT_HELP_LONG"));
+			return;
+		}
+
 		/* In secure mode don't allow people to change imgmount points.
 		 * Neither mount nor unmount */
 		if (control->SecureMode()) {
@@ -1425,7 +1429,8 @@ public:
 
 			if (paths.size() == 1) {
 				auto *newdrive = static_cast<fatDrive*>(imgDisks[0]);
-				if ('A' <= drive && drive <= 'D' && !(newdrive->loadedDisk->hardDrive)) {
+				if (('A' <= drive && drive <= 'B' && !(newdrive->loadedDisk->hardDrive)) ||
+				    ('C' <= drive && drive <= 'D' && newdrive->loadedDisk->hardDrive)) {
 					const size_t idx = drive_index(drive);
 					imageDiskList[idx] = newdrive->loadedDisk;
 					updateDPT();
@@ -1605,11 +1610,6 @@ void DOS_SetupPrograms(void) {
 	MSG_Add("PROGRAM_MOUNT_ERROR_2","%s isn't a directory\n");
 	MSG_Add("PROGRAM_MOUNT_ILL_TYPE","Illegal type %s\n");
 	MSG_Add("PROGRAM_MOUNT_ALREADY_MOUNTED","Drive %c already mounted with %s\n");
-	MSG_Add("PROGRAM_MOUNT_USAGE",
-		"Usage \033[34;1mMOUNT Drive-Letter Local-Directory\033[0m\n"
-		"For example: MOUNT c %s\n"
-		"This makes the directory %s act as the C: drive inside DOSBox.\n"
-		"The directory has to exist.\n");
 	MSG_Add("PROGRAM_MOUNT_UMOUNT_NOT_MOUNTED","Drive %c isn't mounted.\n");
 	MSG_Add("PROGRAM_MOUNT_UMOUNT_SUCCESS","Drive %c has successfully been removed.\n");
 	MSG_Add("PROGRAM_MOUNT_UMOUNT_NO_VIRTUAL","Virtual Drives can not be unMOUNTed.\n");
@@ -1653,7 +1653,8 @@ void DOS_SetupPrograms(void) {
 		"For information about basic mount type \033[34;1mintro mount\033[0m\n"
 		"For information about CD-ROM support type \033[34;1mintro cdrom\033[0m\n"
 		"For information about special keys type \033[34;1mintro special\033[0m\n"
-		"For more information about DOSBox, go to \033[34;1mhttp://www.dosbox.com/wiki\033[0m\n"
+		"To access dosbox-staging's wiki, visit:\033[34;1m\n"
+		"https://github.com/dosbox-staging/dosbox-staging/wiki\033[0m\n"
 		"\n"
 		"\033[31;1mDOSBox will stop/exit without a warning if an error occurred!\033[0m\n"
 		"\n"
@@ -1761,8 +1762,92 @@ void DOS_SetupPrograms(void) {
 	MSG_Add("PROGRAM_LOADROM_UNRECOGNIZED","ROM file not recognized.\n");
 	MSG_Add("PROGRAM_LOADROM_BASIC_LOADED","BASIC ROM loaded.\n");
 
-	MSG_Add("PROGRAM_IMGMOUNT_SPECIFY_DRIVE","Must specify drive letter to mount image at.\n");
-	MSG_Add("PROGRAM_IMGMOUNT_SPECIFY2","Must specify drive number (0 or 3) to mount image at (0,1=fda,fdb;2,3=hda,hdb).\n");
+	MSG_Add("SHELL_CMD_IMGMOUNT_HELP",
+	        "mounts compact disc image(s) or floppy disk image(s) to a given drive letter.\n");
+
+	MSG_Add("SHELL_CMD_IMGMOUNT_HELP_LONG",
+	        "Mount a CD-ROM, floppy, or disk image to a drive letter.\n"
+	        "\n"
+	        "Usage:\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mDRIVE\033[0m \033[36;1mCDROM-SET\033[0m [CDROM-SET2 [..]] [-fs iso] -t cdrom \n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mDRIVE\033[0m \033[36;1mIMAGEFILE\033[0m [IMAGEFILE2 [..]] [-fs fat] -t hdd|floppy\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mDRIVE\033[0m \033[36;1mBOOTIMAGE\033[0m [-fs fat|none] -t hdd -size GEOMETRY\n"
+	        "  \033[32;1mimgmount\033[0m -u \033[37;1mDRIVE\033[0m  (unmounts the DRIVE's image)\n"
+	        "Where:\n"
+	        "  \033[37;1mDRIVE\033[0m     is the drive letter where the image will be mounted: a, c, d, ...\n"
+	        "  \033[36;1mCDROM-SET\033[0m is an ISO, CUE+BIN, CUE+ISO, or CUE+ISO+FLAC/OPUS/OGG/MP3/WAV\n"
+	        "  \033[36;1mIMAGEFILE\033[0m is a hard drive or floppy image in FAT16 or FAT12 format\n"
+	        "  \033[36;1mBOOTIMAGE\033[0m is a bootable disk image with specified -size GEOMETRY:\n"
+	        "            bytes-per-sector,sectors-per-head,heads,cylinders\n"
+	        "Notes:\n"
+	        "  - Image paths and filenames are case-sensitive and either relative or\n"
+	        "    absolute with respect to dosbox's current-working directory.\n"
+	        "  - Ctrl+F4 swaps & mounts the next CDROM-SET or IMAGEFILE, if provided.\n"
+	        "Examples:\n"
+#if defined(WIN32)
+	        "  \033[32;1mimgmount\033[0m \033[37;1mD\033[0m \033[36;1mC:\\games\\doom.iso\033[0m -t cdrom\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mD\033[0m \033[36;1mcd/quake1.cue\033[0m -t cdrom\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mA\033[0m \033[36;1mfloppy1.img floppy2.img floppy3.img\033[0m -t floppy\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mC\033[0m \033[36;1mC:\\dos\\c_drive.img\033[0m -t hdd\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mC\033[0m \033[36;1mbootable.img\033[0m -t hdd -fs none -size 512,63,32,1023\n"
+#elif defined(MACOSX)
+	        "  \033[32;1mimgmount\033[0m \033[37;1mD\033[0m \033[36;1m/Users/USERNAME/games/doom.iso\033[0m -t cdrom\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mD\033[0m \033[36;1mcd/quake1.cue\033[0m -t cdrom\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mA\033[0m \033[36;1mfloppy1.img floppy2.img floppy3.img\033[0m -t floppy\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mC\033[0m \033[36;1m~/dos/c_drive.img\033[0m -t hdd\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mC\033[0m \033[36;1mbootable.img\033[0m -t hdd -fs none -size 512,63,32,1023\n"
+#else
+	        "  \033[32;1mimgmount\033[0m \033[37;1mD\033[0m \033[36;1m/home/USERNAME/games/doom.iso\033[0m -t cdrom\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mD\033[0m \033[36;1mcd/quake1.cue\033[0m -t cdrom\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mA\033[0m \033[36;1mfloppy1.img floppy2.img floppy3.img\033[0m -t floppy\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mC\033[0m \033[36;1m~/dos/c_drive.img\033[0m -t hdd\n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mC\033[0m \033[36;1mbootable.img\033[0m -t hdd -fs none -size 512,63,32,1023\n"
+#endif
+	);
+
+	MSG_Add("SHELL_CMD_MOUNT_HELP",
+	        "maps physical folders or drives to a virtual drive letter.\n");
+
+	MSG_Add("SHELL_CMD_MOUNT_HELP_LONG",
+	        "Mount a directory from the host OS to a drive letter.\n"
+	        "\n"
+	        "Usage:\n"
+	        "  \033[32;1mmount\033[0m \033[37;1mDRIVE\033[0m \033[36;1mDIRECTORY\033[0m [-t TYPE] [-freesize SIZE] [-label LABEL]\n"
+	        "  \033[32;1mmount\033[0m -u \033[37;1mDRIVE\033[0m  (unmounts the DRIVE's directory)\n"
+	        "\n"
+	        "Where:\n"
+	        "  \033[37;1mDRIVE\033[0m     the drive letter where the directory will be mounted: A, C, D, ...\n"
+	        "  \033[36;1mDIRECTORY\033[0m is the directory on the host OS to be mounted\n"
+	        "  TYPE      type of the directory to mount: dir, floppy, cdrom, or overlay\n"
+	        "  SIZE      free space for the virtual drive (KiB for floppies, MiB otherwise)\n"
+	        "  LABEL     drive label name to be used\n"
+	        "\n"
+	        "Notes:\n"
+	        "  - \033[36;1mDIRECTORY\033[0m is case-sensitive path, relative or absolute with respect to\n"
+	        "    dosbox's current-working directory.\n"
+	        "  - '-t overlay' redirects writes for mounted drive to another directory.\n"
+	        "  - Additional options are described in the manual (README file, chapter 4).\n"
+	        "\n"
+	        "Examples:\n"
+#if defined(WIN32)
+	        "  \033[32;1mmount\033[0m \033[37;1mC\033[0m \033[36;1mC:\\dosgames\033[0m\n"
+	        "  \033[32;1mmount\033[0m \033[37;1mD\033[0m \033[36;1mD:\\\033[0m -t cdrom\n"
+	        "  \033[32;1mmount\033[0m \033[37;1mC\033[0m \033[36;1mmy_savegame_files\033[0m -t overlay\n"
+#elif defined(MACOSX)
+	        "  \033[32;1mmount\033[0m \033[37;1mC\033[0m \033[36;1m~/dosgames\033[0m\n"
+	        "  \033[32;1mmount\033[0m \033[37;1mD\033[0m \033[36;1m\"/Volumes/Game CD\"\033[0m -t cdrom\n"
+	        "  \033[32;1mmount\033[0m \033[37;1mC\033[0m \033[36;1mmy_savegame_files\033[0m -t overlay\n"
+#else
+	        "  \033[32;1mmount\033[0m \033[37;1mC\033[0m \033[36;1m~/dosgames\033[0m\n"
+	        "  \033[32;1mmount\033[0m \033[37;1mD\033[0m \033[36;1m\"/media/USERNAME/Game CD\"\033[0m -t cdrom\n"
+	        "  \033[32;1mmount\033[0m \033[37;1mC\033[0m \033[36;1mmy_savegame_files\033[0m -t overlay\n"
+#endif
+	);
+
+	MSG_Add("PROGRAM_IMGMOUNT_SPECIFY_DRIVE",
+	        "Must specify drive letter to mount image at.\n");
+	MSG_Add("PROGRAM_IMGMOUNT_SPECIFY2",
+	        "Must specify drive number (0 or 3) to mount image at (0,1=fda,fdb;2,3=hda,hdb).\n");
 	MSG_Add("PROGRAM_IMGMOUNT_SPECIFY_GEOMETRY",
 		"For \033[33mCD-ROM\033[0m images:   \033[34;1mIMGMOUNT drive-letter location-of-image -t iso\033[0m\n"
 		"\n"

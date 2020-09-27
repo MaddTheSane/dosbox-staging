@@ -51,7 +51,7 @@ private:
 	std::string address;
 };
 
-static std::vector<PhonebookEntry *> phones;
+static std::vector<PhonebookEntry> phones;
 static const char phoneValidChars[] = "01234567890*=,;#+>";
 
 static bool MODEM_IsPhoneValid(const std::string &input) {
@@ -89,17 +89,21 @@ bool MODEM_ReadPhonebook(const std::string &filename) {
 
 		LOG_MSG("SERIAL: Phonebook mapped %s to address %s.", phone.c_str(),
 		        address.c_str());
-		PhonebookEntry *pbEntry = new PhonebookEntry(phone, address);
-		phones.push_back(pbEntry);
+		phones.emplace_back(phone, address);
 	}
 
 	return true;
 }
 
+void MODEM_ClearPhonebook()
+{
+	phones.clear();
+}
+
 static const char *MODEM_GetAddressFromPhone(const char *input) {
-	for (const auto entry : phones) {
-		if (entry->IsMatchingPhone(input))
-			return entry->GetAddress().c_str();
+	for (const auto &entry : phones) {
+		if (entry.IsMatchingPhone(input))
+			return entry.GetAddress().c_str();
 	}
 
 	return nullptr;
@@ -127,8 +131,15 @@ CSerialModem::CSerialModem(const uint8_t port_idx, CommandLine *cmd)
 
 	CSerial::Init_Registers();
 	Reset(); // reset calls EnterIdleState
-
 	setEvent(SERIAL_POLLING_EVENT,1);
+
+	// Enable telnet-mode if configured
+	if (getUintFromString("telnet:", val, cmd)) {
+		telnet_mode = (val == 1);
+		LOG_MSG("SERIAL: Port %" PRIu8 " telnet-mode %s",
+		        GetPortNumber(), telnet_mode ? "enabled" : "disabled");
+	}
+
 	InstallationSuccessful=true;
 }
 
@@ -336,9 +347,6 @@ void CSerialModem::Reset(){
 	echo = true;
 	doresponse = 0;
 	numericresponse = false;
-
-	/* Default to direct null modem connection.  Telnet mode interprets IAC codes */
-	telnetmode = false;
 }
 
 void CSerialModem::EnterIdleState(){
@@ -391,11 +399,22 @@ void CSerialModem::EnterConnectedState() {
 	CSerial::setRI(false);
 }
 
-void CSerialModem::DoCommand() {
+template <size_t N>
+bool is_next_token(const char (&a)[N], const char *b) noexcept
+{
+	// Is 'b' at least as long as 'a'?
+	constexpr size_t N_without_null = N - 1;
+	if (strnlen(b, N) < N_without_null)
+		return false;
+	return (strncmp(a, b, N_without_null) == 0);
+}
+
+void CSerialModem::DoCommand()
+{
 	cmdbuf[cmdpos] = 0;
 	cmdpos = 0;			//Reset for next command
 	upcase(cmdbuf);
-	LOG_MSG("SERIAL: Port %" PRIu8 " command sent to modem: ->%s<-\n",
+	LOG_MSG("SERIAL: Port %" PRIu8 " command sent to modem: ->%s<-",
 	        GetPortNumber(), cmdbuf);
 	/* Check for empty line, stops dialing and autoanswer */
 	if (!cmdbuf[0]) {
@@ -414,30 +433,53 @@ void CSerialModem::DoCommand() {
 		SendRes(ResERROR);
 		return;
 	}
-	if (strstr(cmdbuf,"NET0")) {
-		telnetmode = false;
-		SendRes(ResOK);
-		return;
-	}
-	else if (strstr(cmdbuf,"NET1")) {
-		telnetmode = true;
-		SendRes(ResOK);
-		return;
-	}
-
 	char * scanbuf = &cmdbuf[2];
 	while (1) {
 		// LOG_MSG("SERIAL: Port %" PRIu8 " loopstart ->%s<-",
 		//         GetPortNumber(), scanbuf);
 		char chr = GetChar(scanbuf);
 		switch (chr) {
+
+		// Multi-character AT-commands are prefixed with +
+		// -----------------------------------------------
+		// Note: successfully finding your multi-char command
+		// requires moving the scanbuf position one beyond the
+		// the last character in the multi-char sequence to ensure
+		// single-character detection resumes on the next character.
+		// Either break if successful or fail with SendRes(ResERROR)
+		// and return (halting the command sequence all together).
+		case '+':
+			// +NET1 enables telnet-mode and +NET0 disables it
+			if (is_next_token("NET", scanbuf)) {
+				// only walk the pointer ahead if the command matches
+				scanbuf += 3;
+				const uint32_t requested_mode = ScanNumber(scanbuf);
+
+				// If the mode isn't valid then stop parsing
+				if (requested_mode != 1 && requested_mode != 0) {
+					SendRes(ResERROR);
+					return;
+				}
+				// Inform the user on changes
+				if (telnet_mode != static_cast<bool>(requested_mode)) {
+					telnet_mode = requested_mode;
+					LOG_MSG("SERIAL: Port %" PRIu8 " telnet-mode %s",
+					        GetPortNumber(),
+					        telnet_mode ? "enabled" : "disabled");
+				}
+				break;
+			}
+			// If the command wasn't recognized then stop parsing
+			SendRes(ResERROR);
+			return;
+
 		case 'D': { // Dial
 			char * foundstr = &scanbuf[0];
 			if (*foundstr == 'T' || *foundstr == 'P')
 				foundstr++;
 
-			// Small protection against empty line and long string
-			if ((!foundstr[0]) || (strlen(foundstr) > 100)) {
+			// Small protection against empty line or hostnames beyond the 253-char limit
+			if ((!foundstr[0]) || (strlen(foundstr) > 253)) {
 				SendRes(ResERROR);
 				return;
 			}
@@ -826,11 +868,9 @@ void CSerialModem::Timer2() {
 					cmdpos--;
 			} else if (txval == '\r') {
 				DoCommand();
-			} else if (txval != '+') {
-				if (cmdpos < 99) {
-					cmdbuf[cmdpos] = txval;
-					cmdpos++;
-				}
+			} else if (cmdpos < 99) {
+				cmdbuf[cmdpos] = txval;
+				cmdpos++;
 			}
 		}
 		else {// + character
@@ -860,7 +900,7 @@ void CSerialModem::Timer2() {
 			EnterIdleState();
 		} else if (usesize) {
 			// Filter telnet commands
-			if (telnetmode)
+			if (telnet_mode)
 				TelnetEmulation(tmpbuf, usesize);
 			else
 				rqueue->adds(tmpbuf,usesize);
