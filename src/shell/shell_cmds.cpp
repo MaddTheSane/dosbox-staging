@@ -199,10 +199,13 @@ void DOS_Shell::DoCommand(char * line) {
 		return; \
 	}
 
-void DOS_Shell::CMD_CLS(char * args) {
+void DOS_Shell::CMD_CLS(char *args)
+{
 	HELP("CLS");
-	reg_ax=0x0003;
-	CALLBACK_RunRealInt(0x10);
+	const auto rows = real_readb(BIOSMEM_SEG, BIOSMEM_NB_ROWS);
+	const auto cols = real_readw(BIOSMEM_SEG, BIOSMEM_NB_COLS);
+	INT10_ScrollWindow(0, 0, rows, static_cast<uint8_t>(cols), -rows, 0x7, 0xff);
+	INT10_SetCursorPos(0, 0, 0);
 }
 
 void DOS_Shell::CMD_DELETE(char * args) {
@@ -290,7 +293,7 @@ void DOS_Shell::CMD_RENAME(char * args){
 
 		char dir_source[DOS_PATHLENGTH + 4] = {0}; //not sure if drive portion is included in pathlength
 		//Copy first and then modify, makes GCC happy
-		safe_strncpy(dir_source,arg1,DOS_PATHLENGTH + 4);
+		safe_strcpy(dir_source, arg1);
 		char* dummy = strrchr(dir_source,'\\');
 		if (!dummy) { //Possible due to length
 			WriteOut(MSG_Get("SHELL_ILLEGAL_PATH"));
@@ -321,7 +324,7 @@ void DOS_Shell::CMD_ECHO(char * args){
 	}
 	char buffer[512];
 	char* pbuffer = buffer;
-	safe_strncpy(buffer,args,512);
+	safe_strcpy(buffer, args);
 	StripSpaces(pbuffer);
 	if (strcasecmp(pbuffer,"OFF") == 0) {
 		echo=false;
@@ -1000,7 +1003,7 @@ void DOS_Shell::CMD_COPY(char * args) {
 				plus = strchr(source_p,'+');
 			}
 			if (plus) *plus++ = 0;
-			safe_strncpy(source_x,source_p,CROSS_LEN);
+			safe_strcpy(source_x, source_p);
 			bool has_drive_spec = false;
 			size_t source_x_len = strlen(source_x);
 			if (source_x_len>0) {

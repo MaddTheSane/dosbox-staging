@@ -751,7 +751,7 @@ bool Config::PrintConfig(const std::string &filename) const
 
 	for (const_it tel = sectionlist.begin(); tel != sectionlist.end(); ++tel){
 		/* Print out the Section header */
-		safe_strncpy(temp,(*tel)->GetName(),sizeof(temp));
+		safe_strcpy(temp, (*tel)->GetName());
 		lowcase(temp);
 		fprintf(outfile,"[%s]\n",temp);
 
@@ -972,7 +972,7 @@ bool Config::ParseConfigFile(char const * const configfilename) {
 void Config::ParseEnv(char ** envp) {
 	for(char** env=envp; *env;env++) {
 		char copy[1024];
-		safe_strncpy(copy,*env,1024);
+		safe_strcpy(copy, *env);
 		if(strncasecmp(copy,"DOSBOX_",7))
 			continue;
 		char* sec_name = &copy[7];
@@ -1023,15 +1023,6 @@ bool CommandLine::FindExist(char const * const name,bool remove) {
 	cmd_it it;
 	if (!(FindEntry(name,it,false))) return false;
 	if (remove) cmds.erase(it);
-	return true;
-}
-
-bool CommandLine::FindHex(char const * const name,unsigned int & value,bool remove) {
-	cmd_it it,it_next;
-	if (!(FindEntry(name,it,true))) return false;
-	it_next=it;++it_next;
-	sscanf((*it_next).c_str(),"%X",&value);
-	if (remove) cmds.erase(it,++it_next);
 	return true;
 }
 

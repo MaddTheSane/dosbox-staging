@@ -175,7 +175,7 @@ void INT10_SetCursorPos(Bit8u row,Bit8u col,Bit8u page);
 void INT10_TeletypeOutput(Bit8u chr,Bit8u attr);
 void INT10_TeletypeOutputAttr(Bit8u chr,Bit8u attr,bool useattr);
 void INT10_ReadCharAttr(Bit16u * result,Bit8u page);
-void INT10_WriteChar(Bit8u chr,Bit8u attr,Bit8u page,Bit16u count,bool showattr);
+void INT10_WriteChar(uint8_t chr, uint8_t attr, uint8_t page, uint16_t count, bool showattr);
 void INT10_WriteString(Bit8u row,Bit8u col,Bit8u flag,Bit8u attr,PhysPt string,Bit16u count,Bit8u page);
 
 /* Graphics Stuff */
@@ -187,10 +187,10 @@ void INT10_LoadFont(PhysPt font,bool reload,Bitu count,Bitu offset,Bitu map,Bitu
 void INT10_ReloadFont(void);
 
 /* Palette Group */
-void INT10_SetBackgroundBorder(Bit8u val);
+void INT10_SetBackgroundBorder(uint8_t val);
 void INT10_SetColorSelect(Bit8u val);
-void INT10_SetSinglePaletteRegister(Bit8u reg,Bit8u val);
-void INT10_SetOverscanBorderColor(Bit8u val);
+void INT10_SetSinglePaletteRegister(uint8_t reg, uint8_t val);
+void INT10_SetOverscanBorderColor(uint8_t val);
 void INT10_SetAllPaletteRegisters(PhysPt data);
 void INT10_ToggleBlinkingBit(Bit8u state);
 void INT10_GetSinglePaletteRegister(Bit8u reg,Bit8u * val);

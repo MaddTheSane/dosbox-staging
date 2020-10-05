@@ -703,7 +703,9 @@ void SHELL_Init() {
 	        "  ..   Specifies that you want to change to the parent directory.\n\n"
 	        "Type CD drive: to display the current directory in the specified drive.\n"
 	        "Type CD without parameters to display the current drive and directory.\n");
-	MSG_Add("SHELL_CMD_CLS_HELP","Clear screen.\n");
+
+	MSG_Add("SHELL_CMD_CLS_HELP", "Clear the screen.\n");
+
 	MSG_Add("SHELL_CMD_DIR_HELP",
 	        "Displays a list of files and subdirectories in a directory.\n");
 	MSG_Add("SHELL_CMD_DIR_HELP_LONG",
@@ -838,6 +840,12 @@ void SHELL_Init() {
 	DOS_ForceDuplicateEntry(1,2);				/* STDERR */
 	DOS_OpenFile("CON",OPEN_READWRITE,&dummy);	/* STDAUX */
 	DOS_OpenFile("PRN",OPEN_READWRITE,&dummy);	/* STDPRN */
+
+	/* Create appearance of handle inheritance by first shell */
+	for (Bit16u i=0;i<5;i++) {
+		Bit8u handle=psp.GetFileHandle(i);
+		if (Files[handle]) Files[handle]->AddRef();
+	}
 
 	psp.SetParent(psp_seg);
 	/* Set the environment */

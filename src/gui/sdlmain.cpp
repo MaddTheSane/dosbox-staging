@@ -419,15 +419,22 @@ bool startup_state_capslock=false;
 void GFX_SetTitle(Bit32s cycles, int /*frameskip*/, bool paused)
 {
 	char title[200] = {0};
+
+#if !defined(NDEBUG)
+	const char* build_type = " (debug build)";
+#else
+	const char* build_type = "";
+#endif
+
 	static Bit32s internal_cycles = 0;
 	if (cycles != -1)
 		internal_cycles = cycles;
 
 	const char *msg = CPU_CycleAutoAdjust
-	                          ? "%8s - max %d%% - dosbox-staging%s"
-	                          : "%8s - %d cycles/ms - dosbox-staging%s";
+	                          ? "%8s - max %d%% - dosbox-staging%s%s"
+	                          : "%8s - %d cycles/ms - dosbox-staging%s%s";
 	snprintf(title, sizeof(title), msg, RunningProgram, internal_cycles,
-	         paused ? " (PAUSED)" : "");
+	         build_type, paused ? " (PAUSED)" : "");
 	SDL_SetWindowTitle(sdl.window, title);
 }
 
@@ -2081,7 +2088,7 @@ static void GUI_StartUp(Section * sec) {
 	sdl.desktop.full.height = 0;
 	if(fullresolution && *fullresolution) {
 		char res[100];
-		safe_strncpy( res, fullresolution, sizeof( res ));
+		safe_strcpy(res, fullresolution);
 		fullresolution = lowcase (res);//so x and X are allowed
 		if (strcmp(fullresolution,"original")) {
 			sdl.desktop.full.fixed = true;
@@ -2287,6 +2294,11 @@ static void GUI_StartUp(Section * sec) {
 	Prop_multival* p3 = section->Get_multival("sensitivity");
 	sdl.mouse.xsensitivity = p3->GetSection()->Get_int("xsens");
 	sdl.mouse.ysensitivity = p3->GetSection()->Get_int("ysens");
+
+	// Apply raw mouse input setting
+	SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP,
+	                        section->Get_bool("raw_mouse_input") ? "0" : "1",
+	                        SDL_HINT_OVERRIDE);
 
 	/* Get some Event handlers */
 	MAPPER_AddHandler(KillSwitch,MK_f9,MMOD1,"shutdown","ShutDown");
@@ -2751,7 +2763,8 @@ static std::vector<std::string> Get_SDL_TextureRenderers()
 void Config_Add_SDL() {
 	Section_prop * sdl_sec=control->AddSection_prop("sdl",&GUI_StartUp);
 	sdl_sec->AddInitFunction(&MAPPER_StartUp);
-	Prop_bool* Pbool;
+	Prop_bool *Pbool; // use pbool for new properties
+	Prop_bool *pbool;
 	Prop_string *Pstring; // use pstring for new properties
 	Prop_string *pstring;
 	Prop_int *Pint; // use pint for new properties
@@ -2875,6 +2888,12 @@ void Config_Add_SDL() {
 	Pint->SetMinMax(-1000,1000);
 	Pint = Pmulti->GetSection()->Add_int("ysens",Property::Changeable::Always,100);
 	Pint->SetMinMax(-1000,1000);
+
+	pbool = sdl_sec->Add_bool("raw_mouse_input", on_start, false);
+	pbool->Set_help(
+	        "Enable this setting to bypass your operating system's mouse\n"
+	        "acceleration and sensitivity settings. This works in\n"
+	        "fullscreen or when the mouse is captured in window mode.");
 
 	Pbool = sdl_sec->Add_bool("waitonerror",Property::Changeable::Always, true);
 	Pbool->Set_help("Wait before closing the console if dosbox has an error.");

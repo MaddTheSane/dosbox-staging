@@ -111,12 +111,16 @@ void DOS_SetupFiles (void);
 bool DOS_ReadFile(Bit16u handle,Bit8u * data,Bit16u * amount, bool fcb = false);
 bool DOS_WriteFile(Bit16u handle,Bit8u * data,Bit16u * amount,bool fcb = false);
 bool DOS_SeekFile(Bit16u handle,Bit32u * pos,Bit32u type,bool fcb = false);
-bool DOS_CloseFile(Bit16u handle,bool fcb = false);
+bool DOS_CloseFile(Bit16u handle,bool fcb = false,Bit8u * refcnt = NULL);
 bool DOS_FlushFile(Bit16u handle);
 bool DOS_DuplicateEntry(Bit16u entry,Bit16u * newentry);
 bool DOS_ForceDuplicateEntry(Bit16u entry,Bit16u newentry);
 bool DOS_GetFileDate(Bit16u entry, Bit16u* otime, Bit16u* odate);
 bool DOS_SetFileDate(uint16_t entry, uint16_t ntime, uint16_t ndate);
+
+// Date and Time Conversion
+uint16_t DOS_PackTime(uint16_t hour, uint16_t min, uint16_t sec);
+uint16_t DOS_PackDate(uint16_t year, uint16_t mon, uint16_t day);
 
 /* Routines for Drive Class */
 bool DOS_OpenFile(char const * name,Bit8u flags,Bit16u * entry,bool fcb = false);
@@ -214,15 +218,6 @@ static INLINE Bit16u long2para(Bit32u size) {
 	if (size>0xFFFF0) return 0xffff;
 	if (size&0xf) return (Bit16u)((size>>4)+1);
 	else return (Bit16u)(size>>4);
-}
-
-
-static INLINE Bit16u DOS_PackTime(Bit16u hour,Bit16u min,Bit16u sec) {
-	return (hour&0x1f)<<11 | (min&0x3f) << 5 | ((sec/2)&0x1f);
-}
-
-static INLINE Bit16u DOS_PackDate(Bit16u year,Bit16u mon,Bit16u day) {
-	return ((year-1980)&0x7f)<<9 | (mon&0x3f) << 5 | (day&0x1f);
 }
 
 /* Dos Error Codes */
@@ -440,7 +435,7 @@ public:
 	void SetUMBChainState(uint8_t state) { SSET_BYTE(sDIB, chainingUMB, state); }
 	uint8_t GetUMBChainState() const { return SGET_BYTE(sDIB, chainingUMB); }
 
-	void SetStartOfUMBChain(uint16_t seg) { SSET_WORD(sDIB, startOfUMBChain, seg); }
+	void SetStartOfUMBChain(uint16_t start_seg) { SSET_WORD(sDIB, startOfUMBChain, start_seg); }
 	uint16_t GetStartOfUMBChain() const { return SGET_WORD(sDIB, startOfUMBChain); }
 
 	void SetDiskBufferHeadPt(uint32_t db) { SSET_DWORD(sDIB, diskBufferHeadPt, db); }

@@ -33,7 +33,8 @@ static INLINE void WriteTandyACTL(Bit8u creg,Bit8u val) {
 	else IO_Write(VGAREG_PCJR_DATA,val);
 }
 
-void INT10_SetSinglePaletteRegister(Bit8u reg,Bit8u val) {
+void INT10_SetSinglePaletteRegister(uint8_t reg, uint8_t val)
+{
 	switch (machine) {
 	case MCH_PCJR:
 		reg&=0xf;
@@ -63,7 +64,7 @@ void INT10_SetSinglePaletteRegister(Bit8u reg,Bit8u val) {
 					if (color_select& 0x20) reg++; // Cyan Magenta White
 				}
 				WriteTandyACTL(reg+0x10,val);
-			} 
+			}
 			// 4-color high resolution mode 0x0a isn't handled specially
 			else WriteTandyACTL(reg+0x10,val);
 			break;
@@ -83,11 +84,14 @@ void INT10_SetSinglePaletteRegister(Bit8u reg,Bit8u val) {
 		}
 		IO_Write(VGAREG_ACTL_ADDRESS,32);		//Enable output and protect palette
 		break;
+	case MCH_HERC:
+	case MCH_CGA:
+		break;
 	}
 }
 
-
-void INT10_SetOverscanBorderColor(Bit8u val) {
+void INT10_SetOverscanBorderColor(uint8_t val)
+{
 	switch (machine) {
 	case TANDY_ARCH_CASE:
 		IO_Read(VGAREG_TDY_RESET);
@@ -100,10 +104,14 @@ void INT10_SetOverscanBorderColor(Bit8u val) {
 		IO_Write(VGAREG_ACTL_WRITE_DATA,val);
 		IO_Write(VGAREG_ACTL_ADDRESS,32);		//Enable output and protect palette
 		break;
+	case MCH_HERC:
+	case MCH_CGA:
+		break;
 	}
 }
 
-void INT10_SetAllPaletteRegisters(PhysPt data) {
+void INT10_SetAllPaletteRegisters(PhysPt data)
+{
 	switch (machine) {
 	case TANDY_ARCH_CASE:
 		IO_Read(VGAREG_TDY_RESET);
@@ -127,6 +135,9 @@ void INT10_SetAllPaletteRegisters(PhysPt data) {
 		IO_Write(VGAREG_ACTL_ADDRESS,0x11);
 		IO_Write(VGAREG_ACTL_WRITE_DATA,mem_readb(data));
 		IO_Write(VGAREG_ACTL_ADDRESS,32);		//Enable output and protect palette
+		break;
+	case MCH_HERC:
+	case MCH_CGA:
 		break;
 	}
 }
@@ -305,11 +316,12 @@ void INT10_GetPelMask(Bit8u & mask) {
 	mask=IO_Read(VGAREG_PEL_MASK);
 }
 
-void INT10_SetBackgroundBorder(Bit8u val) {
+void INT10_SetBackgroundBorder(uint8_t val)
+{
 	Bit8u color_select=real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_PAL);
 	color_select=(color_select & 0xe0) | (val & 0x1f);
 	real_writeb(BIOSMEM_SEG,BIOSMEM_CURRENT_PAL,color_select);
-	
+
 	switch (machine) {
 	case MCH_CGA:
 		// only write the color select register
@@ -326,7 +338,7 @@ void INT10_SetBackgroundBorder(Bit8u val) {
 			IO_Write(0x3d9, color_select);
 			break;
 		case 0x07: // Tandy monochrome not implemented
-			break; 
+			break;
 		case 0x08:
 		case 0x09: // 16-color: write to color select, border and pal. index 0
 			INT10_SetOverscanBorderColor(val);
@@ -363,6 +375,8 @@ void INT10_SetBackgroundBorder(Bit8u val) {
 		INT10_SetSinglePaletteRegister( 2, val );
 		val+=2;
 		INT10_SetSinglePaletteRegister( 3, val );
+		break;
+	case MCH_HERC:
 		break;
 	}
 }

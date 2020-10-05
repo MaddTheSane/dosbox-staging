@@ -306,6 +306,7 @@ bool localDrive::FileUnlink(char * name) {
 		}
 	}
 	DEBUG_LOG_MSG("FS: Unable to remove file %s", fullname);
+	DOS_SetError(DOSERR_ACCESS_DENIED);
 	return false;
 }
 

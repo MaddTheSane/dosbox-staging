@@ -174,13 +174,23 @@ static void MIXER_UnlockAudioDevice()
 	SDL_UnlockAudioDevice(mixer.sdldevice);
 }
 
+void MixerChannel::RegisterLevelCallBack(apply_level_callback_f cb)
+{
+	apply_level = cb;
+	const AudioFrame level{volmain[0], volmain[1]};
+	apply_level(level);
+}
+
 void MixerChannel::UpdateVolume()
 {
+	// Don't scale by volmain[] if the level is being managed by the source
+	const float level_l = apply_level ? 1 : volmain[0];
+	const float level_r = apply_level ? 1 : volmain[1];
 	//--Modified 2012-02-26 by Alun Bestor to give Boxer control over master volume
-	//volmul[0]=(Bits)((1 << MIXER_VOLSHIFT)*scale[0]*volmain[0]*mixer.mastervol[0]);
-	//volmul[1]=(Bits)((1 << MIXER_VOLSHIFT)*scale[1]*volmain[1]*mixer.mastervol[1]);
-	volmul[0]=(Bits)((1 << MIXER_VOLSHIFT)*scale[0]*volmain[0]*boxer_masterVolume(BXLeftChannel));
-	volmul[1]=(Bits)((1 << MIXER_VOLSHIFT)*scale[1]*volmain[1]*boxer_masterVolume(BXRightChannel));
+	//volmul[0] = (Bits)((1 << MIXER_VOLSHIFT) * scale[0] * level_l * mixer.mastervol[0]);
+	//volmul[1] = (Bits)((1 << MIXER_VOLSHIFT) * scale[1] * level_r * mixer.mastervol[1]);
+	volmul[0]=(Bits)((1 << MIXER_VOLSHIFT)*scale[0]*level_l*boxer_masterVolume(BXLeftChannel));
+	volmul[1]=(Bits)((1 << MIXER_VOLSHIFT)*scale[1]*level_r*boxer_masterVolume(BXRightChannel));
 	//--End of modifications
 }
 
@@ -188,6 +198,11 @@ void MixerChannel::SetVolume(float _left,float _right) {
 	// Allow unconstrained user-defined values
 	volmain[0] = _left;
 	volmain[1] = _right;
+
+	if (apply_level) {
+		const AudioFrame level{_left, _right};
+		apply_level(level);
+	}
 	UpdateVolume();
 }
 
@@ -827,7 +842,10 @@ public:
 		MixerChannel * chan = mixer.channels;
 		while (chan) {
 			if (cmd->FindString(chan->name,temp_line,false)) {
-				MakeVolume((char *)temp_line.c_str(),chan->volmain[0],chan->volmain[1]);
+				float left_vol = 0;
+				float right_vol = 0;
+				MakeVolume(&temp_line[0], left_vol, right_vol);
+				chan->SetVolume(left_vol, right_vol);
 			}
 			chan->UpdateVolume();
 			chan = chan->next;
@@ -861,7 +879,7 @@ static void MIXER_ProgramStart(Program * * make) {
 MixerChannel* MixerObject::Install(MIXER_Handler handler,Bitu freq,const char * name){
 	if(!installed) {
 		if(strlen(name) > 31) E_Exit("Too long mixer channel name");
-		safe_strncpy(m_name,name,32);
+		safe_strcpy(m_name, name);
 		installed = true;
 		return MIXER_AddChannel(handler,freq,name);
 	} else {

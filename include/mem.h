@@ -25,152 +25,190 @@
 #include "mem_host.h"
 #include "mem_unaligned.h"
 
-typedef Bit32u PhysPt;
-typedef Bit8u * HostPt;
-typedef Bit32u RealPt;
+typedef uint32_t PhysPt;
+typedef uint8_t *HostPt;
+typedef uint32_t RealPt;
 
-typedef Bit32s MemHandle;
+typedef int32_t MemHandle;
 
 #define MEM_PAGESIZE 4096
 
 extern HostPt MemBase;
-HostPt GetMemBase(void);
+HostPt GetMemBase();
 
-bool MEM_A20_Enabled(void);
+bool MEM_A20_Enabled();
 void MEM_A20_Enable(bool enable);
 
 /* Memory management / EMS mapping */
-HostPt MEM_GetBlockPage(void);
-Bitu MEM_FreeTotal(void);			//Free 4 kb pages
-Bitu MEM_FreeLargest(void);			//Largest free 4 kb pages block
-Bitu MEM_TotalPages(void);			//Total amount of 4 kb pages
+HostPt MEM_GetBlockPage();
+Bitu MEM_FreeTotal();                      // Free 4 KiB pages
+Bitu MEM_FreeLargest();                    // Largest free 4 KiB pages block
+Bitu MEM_TotalPages();                     // Total amount of 4 KiB pages
 Bitu MEM_AllocatedPages(MemHandle handle); // amount of allocated pages of handle
-MemHandle MEM_AllocatePages(Bitu pages,bool sequence);
-MemHandle MEM_GetNextFreePage(void);
-PhysPt MEM_AllocatePage(void);
+MemHandle MEM_AllocatePages(Bitu pages, bool sequence);
+MemHandle MEM_GetNextFreePage();
+PhysPt MEM_AllocatePage();
 void MEM_ReleasePages(MemHandle handle);
-bool MEM_ReAllocatePages(MemHandle & handle,Bitu pages,bool sequence);
+bool MEM_ReAllocatePages(MemHandle &handle, Bitu pages, bool sequence);
 
 MemHandle MEM_NextHandle(MemHandle handle);
-MemHandle MEM_NextHandleAt(MemHandle handle,Bitu where);
+MemHandle MEM_NextHandleAt(MemHandle handle, Bitu where);
 
-static INLINE void var_write(uint8_t *var, uint8_t val)
+static inline void var_write(uint8_t *var, uint8_t val)
 {
 	host_writeb(var, val);
 }
 
-static INLINE void var_write(Bit16u * var, Bit16u val) {
+static inline void var_write(uint16_t *var, uint16_t val)
+{
 	host_writew((HostPt)var, val);
 }
 
-static INLINE void var_write(Bit32u * var, Bit32u val) {
+static inline void var_write(uint32_t *var, uint32_t val)
+{
 	host_writed((HostPt)var, val);
 }
 
-static INLINE Bit16u var_read(Bit16u * var) {
+static inline uint16_t var_read(uint16_t *var)
+{
 	return host_readw((HostPt)var);
 }
 
-static INLINE Bit32u var_read(Bit32u * var) {
+static inline uint32_t var_read(uint32_t *var)
+{
 	return host_readd((HostPt)var);
 }
 
-/* The Folowing six functions are slower but they recognize the paged memory system */
+/* The Folowing six functions are slower but they recognize the paged memory
+ * system */
 
-Bit8u  mem_readb(PhysPt pt);
-Bit16u mem_readw(PhysPt pt);
-Bit32u mem_readd(PhysPt pt);
+uint8_t mem_readb(PhysPt pt);
+uint16_t mem_readw(PhysPt pt);
+uint32_t mem_readd(PhysPt pt);
 
-void mem_writeb(PhysPt pt,Bit8u val);
-void mem_writew(PhysPt pt,Bit16u val);
-void mem_writed(PhysPt pt,Bit32u val);
+void mem_writeb(PhysPt pt, uint8_t val);
+void mem_writew(PhysPt pt, uint16_t val);
+void mem_writed(PhysPt pt, uint32_t val);
 
-static INLINE void phys_writeb(PhysPt addr,Bit8u val) {
-	host_writeb(MemBase+addr,val);
+static inline void phys_writeb(PhysPt addr, uint8_t val)
+{
+	host_writeb(MemBase + addr, val);
 }
-static INLINE void phys_writew(PhysPt addr,Bit16u val){
-	host_writew(MemBase+addr,val);
+static inline void phys_writew(PhysPt addr, uint16_t val)
+{
+	host_writew(MemBase + addr, val);
 }
-static INLINE void phys_writed(PhysPt addr,Bit32u val){
-	host_writed(MemBase+addr,val);
+static inline void phys_writed(PhysPt addr, uint32_t val)
+{
+	host_writed(MemBase + addr, val);
 }
 
-static INLINE Bit8u phys_readb(PhysPt addr) {
-	return host_readb(MemBase+addr);
+static inline uint8_t phys_readb(PhysPt addr)
+{
+	return host_readb(MemBase + addr);
 }
-static INLINE Bit16u phys_readw(PhysPt addr){
-	return host_readw(MemBase+addr);
+static inline uint16_t phys_readw(PhysPt addr)
+{
+	return host_readw(MemBase + addr);
 }
-static INLINE Bit32u phys_readd(PhysPt addr){
-	return host_readd(MemBase+addr);
+static inline uint32_t phys_readd(PhysPt addr)
+{
+	return host_readd(MemBase + addr);
 }
 
 /* These don't check for alignment, better be sure it's correct */
 
-void MEM_BlockWrite(PhysPt pt,void const * const data,Bitu size);
-void MEM_BlockRead(PhysPt pt,void * data,Bitu size);
-void MEM_BlockCopy(PhysPt dest,PhysPt src,Bitu size);
-void MEM_StrCopy(PhysPt pt,char * data,Bitu size);
+void MEM_BlockWrite(PhysPt pt, const void *data, Bitu size);
+void MEM_BlockRead(PhysPt pt, void *data, Bitu size);
+void MEM_BlockCopy(PhysPt dest, PhysPt src, Bitu size);
+void MEM_StrCopy(PhysPt pt, char *data, Bitu size);
 
-void mem_memcpy(PhysPt dest,PhysPt src,Bitu size);
+void mem_memcpy(PhysPt dest, PhysPt src, Bitu size);
 Bitu mem_strlen(PhysPt pt);
-void mem_strcpy(PhysPt dest,PhysPt src);
+void mem_strcpy(PhysPt dest, PhysPt src);
 
-/* The folowing functions are all shortcuts to the above functions using physical addressing */
+/* The folowing functions are all shortcuts to the above functions using
+ * physical addressing */
 
-static INLINE Bit8u real_readb(Bit16u seg,Bit16u off) {
-	return mem_readb((seg<<4)+off);
+static inline uint8_t real_readb(uint16_t seg, uint16_t off)
+{
+	const auto base = static_cast<uint32_t>(seg << 4);
+	return mem_readb(base + off);
 }
-static INLINE Bit16u real_readw(Bit16u seg,Bit16u off) {
-	return mem_readw((seg<<4)+off);
+static inline uint16_t real_readw(uint16_t seg, uint16_t off)
+{
+	const auto base = static_cast<uint32_t>(seg << 4);
+	return mem_readw(base + off);
 }
-static INLINE Bit32u real_readd(Bit16u seg,Bit16u off) {
-	return mem_readd((seg<<4)+off);
-}
-
-static INLINE void real_writeb(Bit16u seg,Bit16u off,Bit8u val) {
-	mem_writeb(((seg<<4)+off),val);
-}
-static INLINE void real_writew(Bit16u seg,Bit16u off,Bit16u val) {
-	mem_writew(((seg<<4)+off),val);
-}
-static INLINE void real_writed(Bit16u seg,Bit16u off,Bit32u val) {
-	mem_writed(((seg<<4)+off),val);
+static inline uint32_t real_readd(uint16_t seg, uint16_t off)
+{
+	const auto base = static_cast<uint32_t>(seg << 4);
+	return mem_readd(base + off);
 }
 
-
-static INLINE Bit16u RealSeg(RealPt pt) {
-	return (Bit16u)(pt>>16);
+static inline void real_writeb(uint16_t seg, uint16_t off, uint8_t val)
+{
+	const auto base = static_cast<uint32_t>(seg << 4);
+	mem_writeb(base + off, val);
+}
+static inline void real_writew(uint16_t seg, uint16_t off, uint16_t val)
+{
+	const auto base = static_cast<uint32_t>(seg << 4);
+	mem_writew(base + off, val);
+}
+static inline void real_writed(uint16_t seg, uint16_t off, uint32_t val)
+{
+	const auto base = static_cast<uint32_t>(seg << 4);
+	mem_writed(base + off, val);
 }
 
-static INLINE Bit16u RealOff(RealPt pt) {
-	return (Bit16u)(pt&0xffff);
+static inline uint16_t RealSeg(RealPt pt)
+{
+	return pt >> 16;
 }
 
-static INLINE PhysPt Real2Phys(RealPt pt) {
-	return (RealSeg(pt)<<4) +RealOff(pt);
+static inline uint16_t RealOff(RealPt pt)
+{
+	return static_cast<uint16_t>(pt & 0xffff);
 }
 
-static INLINE PhysPt PhysMake(Bit16u seg,Bit16u off) {
-	return (seg<<4)+off;
+static inline PhysPt Real2Phys(RealPt pt)
+{
+	const auto base = static_cast<uint32_t>(RealSeg(pt) << 4);
+	return base + RealOff(pt);
 }
 
-static INLINE RealPt RealMake(Bit16u seg,Bit16u off) {
-	return (seg<<16)+off;
+static inline PhysPt PhysMake(uint16_t seg, uint16_t off)
+{
+	const auto base = static_cast<uint32_t>(seg << 4);
+	return base + off;
 }
 
-static INLINE void RealSetVec(Bit8u vec,RealPt pt) {
-	mem_writed(vec<<2,pt);
+static inline RealPt RealMake(uint16_t seg, uint16_t off)
+{
+	const auto base = static_cast<uint32_t>(seg << 16);
+	return base + off;
 }
 
-static INLINE void RealSetVec(Bit8u vec,RealPt pt,RealPt &old) {
-	old = mem_readd(vec<<2);
-	mem_writed(vec<<2,pt);
+static inline void RealSetVec(uint8_t vec, RealPt pt)
+{
+	const auto target = static_cast<uint16_t>(vec << 2);
+	mem_writed(target, pt);
 }
 
-static INLINE RealPt RealGetVec(Bit8u vec) {
-	return mem_readd(vec<<2);
-}	
+// TODO: consider dropping this function. The three places where it's called all
+// ignore the 3rd updated parameter.
+static inline void RealSetVec(uint8_t vec, RealPt pt, RealPt &old)
+{
+	const auto target = static_cast<uint16_t>(vec << 2);
+	old = mem_readd(target);
+	mem_writed(target, pt);
+}
+
+static inline RealPt RealGetVec(uint8_t vec)
+{
+	const auto target = static_cast<uint16_t>(vec << 2);
+	return mem_readd(target);
+}
 
 #endif
-
