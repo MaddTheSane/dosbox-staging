@@ -1,4 +1,4 @@
-# dosbox-staging
+# DOSBox Staging
 
 [![Linux x86\_64 build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Linux%20builds?label=Linux%20builds%20(x86_64))](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Linux+builds%22)
 [![Linux other build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Platform%20builds?label=Linux%20builds%20(ARM,%20S390x,%20ppc64le))](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Platform+builds%22)
@@ -36,7 +36,7 @@ support today's systems.
 
 ### Feature differences
 
-**dosbox-staging** does not support audio playback using physical CDs.
+DOSBox Staging does not support audio playback using physical CDs.
 Using CD Digital Audio emulation (loading CD music via
 [cue sheets](https://en.wikipedia.org/wiki/Cue_sheet_(computing)) or
 mounting [ISO images](https://en.wikipedia.org/wiki/ISO_image)) is
@@ -44,7 +44,7 @@ preferred instead.
 
 Codecs supported for CD-DA emulation:
 
-|                | dosbox-staging<sup>†</sup> | DOSBox SVN<sup>‡</sup>
+|                | DOSBox Staging<sup>†</sup> | DOSBox SVN<sup>‡</sup>
 |-               |-                           |-
 | **Opus**       | Yes (libopus)              | No
 | **OGG/Vorbis** | Yes (built-in)             | Yes - SDL\_sound 1.2 (libvorbis)<sup>[6],＊</sup>
@@ -63,7 +63,7 @@ Codecs supported for CD-DA emulation:
 
 Other differences:
 
-|                          | dosbox-staging                               | DOSBox SVN
+|                          | DOSBox Staging                               | DOSBox SVN
 |-                         |-                                             |-
 | **Pixel-perfect mode**   | Yes (`output=texturepp`)<sup>[7]</sup>       | N/A
 | **Resizable window**     | Experimental (`windowresolution=resizable`)  | N/A
@@ -111,7 +111,7 @@ Install build dependencies appropriate for your OS:
 
 ``` shell
 # Fedora
-sudo dnf install gcc-c++ automake alsa-lib-devel libpng-devel SDL2-devel \
+sudo dnf install gcc-c++ make automake alsa-lib-devel libpng-devel SDL2-devel \
                  SDL2_net-devel opusfile-devel fluidsynth-devel
 ```
 
@@ -129,12 +129,8 @@ sudo pacman -S gcc automake alsa-lib libpng sdl2 sdl2_net opusfile fluidsynth
 ``` shell
 # macOS
 xcode-select --install
-brew install autogen automake libpng sdl2 sdl2_net opusfile glib
+brew install autogen automake libpng sdl2 sdl2_net opusfile fluid-synth
 ```
-*Note: FluidSynth as a library is not available on macOS via brew.
-Either use the `--disable-fluidsynth` configure flag to disable the
-feature or run `gmake` inside `contrib/static-fluid-synth` and set
-the resulting two environment variables prior to `./configure`ing.*
 
 Compilation flags suggested for local optimised builds:
 

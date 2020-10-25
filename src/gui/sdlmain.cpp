@@ -227,8 +227,7 @@ enum SCREEN_TYPES	{
 #endif
 };
 
-/* Modes of simple pixel scaling, currently encoded in the output type: */
-enum ScalingMode {SmNone, SmNearest, SmPerfect};
+enum class SCALING_MODE { NONE, NEAREST, PERFECT };
 
 enum PRIORITY_LEVELS {
 	PRIORITY_LEVEL_PAUSE,
@@ -244,11 +243,12 @@ constexpr bool FIXED_SIZE = false;
 
 struct SDL_Block {
 	bool initialized = false;
-	bool active;							//If this isn't set don't draw
-	bool updating;
-	bool update_display_contents;
-	bool resizing_window;
-	ScalingMode scaling_mode;
+	bool active = false; // If this isn't set don't draw
+	bool updating = false;
+	bool update_display_contents = true;
+	bool resizing_window = false;
+	bool wait_on_error = false;
+	SCALING_MODE scaling_mode = SCALING_MODE::NONE;
 	struct {
 		int width = 0;
 		int height = 0;
@@ -256,21 +256,20 @@ struct SDL_Block {
 		double scaley = 1.0;
 		double pixel_aspect = 1.0;
 		GFX_CallBack_t callback = nullptr;
-	} draw;
-	bool wait_on_error;
+	} draw = {};
 	struct {
 		struct {
 			Bit16u width = 0;
 			Bit16u height = 0;
 			bool fixed = false;
 			bool display_res = false;
-		} full;
+		} full = {};
 		struct {
 			uint16_t width = 0; // TODO convert to int
 			uint16_t height = 0; // TODO convert to int
 			bool use_original_size = true;
 			bool resizable = false;
-		} window;
+		} window = {};
 		Bit8u bpp = 0;
 		bool fullscreen = false;
 		// This flag indicates, that we are in the process of switching
@@ -286,7 +285,7 @@ struct SDL_Block {
 		bool want_resizable_window = false;
 		SCREEN_TYPES type;
 		SCREEN_TYPES want_type;
-	} desktop;
+	} desktop = {};
 #if C_OPENGL
 	struct {
 		SDL_GLContext context;
@@ -308,17 +307,17 @@ struct SDL_Block {
 			GLint input_size;
 			GLint output_size;
 			GLint frame_count;
-		} ruby;
+		} ruby = {};
 		GLuint actual_frame_count;
 		GLfloat vertex_data[2*3];
-	} opengl;
+	} opengl = {};
 #endif // C_OPENGL
 	struct {
 		PRIORITY_LEVELS focus;
 		PRIORITY_LEVELS nofocus;
-	} priority;
-	SDL_Rect clip;
-	SDL_Surface *surface;
+	} priority = {};
+	SDL_Rect clip = {0, 0, 0, 0};
+	SDL_Surface *surface = nullptr;
 	SDL_Window *window = nullptr;
 	SDL_Renderer *renderer = nullptr;
 	std::string render_driver = "";
@@ -327,7 +326,7 @@ struct SDL_Block {
 		SDL_Surface *input_surface = nullptr;
 		SDL_Texture *texture = nullptr;
 		SDL_PixelFormat *pixelFormat = nullptr;
-	} texture;
+	} texture = {};
 	struct {
 		int xsensitivity = 0;
 		int ysensitivity = 0;
@@ -335,17 +334,16 @@ struct SDL_Block {
 		MouseControlType control_choice = Seamless;
 		bool middle_will_release = true;
 		bool has_focus = false;
-	} mouse;
+	} mouse = {};
 	SDL_Point pp_scale = {1, 1};
-	bool double_h, double_w;   /* double-height and double-width flags */
 	SDL_Rect updateRects[1024];
 #if defined (WIN32)
 	// Time when sdl regains focus (alt-tab) in windowed mode
 	Bit32u focus_ticks;
 #endif
 	// state of alt-keys for certain special handlings
-	SDL_EventType laltstate;
-	SDL_EventType raltstate;
+	SDL_EventType laltstate = SDL_KEYUP;
+	SDL_EventType raltstate = SDL_KEYUP;
 };
 
 static SDL_Block sdl;
@@ -431,8 +429,8 @@ void GFX_SetTitle(Bit32s cycles, int /*frameskip*/, bool paused)
 		internal_cycles = cycles;
 
 	const char *msg = CPU_CycleAutoAdjust
-	                          ? "%8s - max %d%% - dosbox-staging%s%s"
-	                          : "%8s - %d cycles/ms - dosbox-staging%s%s";
+	                          ? "%8s - max %d%% - DOSBox Staging%s%s"
+	                          : "%8s - %d cycles/ms - DOSBox Staging%s%s";
 	snprintf(title, sizeof(title), msg, RunningProgram, internal_cycles,
 	         build_type, paused ? " (PAUSED)" : "");
 	SDL_SetWindowTitle(sdl.window, title);
@@ -542,7 +540,7 @@ MAYBE_UNUSED static void PauseDOSBox(bool pressed)
 				if (inkeymod != outkeymod) {
 					KEYBOARD_ClrBuffer();
 					MAPPER_LosingFocus();
-					//Not perfect if the pressed alt key is switched, but then we have to 
+					//Not perfect if the pressed alt key is switched, but then we have to
 					//insert the keys into the mapper or create/rewrite the event and push it.
 					//Which is tricky due to possible use of scancodes.
 				}
@@ -565,7 +563,7 @@ MAYBE_UNUSED static void PauseDOSBox(bool pressed)
 /* Reset the screen with current values in the sdl structure */
 Bitu GFX_GetBestMode(Bitu flags)
 {
-	if (sdl.scaling_mode == SmPerfect)
+	if (sdl.scaling_mode == SCALING_MODE::PERFECT)
 		flags |= GFX_UNITY_SCALE;
 	switch (sdl.desktop.want_type) {
 	case SCREEN_SURFACE:
@@ -801,7 +799,7 @@ static SDL_Window *setup_window_pp(SCREEN_TYPES screen_type, bool resizable)
 
 static SDL_Window *SetupWindowScaled(SCREEN_TYPES screen_type, bool resizable)
 {
-	if (sdl.scaling_mode == SmPerfect)
+	if (sdl.scaling_mode == SCALING_MODE::PERFECT)
 		return setup_window_pp(screen_type, resizable);
 
 	Bit16u fixedWidth;
@@ -967,13 +965,13 @@ Bitu GFX_SetSize(Bitu width, Bitu height, Bitu flags,
 	sdl.draw.pixel_aspect = pixel_aspect;
 	sdl.draw.callback = callback;
 
-	sdl.double_h = (flags & GFX_DBL_H) > 0;
-	sdl.double_w = (flags & GFX_DBL_W) > 0;
+	const bool double_h = (flags & GFX_DBL_H) > 0;
+	const bool double_w = (flags & GFX_DBL_W) > 0;
 
 	LOG_MSG("MAIN: Draw resolution: %dx%d,%s%s pixel aspect ratio: %#.2f",
 	        sdl.draw.width, sdl.draw.height,
-	        sdl.double_w ? " double-width," : "",
-	        sdl.double_h ? " double-height," : "",
+	        (double_w ? " double-width," : ""),
+	        (double_h ? " double-height," : ""),
 	        pixel_aspect);
 
 	switch (sdl.desktop.want_type) {
@@ -1282,17 +1280,13 @@ dosurface:
 		// No borders
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
-		if(
-			sdl.scaling_mode != SmNone || (
-				sdl.clip.h % height == 0 &&
-				sdl.clip.w % width  == 0 )
-		) {
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		} else {
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		}
+
+		const bool use_nearest = (sdl.scaling_mode != SCALING_MODE::NONE) ||
+		                         ((sdl.clip.h % height == 0) &&
+		                          (sdl.clip.w % width == 0));
+		const GLint filter = (use_nearest ? GL_NEAREST : GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
 
 		Bit8u* emptytex = new Bit8u[texsize * texsize * 4];
 		memset((void*) emptytex, 0, texsize * texsize * 4);
@@ -2039,7 +2033,7 @@ static SDL_Rect calc_viewport_pp(int win_width, int win_height)
 
 static SDL_Rect calc_viewport(int width, int height)
 {
-	if (sdl.scaling_mode == SmPerfect)
+	if (sdl.scaling_mode == SCALING_MODE::PERFECT)
 		return calc_viewport_pp(width, height);
 	else
 		return calc_viewport_fit(width, height);
@@ -2048,16 +2042,18 @@ static SDL_Rect calc_viewport(int width, int height)
 //extern void UI_Run(bool);
 void Restart(bool pressed);
 
-static void GUI_StartUp(Section * sec) {
+static void GUI_StartUp(Section *sec)
+{
 	sec->AddDestroyFunction(&GUI_ShutDown);
-	Section_prop * section=static_cast<Section_prop *>(sec);
-	sdl.active=false;
-	sdl.updating=false;
-	sdl.resizing_window = false;
+	Section_prop *section = static_cast<Section_prop *>(sec);
+
+	sdl.active = false;
+	sdl.updating = false;
 	sdl.update_display_contents = true;
+	sdl.resizing_window = false;
+	sdl.wait_on_error = section->Get_bool("waitonerror");
 
 	sdl.desktop.fullscreen=section->Get_bool("fullscreen");
-	sdl.wait_on_error=section->Get_bool("waitonerror");
 
 	Prop_multival* p=section->Get_multival("priority");
 	std::string focus = p->GetSection()->Get_string("active");
@@ -2126,29 +2122,29 @@ static void GUI_StartUp(Section * sec) {
 		sdl.desktop.want_type=SCREEN_SURFACE;
 	} else if (output == "texture") {
 		sdl.desktop.want_type=SCREEN_TEXTURE;
-		sdl.scaling_mode = SmNone;
+		sdl.scaling_mode = SCALING_MODE::NONE;
 		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
 	} else if (output == "texturenb") {
 		sdl.desktop.want_type=SCREEN_TEXTURE;
-		sdl.scaling_mode = SmNearest;
+		sdl.scaling_mode = SCALING_MODE::NEAREST;
 		// Currently the default, but... oh well
 		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
 	} else if (output == "texturepp") {
 		sdl.desktop.want_type=SCREEN_TEXTURE;
-		sdl.scaling_mode = SmPerfect;
+		sdl.scaling_mode = SCALING_MODE::PERFECT;
 		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
 #if C_OPENGL
 	} else if (output == "opengl") {
 		sdl.desktop.want_type=SCREEN_OPENGL;
-		sdl.scaling_mode = SmNone;
+		sdl.scaling_mode = SCALING_MODE::NONE;
 		sdl.opengl.bilinear = true;
 	} else if (output == "openglnb") {
 		sdl.desktop.want_type=SCREEN_OPENGL;
-		sdl.scaling_mode = SmNearest;
+		sdl.scaling_mode = SCALING_MODE::NEAREST;
 		sdl.opengl.bilinear = false;
 	} else if (output == "openglpp") {
 		sdl.desktop.want_type = SCREEN_OPENGL;
-		sdl.scaling_mode = SmPerfect;
+		sdl.scaling_mode = SCALING_MODE::PERFECT;
 		sdl.opengl.bilinear = false;
 #endif
 	} else {
@@ -2242,7 +2238,7 @@ static void GUI_StartUp(Section * sec) {
 
 	// FIXME the code updated sdl.desktop.bpp in here (has effect in setting up scalers)
 
-	SDL_SetWindowTitle(sdl.window, "dosbox-staging");
+	SDL_SetWindowTitle(sdl.window, "DOSBox Staging");
 	SetIcon();
 
 	const bool tiny_fullresolution = splash_image.width > sdl.desktop.full.width ||
@@ -2363,9 +2359,10 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
 	}
 }
 
-void GFX_LosingFocus(void) {
-	sdl.laltstate=SDL_KEYUP;
-	sdl.raltstate=SDL_KEYUP;
+void GFX_LosingFocus()
+{
+	sdl.laltstate = SDL_KEYUP;
+	sdl.raltstate = SDL_KEYUP;
 	MAPPER_LosingFocus();
 }
 
@@ -3221,9 +3218,6 @@ int main(int argc, char* argv[]) {
 	sdl.initialized = true;
 	// Once initialized, ensure we clean up SDL for all exit conditions
 	atexit(QuitSDL);
-
-	sdl.laltstate = SDL_KEYUP;
-	sdl.raltstate = SDL_KEYUP;
 
 	/* Parse configuration files */
 	std::string config_file, config_path, config_combined;

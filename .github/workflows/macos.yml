@@ -18,10 +18,10 @@ jobs:
         conf:
           - name: Clang
             flags: -c clang
-            max_warnings: 1
+            max_warnings: 0
           - name: GCC-9
             flags: -c gcc -v 9
-            max_warnings: 54
+            max_warnings: 2
     steps:
       - uses: actions/checkout@v2
       - name: Install C++ compiler and libraries
@@ -44,7 +44,7 @@ jobs:
       - name: Log environment
         run:  ./scripts/log-env.sh
       - name: Build
-        run:  ./scripts/build.sh --build-type Debug ${{ matrix.conf.flags }} --disable-fluidsynth
+        run:  ./scripts/build.sh --build-type Debug ${{ matrix.conf.flags }}
       - name: Summarize warnings
         env:
           MAX_WARNINGS: ${{ matrix.conf.max_warnings }}
@@ -94,11 +94,11 @@ jobs:
           git fetch --prune --unshallow
           export VERSION=$(git describe --abbrev=5)
           sed -i -e "s/AC_INIT(dosbox,git)/AC_INIT(dosbox,$VERSION)/" configure.ac
-          echo ::set-env name=VERSION::$VERSION
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
       - name: Build
         env:
           FLUIDSYNTH_CFLAGS: -I${{ github.workspace }}/contrib/static-fluidsynth/include
-          FLUIDSYNTH_LIBS: ${{ github.workspace }}/contrib/static-fluidsynth/lib/libfluidsynth.a -lm
+          FLUIDSYNTH_LIBS: ${{ github.workspace }}/contrib/static-fluidsynth/lib/libfluidsynth.a -lm -L/usr/local/Cellar/glib/$(pkg-config --modversion glib-2.0)/lib -L/usr/local/opt/gettext/lib -lgthread-2.0 -lglib-2.0 -lintl
           OPUSFILE_CFLAGS: -I${{ github.workspace }}/contrib/static-opus/include -I${{ github.workspace }}/contrib/static-opus/include/opus
           OPUSFILE_LIBS: ${{ github.workspace }}/contrib/static-opus/lib/libopusfile.a ${{ github.workspace }}/contrib/static-opus/lib/libogg.a ${{ github.workspace }}/contrib/static-opus/lib/libopus.a -lm
         run: |
@@ -137,7 +137,8 @@ jobs:
           # Inventory the brew dependencies residing in /usr/local
           gthread="/usr/local/opt/glib/lib/libgthread-2.0.0.dylib"
           glib="/usr/local/opt/glib/lib/libglib-2.0.0.dylib"
-          glib_cellar="/usr/local/Cellar/glib/2.66.0/lib/libglib-2.0.0.dylib"
+          glib_version="$(pkg-config --modversion glib-2.0)"
+          glib_cellar="/usr/local/Cellar/glib/$glib_version/lib/libglib-2.0.0.dylib"
           intl="/usr/local/opt/gettext/lib/libintl.8.dylib"
           pcre="/usr/local/opt/pcre/lib/libpcre.1.dylib"
 
@@ -219,7 +220,7 @@ jobs:
           set +x
           git fetch --unshallow
           VERSION=$(git describe --abbrev=4)
-          echo ::set-env name=VERSION::$VERSION
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
           NEWEST_TAG=$(git describe --abbrev=0)
           git log "$NEWEST_TAG..HEAD" > changelog-$VERSION.txt
       - uses: actions/upload-artifact@v2

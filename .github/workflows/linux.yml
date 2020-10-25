@@ -17,51 +17,51 @@ jobs:
       max-parallel: 3
       matrix:
         conf:
-          - name: GCC, Ubuntu 16.04
-            os: ubuntu-16.04
+          - name: Clang, Ubuntu 20.04
+            os: ubuntu-20.04
+            flags: -c clang -v 10
+            max_warnings: 2
+          - name: GCC, Ubuntu 20.04
+            os: ubuntu-20.04
             flags: -c gcc
-            config_flags: --disable-fluidsynth
-            max_warnings: 52
+            max_warnings: 2
           - name: GCC, Ubuntu 18.04
             os: ubuntu-18.04
             flags: -c gcc
             config_flags: --disable-fluidsynth
-            max_warnings: 54
-          - name: GCC, Ubuntu 20.04
-            os: ubuntu-20.04
+            max_warnings: 2
+          - name: GCC, Ubuntu 16.04
+            os: ubuntu-16.04
             flags: -c gcc
-            max_warnings: 54
-          - name: Clang, Ubuntu 20.04
-            os: ubuntu-20.04
-            flags: -c clang -v 10
-            max_warnings: 3
-          - name: Ubuntu, +tests
+            config_flags: --disable-fluidsynth
+            max_warnings: 0
+          - name: GCC, +tests
             os: ubuntu-20.04
             config_flags: --enable-tests
             add_packages: libgtest-dev
             flags: -c gcc
             run_tests: true
             max_warnings: -1
-          - name: Ubuntu, +debug
+          - name: GCC, +debug
             os: ubuntu-20.04
             flags: -c gcc
             config_flags: --enable-debug
-            max_warnings: 164
-          - name: Ubuntu, +dynrec, -dyn_x86
+            max_warnings: 109
+          - name: GCC, +dynrec, -dyn_x86
             os: ubuntu-20.04
             flags: -c gcc
             config_flags: --disable-dynamic-x86
-            max_warnings: 54
-          - name: Ubuntu, +dynrec, +debug, -dyn_x86
+            max_warnings: 2
+          - name: GCC, +dynrec, +debug, -dyn_x86
             os: ubuntu-20.04
             flags: -c gcc
             config_flags: --disable-dynamic-x86 --enable-debug
-            max_warnings: 198
-          - name: Ubuntu, -network
+            max_warnings: 146
+          - name: GCC, -network
             os: ubuntu-20.04
             flags: -c gcc
             config_flags: --disable-network
-            max_warnings: 52
+            max_warnings: 2
 
     steps:
       - uses: actions/checkout@v2
@@ -128,7 +128,7 @@ jobs:
           git fetch --prune --unshallow
           export VERSION=$(git describe --abbrev=4)
           sed -i "s/AC_INIT(dosbox,git)/AC_INIT(dosbox,$VERSION)/" configure.ac
-          echo ::set-env name=VERSION::$VERSION
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
       - name: Build
         env:
           AR: gcc-ar
@@ -227,7 +227,7 @@ jobs:
           set +x
           git fetch --unshallow
           VERSION=$(git describe --abbrev=4)
-          echo ::set-env name=VERSION::$VERSION
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
           NEWEST_TAG=$(git describe --abbrev=0)
           git log "$NEWEST_TAG..HEAD" > changelog-$VERSION.txt
       - uses: actions/upload-artifact@v2

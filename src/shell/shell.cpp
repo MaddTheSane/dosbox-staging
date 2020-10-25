@@ -25,9 +25,9 @@
 #include "callback.h"
 #include "control.h"
 #include "dosbox.h"
+#include "fs_utils.h"
 #include "regs.h"
 #include "support.h"
-
 
 Bitu call_shellstop;
 /* Larger scope so shell_del autoexec can use it to
@@ -516,7 +516,8 @@ public:
 					if(!name) continue;
 				}
 				*name++ = 0;
-				if (access(buffer,F_OK)) continue;
+				if (!path_exists(buffer))
+					continue;
 				autoexec[12].Install(std::string("MOUNT C \"") + buffer + "\"");
 				autoexec[13].Install("C:");
 				/* Save the non-modified filename (so boot and imgmount can use it (long filenames, case sensivitive)) */
@@ -662,7 +663,7 @@ void SHELL_Init() {
 		"\033[44;1m\xC9\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD"
 		"\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD"
 		"\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xBB\n"
-		"\xBA \033[32mWelcome to dosbox-staging %-40s\033[37m \xBA\n"
+		"\xBA \033[32mWelcome to DOSBox Staging %-40s\033[37m \xBA\n"
 		"\xBA                                                                    \xBA\n"
 //		"\xBA DOSBox runs real and protected mode games.                         \xBA\n"
 		"\xBA For a short introduction for new users type: \033[33mINTRO\033[37m                 \xBA\n"
@@ -769,7 +770,7 @@ void SHELL_Init() {
 	        "VER SET version_number\n"
 	        "VER SET major_version [minor_version]\n");
 	MSG_Add("SHELL_CMD_VER_VER",
-	        "dosbox-staging version %s. Reported DOS version %d.%02d.\n");
+	        "DOSBox Staging version %s. Reported DOS version %d.%02d.\n");
 	MSG_Add("SHELL_CMD_VER_INVALID", "The specified DOS version is not correct.\n");
 
 	/* Regular startup */
