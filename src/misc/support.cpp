@@ -54,6 +54,12 @@ uint8_t drive_index(char drive)
 	return static_cast<uint8_t>(drive_letter - 'A');
 }
 
+char drive_letter(uint8_t index)
+{
+	assert(index <= 26);
+	return 'A' + index;
+}
+
 std::string get_basename(const std::string &filename)
 {
 	// Guard against corner cases: '', '/', '\', 'a'
@@ -82,22 +88,6 @@ void upcase(std::string &str) {
 void lowcase(std::string &str) {
 	int (*tf)(int) = std::tolower;
 	std::transform(str.begin(), str.end(), str.begin(), tf);
-}
-
-bool starts_with(const std::string &prefix, const std::string &str) noexcept
-{
-	const size_t n = prefix.length();
-	const auto pfx = std::cbegin(prefix);
-	const auto txt = std::cbegin(str);
-	return std::equal(pfx, pfx + n, txt, txt + n);
-}
-
-bool ends_with(const std::string &suffix, const std::string &str) noexcept
-{
-	const size_t n = suffix.length();
-	const auto sfx = std::crbegin(suffix);
-	const auto txt = std::crbegin(str);
-	return std::equal(sfx, sfx + n, txt, txt + n);
 }
 
 bool is_executable_filename(const std::string &filename) noexcept

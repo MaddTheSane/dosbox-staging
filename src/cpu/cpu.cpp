@@ -2000,18 +2000,31 @@ bool CPU_CPUID(void) {
 		reg_edx='i' | ('n' << 8) | ('e' << 16) | ('I'<< 24); 
 		reg_ecx='n' | ('t' << 8) | ('e' << 16) | ('l'<< 24); 
 		break;
-	case 1:	/* get processor type/family/model/stepping and feature flags */
-		if ((CPU_ArchitectureType==CPU_ARCHTYPE_486NEWSLOW) ||
-			(CPU_ArchitectureType==CPU_ARCHTYPE_MIXED)) {
-			reg_eax=0x402;		/* intel 486dx */
-			reg_ebx=0;			/* Not Supported */
-			reg_ecx=0;			/* No features */
-			reg_edx=0x00000001;	/* FPU */
-		} else if (CPU_ArchitectureType==CPU_ARCHTYPE_PENTIUMSLOW) {
-			reg_eax=0x513;		/* intel pentium */
-			reg_ebx=0;			/* Not Supported */
-			reg_ecx=0;			/* No features */
-			reg_edx=0x00000011;	/* FPU+TimeStamp/RDTSC */
+	case 1: // Get processor type/family/model/stepping and feature flags
+		if ((CPU_ArchitectureType == CPU_ARCHTYPE_486NEWSLOW) ||
+		    (CPU_ArchitectureType == CPU_ARCHTYPE_MIXED)) {
+#if (C_FPU)
+			reg_eax = 0x402; // Intel 486DX
+			reg_edx = 0x1;   // FPU
+#else
+			reg_eax = 0x422; // Intel 486SX
+			reg_edx = 0x0;   // no FPU
+#endif
+			reg_ebx = 0;     // Not supported
+			reg_ecx = 0;     // No features
+		} else if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUMSLOW) {
+#if (C_FPU)
+			reg_eax = 0x517; // Intel Pentium P5 60/66 MHz D1-step
+			reg_edx = 0x11;  // FPU + Time Stamp Counter (RDTSC)
+#else
+			// All Pentiums had FPU built-in, so when FPU is
+			// disabled, we pretend to have early Pentium model with
+			// FDIV bug present.
+			reg_eax = 0x513; // Intel Pentium P5 60/66 MHz B1-step
+			reg_edx = 0x10;  // Time Stamp Counter (RDTSC)
+#endif
+			reg_ebx = 0;     // Not supported
+			reg_ecx = 0;     // No features
 		} else {
 			return false;
 		}
@@ -2210,8 +2223,10 @@ public:
 #elif (C_DYNREC)
 		CPU_Core_Dynrec_Init();
 #endif
-		MAPPER_AddHandler(CPU_CycleDecrease,MK_f11,MMOD1,"cycledown","Dec Cycles");
-		MAPPER_AddHandler(CPU_CycleIncrease,MK_f12,MMOD1,"cycleup"  ,"Inc Cycles");
+		MAPPER_AddHandler(CPU_CycleDecrease, SDL_SCANCODE_F11, MMOD1,
+		                  "cycledown", "Dec Cycles");
+		MAPPER_AddHandler(CPU_CycleIncrease, SDL_SCANCODE_F12, MMOD1,
+		                  "cycleup", "Inc Cycles");
 		Change_Config(configuration);	
 		CPU_JMP(false,0,0,0);					//Setup the first cpu core
 	}

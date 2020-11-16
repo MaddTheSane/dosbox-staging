@@ -241,7 +241,6 @@ public:
 		//--End of modifications
 		/* If device = "default" go for first handler that works */
 		MidiHandler * handler;
-//		MAPPER_AddHandler(MIDI_SaveRawEvent,MK_f8,MMOD1|MMOD2,"caprawmidi","Cap MIDI");
         //Disabled 2011-09-30 by Alun Bestor: Boxer now handles sysex delays itself
 		/*
 		midi.sysex.delay = 0;

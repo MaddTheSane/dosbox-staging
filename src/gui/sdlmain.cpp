@@ -44,21 +44,23 @@
 #include <SDL_opengl.h>
 #endif
 
-#include "cross.h"
-#include "video.h"
-#include "mouse.h"
-#include "joystick.h"
-#include "pic.h"
-#include "timer.h"
-#include "setup.h"
-#include "support.h"
-#include "debug.h"
-#include "mapper.h"
-#include "vga.h"
-#include "keyboard.h"
-#include "cpu.h"
 #include "control.h"
+#include "cpu.h"
+#include "cross.h"
+#include "debug.h"
+#include "gui_msgs.h"
+#include "joystick.h"
+#include "keyboard.h"
+#include "mapper.h"
+#include "mouse.h"
+#include "pic.h"
 #include "render.h"
+#include "setup.h"
+#include "string_utils.h"
+#include "support.h"
+#include "timer.h"
+#include "vga.h"
+#include "video.h"
 
 #include "../libs/ppscale/ppscale.h"
 
@@ -353,19 +355,6 @@ static SDL_Rect calc_viewport(int width, int height);
 
 static void CleanupSDLResources();
 static void HandleVideoResize(int width, int height);
-
-static constexpr char version_msg[] = R"(dosbox (dosbox-staging), version %s
-Copyright (C) 2020 The dosbox-staging team.
-License GPLv2+: GNU GPL version 2 or later <https://www.gnu.org/licenses/gpl-2.0.html>
-
-This is free software, and you are welcome to change and redistribute it
-under certain conditions; please read the COPYING file thoroughly before
-doing so.  There is NO WARRANTY, to the extent permitted by law.
-
-This program (dosbox-staging) is modified version of DOSBox.
-Copyright (C) 2020 The DOSBox Team, published under GNU GPLv2+
-Read AUTHORS file for more details.
-)";
 
 #if C_OPENGL
 static char const shader_src_default[] = R"GLSL(
@@ -2152,6 +2141,12 @@ static void GUI_StartUp(Section *sec)
 		sdl.desktop.want_type=SCREEN_SURFACE;//SHOULDN'T BE POSSIBLE anymore
 	}
 
+	const std::string screensaver = section->Get_string("screensaver");
+	if (screensaver == "allow")
+		SDL_EnableScreenSaver();
+	if (screensaver == "block")
+		SDL_DisableScreenSaver();
+
 	sdl.texture.texture = 0;
 	sdl.texture.pixelFormat = 0;
 	sdl.render_driver = section->Get_string("texture_renderer");
@@ -2283,7 +2278,8 @@ static void GUI_StartUp(Section *sec)
 
 	// Only setup the Ctrl+F10 handler if the mouse is capturable
 	if (sdl.mouse.control_choice & (CaptureOnStart | CaptureOnClick)) {
-		MAPPER_AddHandler(ToggleMouseCapture,MK_f10,MMOD1,"capmouse","Cap Mouse");
+		MAPPER_AddHandler(ToggleMouseCapture, SDL_SCANCODE_F10, MMOD1,
+		                  "capmouse", "Cap Mouse");
 	}
 
 	// Apply the user's mouse sensitivity settings
@@ -2297,13 +2293,17 @@ static void GUI_StartUp(Section *sec)
 	                        SDL_HINT_OVERRIDE);
 
 	/* Get some Event handlers */
-	MAPPER_AddHandler(KillSwitch,MK_f9,MMOD1,"shutdown","ShutDown");
-	MAPPER_AddHandler(SwitchFullScreen,MK_return,MMOD2,"fullscr","Fullscreen");
-	MAPPER_AddHandler(Restart,MK_home,MMOD1|MMOD2,"restart","Restart");
+	MAPPER_AddHandler(KillSwitch, SDL_SCANCODE_F9, MMOD1,
+	                  "shutdown", "Shutdown");
+	MAPPER_AddHandler(SwitchFullScreen, SDL_SCANCODE_RETURN, MMOD2,
+	                  "fullscr", "Fullscreen");
+	MAPPER_AddHandler(Restart, SDL_SCANCODE_HOME, MMOD1 | MMOD2,
+	                  "restart", "Restart");
 #if C_DEBUG
 	/* Pause binds with activate-debugger */
 #else
-	MAPPER_AddHandler(&PauseDOSBox, MK_pause, MMOD2, "pause", "Pause DBox");
+	MAPPER_AddHandler(&PauseDOSBox, SDL_SCANCODE_PAUSE, MMOD2,
+	                  "pause", "Pause Emu.");
 #endif
 	/* Get Keyboard state of numlock and capslock */
 	SDL_Keymod keystate = SDL_GetModState();
@@ -2911,6 +2911,14 @@ void Config_Add_SDL() {
 	pstring = sdl_sec->Add_path("mapperfile", always, MAPPERFILE);
 	pstring->Set_help("File used to load/save the key/event mappings from.\n"
 	                  "Resetmapper only works with the default value.");
+
+	pstring = sdl_sec->Add_string("screensaver", on_start, "auto");
+	pstring->Set_help(
+	        "Use 'allow' or 'block' to override the SDL_VIDEO_ALLOW_SCREENSAVER\n"
+	        "environment variable (which usually blocks the OS screensaver\n"
+	        "while the emulator is running).");
+	const char *ssopts[] = {"auto", "allow", "block", 0};
+	pstring->Set_values(ssopts);
 }
 
 static void show_warning(char const * const message) {
@@ -3191,8 +3199,16 @@ int main(int argc, char* argv[]) {
 #endif  //defined(WIN32) && !(C_DEBUG)
 
 		if (control->cmdline->FindExist("--version") ||
-		    control->cmdline->FindExist("-version")) {
+		    control->cmdline->FindExist("-version") ||
+		    control->cmdline->FindExist("-v")) {
 			printf(version_msg, VERSION);
+			return 0;
+		}
+
+		//If command line includes --help or -h, print help message and exit.
+		if (control->cmdline->FindExist("--help") ||
+		    control->cmdline->FindExist("-h")) {
+			printf(help_msg); // -V618
 			return 0;
 		}
 

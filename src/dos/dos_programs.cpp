@@ -25,21 +25,23 @@
 #include <string>
 #include <vector>
 
-#include "support.h"
-#include "drives.h"
-#include "cross.h"
-#include "regs.h"
+#include "bios_disk.h"
+#include "bios.h"
 #include "callback.h"
 #include "cdrom.h"
-#include "dos_system.h"
-#include "bios.h"
-#include "bios_disk.h"
-#include "setup.h"
 #include "control.h"
-#include "inout.h"
+#include "cross.h"
 #include "dma.h"
-#include "shell.h"
+#include "dos_system.h"
+#include "drives.h"
+#include "fs_utils.h"
+#include "inout.h"
 #include "program_autotype.h"
+#include "program_ls.h"
+#include "regs.h"
+#include "setup.h"
+#include "shell.h"
+#include "support.h"
 
 #if defined(WIN32)
 #ifndef S_ISDIR
@@ -198,7 +200,7 @@ public:
 		}
 
 		if (cmd->FindExist("-cd", false)) {
-   			WriteOut(MSG_Get("PROGRAM_MOUNT_NO_OPTION"), "-cd");
+			WriteOut(MSG_Get("PROGRAM_MOUNT_NO_OPTION"), "-cd");
 			return;
 		}
 
@@ -299,23 +301,33 @@ public:
 					temp_line = lastconfigdir + CROSS_FILESPLIT + temp_line;
 				}
 			}
-			struct stat test;
-			//Win32 : strip tailing backslashes
-			//rest: substitute ~ for home
-			bool failed = false;
-#if defined (WIN32)
-			/* Removing trailing backslash if not root dir so stat will succeed */
-			if (temp_line.size() > 3 && temp_line[temp_line.size() - 1]=='\\') temp_line.erase(temp_line.size() - 1, 1);
-			if (stat(temp_line.c_str(),&test)) {
-#else
-			if (stat(temp_line.c_str(),&test)) {
-				failed = true;
-				Cross::ResolveHomedir(temp_line);
-				//Try again after resolving ~
-				if (!stat(temp_line.c_str(),&test)) failed = false;
-			}
-			if (failed) {
+
+#if defined(WIN32)
+			/* Removing trailing backslash if not root dir so stat
+			 * will succeed */
+			if (temp_line.size() > 3 && temp_line.back() == '\\')
+				temp_line.pop_back();
 #endif
+
+			const std::string real_path = to_native_path(temp_line);
+			if (real_path.empty()) {
+				LOG_MSG("MOUNT: Path '%s' not found", temp_line.c_str());
+			} else {
+				std::string home_resolve = temp_line;
+				Cross::ResolveHomedir(home_resolve);
+				if (home_resolve == real_path) {
+					LOG_MSG("MOUNT: Path '%s' found",
+					        temp_line.c_str());
+				} else {
+					LOG_MSG("MOUNT: Path '%s' found, while looking for '%s'",
+					        real_path.c_str(),
+					        temp_line.c_str());
+				}
+				temp_line = real_path;
+			}
+
+			struct stat test;
+			if (stat(temp_line.c_str(),&test)) {
 				WriteOut(MSG_Get("PROGRAM_MOUNT_ERROR_1"),temp_line.c_str());
 				return;
 			}
@@ -1294,7 +1306,26 @@ public:
 
 		// find all file parameters, assuming that all option parameters have been removed
 		while (cmd->FindCommand((unsigned int)(paths.size() + 2), temp_line) && temp_line.size()) {
+			// Try to find the path on native filesystem first
+			const std::string real_path = to_native_path(temp_line);
+			if (real_path.empty()) {
+				LOG_MSG("IMGMOUNT: Path '%s' not found, maybe it's a DOS path",
+				        temp_line.c_str());
+			} else {
+				std::string home_resolve = temp_line;
+				Cross::ResolveHomedir(home_resolve);
+				if (home_resolve == real_path) {
+					LOG_MSG("IMGMOUNT: Path '%s' found",
+					        temp_line.c_str());
+				} else {
+					LOG_MSG("IMGMOUNT: Path '%s' found, while looking for '%s'",
+					        real_path.c_str(),
+					        temp_line.c_str());
+				}
+				temp_line = real_path;
+			}
 
+			// Test if input is file on virtual DOS drive.
 			struct stat test;
 			if (stat(temp_line.c_str(),&test)) {
 				//See if it works if the ~ are written out
@@ -1326,6 +1357,9 @@ public:
 						WriteOut(MSG_Get("PROGRAM_IMGMOUNT_FILE_NOT_FOUND"));
 						return;
 					}
+
+					LOG_MSG("IMGMOUNT: Path '%s' found on virtual drive %c:",
+					        fullname, drive_letter(dummy));
 				}
 			}
 			if (S_ISDIR(test.st_mode)) {
@@ -1657,11 +1691,9 @@ void DOS_SetupPrograms(void) {
 		"https://github.com/dosbox-staging/dosbox-staging/wiki\033[0m\n"
 		"\n"
 		"\033[31;1mDOSBox will stop/exit without a warning if an error occurred!\033[0m\n"
-		"\n"
-		"\n"
 		);
 	MSG_Add("PROGRAM_INTRO_MOUNT_START",
-		"\033[32;1mHere are some commands to get you started:\033[0m\n"
+		"\033[2J\033[32;1mHere are some commands to get you started:\033[0m\n"
 		"Before you can use the files located on your own filesystem,\n"
 		"You have to mount the directory containing the files.\n"
 		"\n"
@@ -1717,21 +1749,17 @@ void DOS_SetupPrograms(void) {
 		"These are the default keybindings.\n"
 		"They can be changed in the \033[33mkeymapper\033[0m.\n"
 		"\n"
-		"\033[33;1mALT-ENTER\033[0m   : Go full screen and back.\n"
-		"\033[33;1mALT-PAUSE\033[0m   : Pause DOSBox.\n"
+		"\033[33;1mALT-ENTER\033[0m   : Switch between fullscreen and window mode.\n"
+		"\033[33;1mALT-PAUSE\033[0m   : Pause/Unpause emulator.\n"
 		"\033[33;1mCTRL-F1\033[0m     : Start the \033[33mkeymapper\033[0m.\n"
-		"\033[33;1mCTRL-F4\033[0m     : Update directory cache for all drives! Swap mounted disk-image.\n"
-		"\033[33;1mCTRL-ALT-F5\033[0m : Start/Stop creating a movie of the screen.\n"
+		"\033[33;1mCTRL-F4\033[0m     : Swap mounted disk image, update directory cache for all drives.\n"
 		"\033[33;1mCTRL-F5\033[0m     : Save a screenshot.\n"
 		"\033[33;1mCTRL-F6\033[0m     : Start/Stop recording sound output to a wave file.\n"
-		"\033[33;1mCTRL-ALT-F7\033[0m : Start/Stop recording of OPL commands.\n"
-		"\033[33;1mCTRL-ALT-F8\033[0m : Start/Stop the recording of raw MIDI commands.\n"
-		"\033[33;1mCTRL-F7\033[0m     : Decrease frameskip.\n"
-		"\033[33;1mCTRL-F8\033[0m     : Increase frameskip.\n"
-		"\033[33;1mCTRL-F9\033[0m     : Kill DOSBox.\n"
+		"\033[33;1mCTRL-F7\033[0m     : Start/Stop recording video output to a zmbv file.\n"
+		"\033[33;1mCTRL-F9\033[0m     : Shutdown emulator.\n"
 		"\033[33;1mCTRL-F10\033[0m    : Capture/Release the mouse.\n"
-		"\033[33;1mCTRL-F11\033[0m    : Slow down emulation (Decrease DOSBox Cycles).\n"
-		"\033[33;1mCTRL-F12\033[0m    : Speed up emulation (Increase DOSBox Cycles).\n"
+		"\033[33;1mCTRL-F11\033[0m    : Slow down emulation.\n"
+		"\033[33;1mCTRL-F12\033[0m    : Speed up emulation.\n"
 		"\033[33;1mALT-F12\033[0m     : Unlock speed (turbo button/fast forward).\n"
 		);
 	MSG_Add("PROGRAM_BOOT_NOT_EXIST","Bootdisk file does not exist.  Failing.\n");
@@ -1780,7 +1808,7 @@ void DOS_SetupPrograms(void) {
 	        "  \033[36;1mBOOTIMAGE\033[0m is a bootable disk image with specified -size GEOMETRY:\n"
 	        "            bytes-per-sector,sectors-per-head,heads,cylinders\n"
 	        "Notes:\n"
-	        "  - Image paths and filenames are case-sensitive and either relative or\n"
+	        "  - Image paths and filenames are case-insensitive and either relative or\n"
 	        "    absolute with respect to dosbox's current-working directory.\n"
 	        "  - Ctrl+F4 swaps & mounts the next CDROM-SET or IMAGEFILE, if provided.\n"
 	        "Examples:\n"
@@ -1823,7 +1851,7 @@ void DOS_SetupPrograms(void) {
 	        "  LABEL     drive label name to be used\n"
 	        "\n"
 	        "Notes:\n"
-	        "  - \033[36;1mDIRECTORY\033[0m is case-sensitive path, relative or absolute with respect to\n"
+	        "  - \033[36;1mDIRECTORY\033[0m is case-insensitive path, relative or absolute with respect to\n"
 	        "    dosbox's current-working directory.\n"
 	        "  - '-t overlay' redirects writes for mounted drive to another directory.\n"
 	        "  - Additional options are described in the manual (README file, chapter 4).\n"
@@ -1884,21 +1912,20 @@ void DOS_SetupPrograms(void) {
 	MSG_Add("PROGRAM_KEYB_LAYOUTNOTFOUND","No layout in %s for codepage %i\n");
 	MSG_Add("PROGRAM_KEYB_INVCPFILE","None or invalid codepage file for layout %s\n\n");
 
-	/*regular setup*/
 	PROGRAMS_MakeFile("AUTOTYPE.COM", AUTOTYPE_ProgramStart);
-	PROGRAMS_MakeFile("MOUNT.COM",MOUNT_ProgramStart);
-	PROGRAMS_MakeFile("MEM.COM",MEM_ProgramStart);
-	PROGRAMS_MakeFile("LOADFIX.COM",LOADFIX_ProgramStart);
-	PROGRAMS_MakeFile("RESCAN.COM",RESCAN_ProgramStart);
-    //--Disabled 2012-01-06 by Alun Bestor: Boxer no longer uses the INTRO command.
-	//PROGRAMS_MakeFile("INTRO.COM",INTRO_ProgramStart);
-    //--End of modifications
-	PROGRAMS_MakeFile("BOOT.COM",BOOT_ProgramStart);
 #if C_DEBUG
 	PROGRAMS_MakeFile("BIOSTEST.COM", BIOSTEST_ProgramStart);
 #endif
-	PROGRAMS_MakeFile("LOADROM.COM", LOADROM_ProgramStart);
+	PROGRAMS_MakeFile("BOOT.COM", BOOT_ProgramStart);
 	PROGRAMS_MakeFile("IMGMOUNT.COM", IMGMOUNT_ProgramStart);
+	//--Disabled 2012-01-06 by Alun Bestor: Boxer no longer uses the INTRO command.
+	//PROGRAMS_MakeFile("INTRO.COM", INTRO_ProgramStart);
+	//--End of modifications
 	PROGRAMS_MakeFile("KEYB.COM", KEYB_ProgramStart);
-
+	PROGRAMS_MakeFile("LOADFIX.COM", LOADFIX_ProgramStart);
+	PROGRAMS_MakeFile("LOADROM.COM", LOADROM_ProgramStart);
+	PROGRAMS_MakeFile("LS.COM", LS_ProgramStart);
+	PROGRAMS_MakeFile("MEM.COM", MEM_ProgramStart);
+	PROGRAMS_MakeFile("MOUNT.COM", MOUNT_ProgramStart);
+	PROGRAMS_MakeFile("RESCAN.COM", RESCAN_ProgramStart);
 }

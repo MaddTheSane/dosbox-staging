@@ -275,6 +275,7 @@
     <ClCompile Include="..\src\dos\drive_overlay.cpp" />
     <ClCompile Include="..\src\dos\drive_virtual.cpp" />
     <ClCompile Include="..\src\dos\program_autotype.cpp" />
+    <ClCompile Include="..\src\dos\program_ls.cpp" />
     <ClCompile Include="..\src\fpu\fpu.cpp" />
     <ClCompile Include="..\src\gui\render.cpp" />
     <ClCompile Include="..\src\gui\render_scalers.cpp" />
@@ -411,6 +412,7 @@
     <ClInclude Include="..\include\serialport.h" />
     <ClInclude Include="..\include\setup.h" />
     <ClInclude Include="..\include\shell.h" />
+    <ClInclude Include="..\include\string_utils.h" />
     <ClInclude Include="..\include\support.h" />
     <ClInclude Include="..\include\timer.h" />
     <ClInclude Include="..\include\vga.h" />
@@ -452,12 +454,11 @@
     <ClInclude Include="..\src\dos\cdrom.h" />
     <ClInclude Include="..\src\dos\dev_con.h" />
     <ClInclude Include="..\src\dos\dos_mscdex.h" />
-    <ClInclude Include="..\src\dos\Ntddcdrm.h" />
-    <ClInclude Include="..\src\dos\Ntddscsi.h" />
-    <ClInclude Include="..\src\dos\Ntddstor.h" />
     <ClInclude Include="..\src\dos\program_autotype.h" />
+    <ClInclude Include="..\src\dos\program_ls.h" />
     <ClInclude Include="..\src\fpu\fpu_instructions.h" />
     <ClInclude Include="..\src\fpu\fpu_instructions_x86.h" />
+    <ClInclude Include="..\src\gui\gui_msgs.h" />
     <ClInclude Include="..\src\gui\render_scalers.h" />
     <ClInclude Include="..\src\gui\render_templates.h" />
     <ClInclude Include="..\src\hardware\font-switch.h" />

@@ -1,5 +1,7 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2019-2020  The dosbox-staging team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,26 +18,22 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-#ifndef DOSBOX_TIMER_H
-#define DOSBOX_TIMER_H
+#ifndef DOSBOX_STRING_UTILS_H
+#define DOSBOX_STRING_UTILS_H
 
-/* underlying clock rate in HZ */
-//--Modified 2009-02-26 by Alun Bestor to change from <SDL.h>, which was the wrong notation for a locally-included file
-//#include "SDL.h"
-#include "SDL.h"
-//--End of modifications
+#include <cstring>
+#include <string>
 
-#define PIT_TICK_RATE 1193182
+template <size_t N>
+bool starts_with(const char (&pfx)[N], const char *str) noexcept
+{
+	return (strncmp(pfx, str, N - 1) == 0);
+}
 
-#define GetTicks() SDL_GetTicks()
-
-typedef void (*TIMER_TickHandler)(void);
-
-/* Register a function that gets called every time if 1 or more ticks pass */
-void TIMER_AddTickHandler(TIMER_TickHandler handler);
-void TIMER_DelTickHandler(TIMER_TickHandler handler);
-
-/* This will add 1 milliscond to all timers */
-void TIMER_AddTick(void);
+template <size_t N>
+bool starts_with(const char (&pfx)[N], const std::string &str) noexcept
+{
+	return (strncmp(pfx, str.c_str(), N - 1) == 0);
+}
 
 #endif

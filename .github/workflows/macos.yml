@@ -21,7 +21,7 @@ jobs:
             max_warnings: 0
           - name: GCC-9
             flags: -c gcc -v 9
-            max_warnings: 2
+            max_warnings: 0
     steps:
       - uses: actions/checkout@v2
       - name: Install C++ compiler and libraries
@@ -48,7 +48,7 @@ jobs:
       - name: Summarize warnings
         env:
           MAX_WARNINGS: ${{ matrix.conf.max_warnings }}
-        run:  python3 ./scripts/count-warnings.py -f build.log
+        run:  python3 ./scripts/count-warnings.py -lf build.log
 
   build_macos_release:
     name: Release build
@@ -138,7 +138,7 @@ jobs:
           gthread="/usr/local/opt/glib/lib/libgthread-2.0.0.dylib"
           glib="/usr/local/opt/glib/lib/libglib-2.0.0.dylib"
           glib_version="$(pkg-config --modversion glib-2.0)"
-          glib_cellar="/usr/local/Cellar/glib/$glib_version/lib/libglib-2.0.0.dylib"
+          glib_cellar="/usr/local/Cellar/glib/${glib_version}_1/lib/libglib-2.0.0.dylib"
           intl="/usr/local/opt/gettext/lib/libintl.8.dylib"
           pcre="/usr/local/opt/pcre/lib/libpcre.1.dylib"
 

@@ -341,15 +341,24 @@ class Capture {
 	void WriteCache( void  ) {
 		Bitu i, val;
 		/* Check the registers to add */
-		for (i=0;i<256;i++) {
-			//Skip the note on entries
-			if (i>=0xb0 && i<=0xb8) 
-				continue;
+		for (i = 0;i < 256;i++) {
 			val = (*cache)[ i ];
+			//Silence the note on entries
+			if (i >= 0xb0 && i <= 0xb8) {
+				val &= ~0x20;
+			}
+			if (i == 0xbd) {
+				val &= ~0x1f;
+			}
+
 			if (val) {
 				AddWrite( i, val );
 			}
 			val = (*cache)[ 0x100 + i ];
+
+			if (i >= 0xb0 && i <= 0xb8) {
+				val &= ~0x20;
+			}
 			if (val) {
 				AddWrite( 0x100 + i, val );
 			}
@@ -605,7 +614,7 @@ void Module::PortWrite( Bitu port, Bitu val, Bitu iolen ) {
 					break;
 				}
 			}
-			//Fall-through if not handled by control chip
+			FALLTHROUGH;
 		case MODE_OPL2:
 		case MODE_OPL3:
 			if ( !chip[0].Write( reg.normal, val ) ) {
@@ -645,7 +654,7 @@ void Module::PortWrite( Bitu port, Bitu val, Bitu iolen ) {
 					break;
 				}
 			}
-			//Fall-through if not handled by control chip
+			FALLTHROUGH;
 		case MODE_OPL3:
 			reg.normal = handler->WriteAddr( port, val ) & 0x1ff;
 			break;
@@ -688,7 +697,7 @@ Bitu Module::PortRead( Bitu port, Bitu iolen ) {
 				return CtrlRead();
 			}
 		}
-		//Fall-through if not handled by control chip
+		FALLTHROUGH;
 	case MODE_OPL3:
 		//We allocated 4 ports, so just return -1 for the higher ones
 		if ( !(port & 3 ) ) {
@@ -710,6 +719,7 @@ Bitu Module::PortRead( Bitu port, Bitu iolen ) {
 
 void Module::Init( Mode m ) {
 	mode = m;
+	memset(cache, 0, ARRAY_LEN(cache));
 	switch ( mode ) {
 	case MODE_OPL3:
 	case MODE_OPL3GOLD:
@@ -885,7 +895,8 @@ Module::Module(Section *configuration)
 	WriteHandler[2].Install(base+8,OPL_Write,IO_MB, 2);
 	ReadHandler[2].Install(base+8,OPL_Read,IO_MB, 1);
 
-	MAPPER_AddHandler(OPL_SaveRawEvent,MK_f7,MMOD1|MMOD2,"caprawopl","Cap OPL");
+	MAPPER_AddHandler(OPL_SaveRawEvent, SDL_SCANCODE_UNKNOWN, 0,
+	                  "caprawopl", "Rec. OPL");
 }
 
 Module::~Module() {
