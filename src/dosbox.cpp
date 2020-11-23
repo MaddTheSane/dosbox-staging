@@ -898,8 +898,8 @@ void DOSBOX_Init(void) {
 	Pstring = Pmulti_remain->GetSection()->Add_string("parameters",Property::Changeable::WhenIdle,"");
 	Pmulti_remain->Set_help("see serial1");
 
-	Pstring = secprop->Add_path("phonebookfile", Property::Changeable::OnlyAtStart, "phonebook-" VERSION ".txt");
-	Pstring->Set_help("File used to map fake phone numbers to addresses.");
+	pstring = secprop->Add_path("phonebookfile", only_at_start, "phonebook.txt");
+	pstring->Set_help("File used to map fake phone numbers to addresses.");
 
     //--Added 2012-10-19 by Alun Bestor to allow parallel port emulation
 	// parallel ports
