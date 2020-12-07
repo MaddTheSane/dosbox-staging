@@ -19,20 +19,18 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
 #include "dosbox.h"
 
 #include <array>
 #include <cassert>
+#include <cerrno>
 #include <cstdlib>
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <stdarg.h>
 #include <sys/types.h>
+#include <tuple>
 #include <math.h>
 #ifdef WIN32
 #include <signal.h>
@@ -48,6 +46,7 @@
 #include "cpu.h"
 #include "cross.h"
 #include "debug.h"
+#include "fs_utils.h"
 #include "gui_msgs.h"
 #include "joystick.h"
 #include "keyboard.h"
@@ -450,8 +449,8 @@ static int watch_sdl_events(void *userdata, SDL_Event *e)
 		if (win == (SDL_Window *)userdata) {
 			const int w = e->window.data1;
 			const int h = e->window.data2;
-			const int id = e->window.windowID;
-			DEBUG_LOG_MSG("SDL: Resizing window %d to %dx%d", id, w, h);
+			// const int id = e->window.windowID;
+			// DEBUG_LOG_MSG("SDL: Resizing window %d to %dx%d", id, w, h);
 			HandleVideoResize(w, h);
 		}
 	}
@@ -1899,7 +1898,21 @@ static std::string NormalizeConfValue(const char *val)
 	return pref;
 }
 
-static bool DetectResizableWindow()
+static std::string get_glshader_value()
+{
+#if C_OPENGL
+	assert(control);
+	const Section *rs = control->GetSection("render");
+	assert(rs);
+	return rs->GetPropValue("glshader");
+#else
+	return "";
+#endif // C_OPENGL
+}
+
+
+
+static bool detect_resizable_window()
 {
 #if C_OPENGL
 	if (sdl.desktop.want_type != SCREEN_OPENGL) {
@@ -1908,12 +1921,9 @@ static bool DetectResizableWindow()
 		return false;
 	}
 
-	assert(control);
-	const Section *rs = control->GetSection("render");
-	assert(rs);
-	const std::string sname = rs->GetPropValue("glshader");
+	const std::string sname = get_glshader_value();
 
-	if (sname != "sharp" && sname != "none") {
+	if (sname != "sharp" && sname != "none" && sname != "default") {
 		LOG_MSG("MAIN: Disabling resizable window, because it's not "
 		        "compatible with selected render.glshader\n"
 		        "MAIN: Use 'sharp' or 'none' to keep resizable window.");
@@ -1926,6 +1936,49 @@ static bool DetectResizableWindow()
 #endif // C_OPENGL
 }
 
+static bool detect_shader_fixed_size()
+{
+#if C_OPENGL
+	if (sdl.desktop.want_type != SCREEN_OPENGL)
+		return false;
+
+	const std::string sname = get_glshader_value();
+	return (sname == "crt-fakelottes-flat" || sname == "crt-easymode-flat");
+#else
+	return false;
+#endif // C_OPENGL
+}
+
+static SDL_Point detect_window_size()
+{
+	SDL_Rect bounds;
+	SDL_GetDisplayBounds(sdl.display_number, &bounds);
+	constexpr SDL_Point resolutions[] = {
+	        // TODO: these resolutions are disabled for now due to
+	        // compatibility with users using pixel-doubling on high-density
+	        // displays. For example: if we pick 1600x1200 window resolution
+	        // and OS scales it 2x it might end up being larger than really
+	        // available screen area. To fix this we need to avoid currently
+	        // used hacks for OS-level window scaling.
+	        //
+	        // {2560, 1920},
+	        // {2400, 1800},
+	        // {2048, 1536},
+	        // {1920, 1440},
+	        // {1600, 1200},
+	        {1280, 960},
+	        {1024, 768},
+	        {800, 600},
+	};
+	// Pick the biggest window size, that neatly fits in user's available
+	// screen area.
+	for (const auto &size : resolutions) {
+		if (bounds.w > size.x && bounds.h > size.y)
+			return size;
+	}
+	return {640, 480};
+}
+
 static void SetupWindowResolution(const char *val)
 {
 	assert(sdl.display_number >= 0);
@@ -1933,16 +1986,24 @@ static void SetupWindowResolution(const char *val)
 
 	if (pref == "default" || pref.empty()) {
 #if defined(LINUX)
-		sdl.desktop.want_resizable_window = DetectResizableWindow();
+		sdl.desktop.want_resizable_window = detect_resizable_window();
 #else
 		sdl.desktop.want_resizable_window = false;
 #endif
 		sdl.desktop.window.use_original_size = true;
+
+		if (!sdl.desktop.want_resizable_window &&
+		    detect_shader_fixed_size()) {
+			const auto ws = detect_window_size();
+			sdl.desktop.window.use_original_size = false;
+			sdl.desktop.window.width = ws.x;
+			sdl.desktop.window.height = ws.y;
+		}
 		return;
 	}
 
 	if (pref == "resizable") {
-		sdl.desktop.want_resizable_window = DetectResizableWindow();
+		sdl.desktop.want_resizable_window = detect_resizable_window();
 		sdl.desktop.window.use_original_size = true;
 		return;
 	}
@@ -3057,20 +3118,16 @@ static void launchcaptures(std::string const& edit) {
 	}
 	Cross::CreatePlatformConfigDir(path);
 	path += file;
-	Cross::CreateDir(path);
-	struct stat cstat;
-	if(stat(path.c_str(),&cstat) || (cstat.st_mode & S_IFDIR) == 0) {
-		printf("%s doesn't exists or isn't a directory.\n",path.c_str());
+
+	if (create_dir(path.c_str(), 0700, OK_IF_EXISTS) != 0) {
+		fprintf(stderr, "Can't access capture dir '%s': %s\n",
+		        path.c_str(), safe_strerror(errno).c_str());
 		exit(1);
 	}
-/*	if(edit.empty()) {
-		printf("no editor specified.\n");
-		exit(1);
-	}*/
 
 	execlp(edit.c_str(),edit.c_str(),path.c_str(),(char*) 0);
 	//if you get here the launching failed!
-	printf("can't find filemanager %s\n",edit.c_str());
+	fprintf(stderr, "can't find filemanager %s\n", edit.c_str());
 	exit(1);
 }
 
@@ -3236,8 +3293,9 @@ int main(int argc, char* argv[]) {
 	atexit(QuitSDL);
 
 	/* Parse configuration files */
-	std::string config_file, config_path, config_combined;
-	Cross::GetPlatformConfigDir(config_path);
+	std::string config_file, config_combined;
+
+	std::string config_path = CROSS_GetPlatformConfigDir();
 
 	//First parse -userconf
 	if(control->cmdline->FindExist("-userconf",true)){
@@ -3298,6 +3356,18 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
+#if C_OPENGL
+	const std::string glshaders_dir = config_path + "glshaders";
+	if (create_dir(glshaders_dir.c_str(), 0700, OK_IF_EXISTS) != 0)
+		LOG_MSG("CONFIG: Can't create dir '%s': %s",
+			glshaders_dir.c_str(), safe_strerror(errno).c_str());
+#endif // C_OPENGL
+#if C_FLUIDSYNTH
+	const std::string soundfonts_dir = config_path + "soundfonts";
+	if (create_dir(soundfonts_dir.c_str(), 0700, OK_IF_EXISTS) != 0)
+		LOG_MSG("CONFIG: Can't create dir '%s': %s",
+			soundfonts_dir.c_str(), safe_strerror(errno).c_str());
+#endif // C_FLUIDSYNTH
 
 #if (ENVIRON_LINKED)
 		control->ParseEnv(environ);

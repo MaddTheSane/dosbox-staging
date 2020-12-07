@@ -16,10 +16,11 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
+#include <cerrno>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+
 #include "dosbox.h"
 #include "hardware.h"
 #include "setup.h"
@@ -29,6 +30,7 @@
 #include "pic.h"
 #include "render.h"
 #include "cross.h"
+#include "fs_utils.h"
 
 #if (C_SSHOT)
 #include <png.h>
@@ -82,27 +84,31 @@ static struct {
 
 //Overridden 2014-11-30 by Alun Bestor to allow Boxer to decide where captured files should go and what they should be named.
 
-/*
+#if 0
 FILE * OpenCaptureFile(const char * type,const char * ext) {
 	if(capturedir.empty()) {
 		LOG_MSG("Please specify a capture directory");
 		return 0;
 	}
 
-	char file_start[16];
-	dir_information * dir;
-	// Find a filename to open
-	dir = open_directory(capturedir.c_str());
+	/* Find a filename to open */
+	dir_information *dir = open_directory(capturedir.c_str());
 	if (!dir) {
-		//Try creating it first
-		Cross::CreateDir(capturedir);
-		dir=open_directory(capturedir.c_str());
-		if(!dir) {
-		
-			LOG_MSG("Can't open dir %s for capturing %s",capturedir.c_str(),type);
+		// Try creating it first
+		if (create_dir(capturedir.c_str(), 0700, OK_IF_EXISTS) != 0) {
+			LOG_MSG("ERROR: Can't create dir '%s': %s",
+			        capturedir.c_str(), safe_strerror(errno).c_str());
+		}
+
+		dir = open_directory(capturedir.c_str());
+		if (!dir) {
+			LOG_MSG("ERROR: Can't open dir '%s' for capturing %s",
+			        capturedir.c_str(), type);
 			return 0;
 		}
 	}
+
+	char file_start[16];
 	safe_strcpy(file_start, RunningProgram);
 	lowcase(file_start);
 	strcat(file_start,"_");
@@ -133,7 +139,7 @@ FILE * OpenCaptureFile(const char * type,const char * ext) {
 	}
 	return handle;
 }
-*/
+#endif
 
 #if (C_SSHOT)
 static void CAPTURE_AddAviChunk(const char * tag, Bit32u size, void * data, Bit32u flags) {

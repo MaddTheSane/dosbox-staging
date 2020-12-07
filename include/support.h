@@ -236,4 +236,8 @@ constexpr size_t static_if_array_then_zero()
 	(static_if_array_then_zero<decltype(arr)>() +                          \
 	 (sizeof(arr) / sizeof(arr[0])))
 
+// Thread-safe replacement for strerror.
+//
+std::string safe_strerror(int err) noexcept;
+
 #endif

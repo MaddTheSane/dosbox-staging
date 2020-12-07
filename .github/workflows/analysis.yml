@@ -10,7 +10,7 @@ env:
 jobs:
   run_linters:
     name: Script linters
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier', github.actor) == false
     steps:
       - uses: actions/checkout@v2
@@ -25,7 +25,8 @@ jobs:
         run:  ./scripts/verify-python.sh
       - name: Install markdownlint
         run: |
-          sudo apt-get install ruby
+          sudo apt-get install ruby-full
+          ruby --version
           sudo gem install mdl
           sudo chmod go-w /usr/share/rust/.cargo/bin
       - name: Run markdownlint
@@ -81,7 +82,7 @@ jobs:
           path: report
       - name: Summarize report
         env:
-          MAX_BUGS: 192
+          MAX_BUGS: 184
         run: |
           # summary
           echo "Full report is included in build Artifacts"

@@ -1,9 +1,10 @@
 # DOSBox Staging
 
-[![Linux x86\_64 build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Linux%20builds?label=Linux%20builds%20(x86_64))](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Linux+builds%22)
-[![Linux other build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Platform%20builds?label=Linux%20builds%20(ARM,%20S390x,%20ppc64le))](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Platform+builds%22)
-[![Windows build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Windows%20builds?label=Windows%20builds)](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Windows+builds%22)
-[![macOS build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/macOS%20builds?label=macOS%20builds)](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22macOS+builds%22)
+![GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)
+[![Linux x86\_64 build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Linux%20builds?label=Linux%20(x86_64))](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Linux+builds%22)
+[![Linux other build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Platform%20builds?label=Linux%20(ARM,%20S390x,%20ppc64le))](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Platform+builds%22)
+[![Windows build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Windows%20builds?label=Windows)](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Windows+builds%22)
+[![macOS build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/macOS%20builds?label=macOS)](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22macOS+builds%22)
 
 This repository attempts to modernize the DOSBox codebase by using current
 development practices and tools, fixing issues, and adding features that better
@@ -65,7 +66,7 @@ Other differences:
 
 |                          | DOSBox Staging                               | DOSBox SVN
 |-                         |-                                             |-
-| **Pixel-perfect mode**   | Yes (`output=texturepp`)<sup>[7]</sup>       | N/A
+| **Pixel-perfect mode**   | Yes (`output=openglpp` or `output=texturepp`)| N/A
 | **Resizable window**     | Experimental (`windowresolution=resizable`)  | N/A
 | **Relative window size** | N/A                                          | `windowresolution=X%`
 | **[OPL] emulators**      | compat, fast, mame, nuked<sup>[8]</sup>      | compat, fast, mame
@@ -74,18 +75,21 @@ Other differences:
 | **Modem phonebook file** | Yes (`phonebookfile=<name>`)                 | N/A
 | **Autotype command**     | Yes<sup>[10]</sup>                           | N/A
 | **Startup verbosity**    | Yes<sup>[11]</sup>                           | N/A
-| **GUS Enhancements**     | Yes<sup>[12]</sup>                           | N/A
+| **[GUS] enhancements**   | Yes<sup>[12]</sup>                           | N/A
 | **Raw mouse input**      | Yes (`raw_mouse_input=true`)                 | N/A
+| **[FluidSynth] MIDI**    | Yes<sup>[13]</sup> (FluidSynth 2.x)          | Only external synths
 
 [OPL]:https://en.wikipedia.org/wiki/Yamaha_YMF262
 [CGA]:https://en.wikipedia.org/wiki/Color_Graphics_Adapter
 [Wayland]:https://en.wikipedia.org/wiki/Wayland_(display_server_protocol)
-[7]:https://github.com/dosbox-staging/dosbox-staging/commit/d1be65b105de714924947df4a7909e684d283385
+[GUS]: https://en.wikipedia.org/wiki/Gravis_Ultrasound
+[FluidSynth]: http://www.fluidsynth.org/
 [8]:https://www.vogons.org/viewtopic.php?f=9&t=37782
 [9]:https://github.com/dosbox-staging/dosbox-staging/commit/ffe3c5ab7fb5e28bae78f07ea987904f391a7cf8
 [10]:https://github.com/dosbox-staging/dosbox-staging/commit/239396fec83dbba6a1eb1a0f4461f4a427d2be38
 [11]: https://github.com/dosbox-staging/dosbox-staging/pull/477
 [12]: https://github.com/dosbox-staging/dosbox-staging/wiki/Gravis-UltraSound-Enhancements
+[13]: https://github.com/dosbox-staging/dosbox-staging/issues/262#issuecomment-734719260
 
 ## Stable release builds
 

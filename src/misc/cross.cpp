@@ -18,6 +18,7 @@
 
 #include "cross.h"
 
+#include <cerrno>
 #include <string>
 #include <vector>
 
@@ -51,17 +52,11 @@ static std::string GetConfigName()
 
 std::string cached_conf_path;
 
-static std::string ResolveHome(std::string tilde_path)
-{
-	Cross::ResolveHomedir(tilde_path);
-	return tilde_path;
-}
-
 #if defined(MACOSX)
 
 static std::string DetermineConfigPath()
 {
-	const std::string conf_path = ResolveHome("~/Library/Preferences/DOSBox");
+	const std::string conf_path = CROSS_ResolveHome("~/Library/Preferences/DOSBox");
 	mkdir(conf_path.c_str(), 0700);
 	return conf_path;
 }
@@ -90,8 +85,8 @@ static std::string DetermineConfigPath()
 {
 	const char *xdg_conf_home = getenv("XDG_CONFIG_HOME");
 	const std::string conf_home = xdg_conf_home ? xdg_conf_home : "~/.config";
-	const std::string conf_path = ResolveHome(conf_home + "/dosbox");
-	const std::string old_conf_path = ResolveHome("~/.dosbox");
+	const std::string conf_path = CROSS_ResolveHome(conf_home + "/dosbox");
+	const std::string old_conf_path = CROSS_ResolveHome("~/.dosbox");
 
 	if (path_exists(conf_path + "/" + GetConfigName())) {
 		return conf_path;
@@ -140,22 +135,31 @@ static void W32_ConfDir(std::string& in,bool create) {
 		size_t len = strlen(result);
 		if (len + strlen(appdata) < MAX_PATH)
 			safe_strcat(result, appdata);
-		if(create) mkdir(result);
+		if (create)
+			mkdir(result);
 	}
 	in = result;
 }
 #endif
 
-void Cross::GetPlatformConfigDir(std::string& in) {
+std::string CROSS_GetPlatformConfigDir()
+{
+	std::string conf_dir = "";
 #ifdef WIN32
-	W32_ConfDir(in,false);
-	in += "\\DOSBox";
+	W32_ConfDir(conf_dir, false);
+	conf_dir += "\\DOSBox\\";
 #else
 	assert(!cached_conf_path.empty());
-	in = cached_conf_path;
+	conf_dir = cached_conf_path;
+	if (conf_dir.back() != CROSS_FILESPLIT)
+		conf_dir += CROSS_FILESPLIT;
 #endif
-	if (in.back() != CROSS_FILESPLIT)
-		in += CROSS_FILESPLIT;
+	return conf_dir;
+}
+
+void Cross::GetPlatformConfigDir(std::string &in)
+{
+	in = CROSS_GetPlatformConfigDir();
 }
 
 void Cross::GetPlatformConfigName(std::string &in)
@@ -163,24 +167,35 @@ void Cross::GetPlatformConfigName(std::string &in)
 	in = GetConfigName();
 }
 
+void Cross::ResolveHomedir(std::string &in)
+{
+	in = CROSS_ResolveHome(in);
+}
+
 void Cross::CreatePlatformConfigDir(std::string &in)
 {
 #ifdef WIN32
 	W32_ConfDir(in,true);
 	in += "\\DOSBox";
-	mkdir(in.c_str());
 #else
 	assert(!cached_conf_path.empty());
 	in = cached_conf_path.c_str();
-	mkdir(in.c_str(), 0700);
 #endif
 	if (in.back() != CROSS_FILESPLIT)
 		in += CROSS_FILESPLIT;
+
+	if (create_dir(in.c_str(), 0700, OK_IF_EXISTS) != 0) {
+		LOG_MSG("ERROR: Creation of config directory '%s' failed: %s",
+		        in.c_str(), safe_strerror(errno).c_str());
+	}
 }
 
-void Cross::ResolveHomedir(std::string & temp_line) {
-	if(!temp_line.size() || temp_line[0] != '~') return; //No ~
+std::string CROSS_ResolveHome(const std::string &str)
+{
+	if (!str.size() || str[0] != '~') // No ~
+		return str;
 
+	std::string temp_line = str;
 	if(temp_line.size() == 1 || temp_line[1] == CROSS_FILESPLIT) { //The ~ and ~/ variant
 		char * home = getenv("HOME");
 		if(home) temp_line.replace(0,1,std::string(home));
@@ -193,14 +208,7 @@ void Cross::ResolveHomedir(std::string & temp_line) {
 		if(pass) temp_line.replace(0,namelen,pass->pw_dir); //namelen -1 +1(for the ~)
 #endif // USERNAME lookup code
 	}
-}
-
-void Cross::CreateDir(std::string const& in) {
-#ifdef WIN32
-	mkdir(in.c_str());
-#else
-	mkdir(in.c_str(),0700);
-#endif
+	return temp_line;
 }
 
 bool Cross::IsPathAbsolute(std::string const& in) {

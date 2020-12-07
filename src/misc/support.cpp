@@ -240,19 +240,36 @@ Bits ConvHexWord(char * word) {
 }
 
 /*
-static char buf[1024];           //greater scope as else it doesn't always gets thrown right (linux/gcc2.95)
-void E_Exit(const char * format,...) {
+static char e_exit_buf[1024]; // greater scope as else it doesn't always gets
+                              // thrown right
+void E_Exit(const char *format, ...)
+{
 #if C_DEBUG && C_HEAVY_DEBUG
- 	DEBUG_HeavyWriteLogInstruction();
+	DEBUG_HeavyWriteLogInstruction();
 #endif
 	va_list msg;
-	va_start(msg,format);
-	vsnprintf(buf,sizeof(buf),format,msg);
+	va_start(msg, format);
+	vsnprintf(e_exit_buf, ARRAY_LEN(e_exit_buf), format, msg);
 	va_end(msg);
-
-	buf[sizeof(buf) - 1] = '\0';
-	//strcat(buf,"\n"); catcher should handle the end of line.. 
-
-	throw(buf);
+	throw(e_exit_buf);
 }
- */
+*/
+
+std::string safe_strerror(int err) noexcept
+{
+	char buf[128];
+#if defined(WIN32)
+	// C11 version; unavailable in C++14 in general.
+	strerror_s(buf, ARRAY_LEN(buf), err);
+	return buf;
+#elif defined(_GNU_SOURCE)
+	// GNU has POSIX-incompatible version, which fills the buffer
+	// only when unknown error is passed, otherwise it returns
+	// the internal glibc buffer.
+	return strerror_r(err, buf, ARRAY_LEN(buf));
+#else
+	// POSIX version
+	strerror_r(err, buf, ARRAY_LEN(buf));
+	return buf;
+#endif
+}

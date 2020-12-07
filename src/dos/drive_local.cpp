@@ -463,11 +463,10 @@ bool localDrive::MakeDir(char * dir) {
 	//--Modified 2010-12-29 by Alun Bestor to allow Boxer to selectively prevent file operations,
 	//and to prevent DOSBox from creating folders with the wrong file permissions.
 	/*
-#if defined (WIN32)						// MS Visual C++
-	int temp=mkdir(dirCache.GetExpandName(newdir));
-#else
-	int temp=mkdir(dirCache.GetExpandName(newdir),0775);
-#endif
+	const int temp = create_dir(dirCache.GetExpandName(newdir), 0775);
+	if (temp == 0)
+		dirCache.CacheOut(newdir, true);
+	return (temp==0);// || ((temp!=0) && (errno==EEXIST));
  	 */
 	if (!boxer_shouldAllowWriteAccessToPath(dirCache.GetExpandName(newdir), this))
 	{

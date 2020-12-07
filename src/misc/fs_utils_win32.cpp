@@ -22,7 +22,11 @@
 
 #include "fs_utils.h"
 
+#include <direct.h>
 #include <io.h>
+#include <sys/stat.h>
+
+#include "compiler.h"
 
 bool path_exists(const char *path) noexcept
 {
@@ -34,6 +38,18 @@ std::string to_native_path(const std::string &path) noexcept
 	if (path_exists(path))
 		return path;
 	return "";
+}
+
+int create_dir(const char *path, MAYBE_UNUSED uint32_t mode, uint32_t flags) noexcept
+{
+	const int err = mkdir(path);
+	if ((errno == EEXIST) && (flags & OK_IF_EXISTS)) {
+		struct _stat pstat;
+		if ((_stat(path, &pstat) == 0) &&
+		    ((pstat.st_mode & _S_IFMT) == _S_IFDIR))
+			return 0;
+	}
+	return err;
 }
 
 #endif
