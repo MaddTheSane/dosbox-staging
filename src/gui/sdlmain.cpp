@@ -2265,8 +2265,10 @@ static void GUI_StartUp(Section *sec)
 			glMapBufferARB = (PFNGLMAPBUFFERARBPROC)SDL_GL_GetProcAddress("glMapBufferARB");
 			glUnmapBufferARB = (PFNGLUNMAPBUFFERARBPROC)SDL_GL_GetProcAddress("glUnmapBufferARB");
 
-			// FIXME: according to Khronos documentation, the correct way to
-			//        query GL_EXTENSIONS is using glGetStringi from OpenGL 3.0
+			// TODO According to Khronos documentation, the correct
+			// way to query GL_EXTENSIONS is using glGetStringi from
+			// OpenGL 3.0; replace with OpenGL loading library (such
+			// as GLEW or libepoxy)
 			const char * gl_ext = (const char *)glGetString (GL_EXTENSIONS);
 			if(gl_ext && *gl_ext){
 				sdl.opengl.packed_pixel=(strstr(gl_ext,"EXT_packed_pixels") != NULL);
@@ -2291,8 +2293,6 @@ static void GUI_StartUp(Section *sec)
 
 	if (!SetDefaultWindowMode())
 		E_Exit("Could not initialize video: %s", SDL_GetError());
-
-	// FIXME the code updated sdl.desktop.bpp in here (has effect in setting up scalers)
 
 	SDL_SetWindowTitle(sdl.window, "DOSBox Staging");
 	SetIcon();
@@ -2763,9 +2763,7 @@ void GFX_Events() {
 				break;
 			}
 #endif
-		default:
-			void MAPPER_CheckEvent(SDL_Event * event);
-			MAPPER_CheckEvent(&event);
+		default: MAPPER_CheckEvent(&event);
 		}
 	}
 }
@@ -3368,6 +3366,12 @@ int main(int argc, char* argv[]) {
 		LOG_MSG("CONFIG: Can't create dir '%s': %s",
 			soundfonts_dir.c_str(), safe_strerror(errno).c_str());
 #endif // C_FLUIDSYNTH
+#if C_MT32EMU
+	const std::string mt32_rom_dir = config_path + "mt32-roms";
+	if (create_dir(mt32_rom_dir.c_str(), 0700, OK_IF_EXISTS) != 0)
+		LOG_MSG("CONFIG: Can't create dir '%s': %s",
+			mt32_rom_dir.c_str(), safe_strerror(errno).c_str());
+#endif // C_MT32EMU
 
 #if (ENVIRON_LINKED)
 		control->ParseEnv(environ);

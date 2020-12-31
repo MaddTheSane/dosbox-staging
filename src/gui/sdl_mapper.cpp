@@ -505,7 +505,8 @@ public:
 		  hat(_hat),
 		  dir(_dir)
 	{
-		/* allow only one hat position */ // FIXME why?
+		// TODO this code allows to bind only a single hat position, but
+		// perhaps we should allow 8-way positioning?
 		if (dir & SDL_HAT_UP)
 			dir = SDL_HAT_UP;
 		else if (dir & SDL_HAT_RIGHT)
@@ -2470,10 +2471,11 @@ static bool MAPPER_CreateBindsFromFile() {
 	return true;
 }
 
-void MAPPER_CheckEvent(SDL_Event * event) {
-	for (CBindGroup_it it = bindgroups.begin(); it != bindgroups.end(); ++it) {
-		if ((*it)->CheckEvent(event)) return;
-	}
+void MAPPER_CheckEvent(SDL_Event *event)
+{
+	for (auto &group : bindgroups)
+		if (group->CheckEvent(event))
+			return;
 }
 
 void BIND_MappingEvents() {

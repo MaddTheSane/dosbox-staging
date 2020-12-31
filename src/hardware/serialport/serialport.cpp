@@ -1195,78 +1195,76 @@ CSerial::~CSerial() {
 		removeEvent(i);
 }
 
+static bool idle(const double start, const uint32_t timeout)
+{
+	CALLBACK_Idle();
+	return PIC_FullIndex() - start > timeout;
+}
+
 bool CSerial::Getchar(uint8_t *data, uint8_t *lsr, bool wait_dsr, uint32_t timeout)
 {
 	const double starttime = PIC_FullIndex();
-	// wait for DSR on
-	if(wait_dsr) {
-		while (!(Read_MSR() & MSR_DSR_MASK) &&
-		       (starttime > PIC_FullIndex() - timeout))
-			CALLBACK_Idle();
-		if(!(starttime>PIC_FullIndex()-timeout)) {
-#if SERIAL_DEBUG
-			log_ser(dbg_aux,"Getchar status timeout: MSR 0x%x",Read_MSR());
-#endif
-			return false;
-		}
-	}
-	// wait for a byte to arrive
-	while (!((*lsr = static_cast<uint8_t>(Read_LSR())) & LSR_RX_DATA_READY_MASK) &&
-	       (starttime > PIC_FullIndex() - timeout))
-		CALLBACK_Idle();
+	bool timed_out = false;
 
-	if(!(starttime>PIC_FullIndex()-timeout)) {
+	// Wait until we're ready to receive (or we've timed out)
+	const uint32_t ready_flag = (wait_dsr ? MSR_DSR_MASK : 0x0);
+	while ((Read_MSR() & ready_flag) != ready_flag && !timed_out)
+		timed_out = idle(starttime, timeout);
+
+	// wait for a byte to arrive (or we've timed out)
+	*lsr = static_cast<uint8_t>(Read_LSR());
+	while (!(*lsr & LSR_RX_DATA_READY_MASK) && !timed_out) {
+		timed_out = idle(starttime, timeout);
+		*lsr = static_cast<uint8_t>(Read_LSR());
+	}
+
+	if (timed_out) {
 #if SERIAL_DEBUG
 		log_ser(dbg_aux,"Getchar data timeout: MSR 0x%x",Read_MSR());
 #endif
 		return false;
 	}
-	*data = static_cast<uint8_t>(Read_RHR());
 
+	*data = static_cast<uint8_t>(Read_RHR());
 #if SERIAL_DEBUG
 	log_ser(dbg_aux,"Getchar read 0x%x",*data);
 #endif
 	return true;
 }
 
+/*
+Three criteria need to be met before we can send the next character to the
+receiver:
+- our transfer queue needs to be empty (Tx hold high)
+- the receiver says it's ready (DSR high), provided DSR was enabled
+- the receiver says we are clear to send (CTS high), provided CTS was enabled
+*/
 bool CSerial::Putchar(uint8_t data, bool wait_dsr, bool wait_cts, uint32_t timeout)
 {
-	const double starttime = PIC_FullIndex();
-	// wait for it to become empty
-	while (!(Read_LSR() & LSR_TX_HOLDING_EMPTY_MASK)) {
-		CALLBACK_Idle();
-	}
-	// wait for DSR+CTS on
-	if (wait_dsr || wait_cts) {
-		if (wait_dsr && wait_cts) {
-			constexpr auto dsr_cts_mask = MSR_DSR_MASK | MSR_CTS_MASK;
-			while (((Read_MSR() & dsr_cts_mask) != dsr_cts_mask) &&
-			       (starttime > PIC_FullIndex() - timeout)) {
-				CALLBACK_Idle();
-			}
-		} else if (wait_dsr) {
-			while (!(Read_MSR() & MSR_DSR_MASK) &&
-			       (starttime > PIC_FullIndex() - timeout)) {
-				CALLBACK_Idle();
-			}
-		} else if (wait_cts) {
-			while (!(Read_MSR() & MSR_CTS_MASK) &&
-			       (starttime > PIC_FullIndex() - timeout)) {
-				CALLBACK_Idle();
-			}
-		}
-		if (!(starttime > PIC_FullIndex() - timeout)) {
-#if SERIAL_DEBUG
-			log_ser(dbg_aux, "Putchar timeout: MSR 0x%x", Read_MSR());
-#endif
-			return false;
-		}
-	}
-	Write_THR(data);
+	const double start_time = PIC_FullIndex();
+	bool timed_out = false;
 
+	// Wait until our transfer queue is empty (or we've timed out)
+	while (!(Read_LSR() & LSR_TX_HOLDING_EMPTY_MASK) && !timed_out)
+		timed_out = idle(start_time, timeout);
+
+	// Wait until the receiver is ready (or we've timed out)
+	const uint32_t ready_flags = (wait_dsr ? MSR_DSR_MASK : 0x0) |
+	                             (wait_cts ? MSR_CTS_MASK : 0x0);
+	while ((Read_MSR() & ready_flags) != ready_flags && !timed_out)
+		timed_out = idle(start_time, timeout);
+
+	if (timed_out) {
 #if SERIAL_DEBUG
-	log_ser(dbg_aux,"Putchar 0x%x",data);
-#endif 
+		log_ser(dbg_aux, "Putchar timeout: MSR 0x%x", Read_MSR());
+#endif
+		return false;
+	}
+
+	Write_THR(data);
+#if SERIAL_DEBUG
+	log_ser(dbg_aux, "Putchar 0x%x", data);
+#endif
 	return true;
 }
 

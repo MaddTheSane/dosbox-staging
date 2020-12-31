@@ -28,13 +28,15 @@
 #include <string>
 #include <vector>
 
-#include "callback.h"
-#include "regs.h"
 #include "bios.h"
-#include "drives.h"
-#include "support.h"
+#include "callback.h"
 #include "control.h"
+#include "cross.h"
+#include "drives.h"
 #include "paging.h"
+#include "regs.h"
+#include "string_utils.h"
+#include "support.h"
 #include "../ints/int10.h"
 
 // clang-format off
@@ -452,28 +454,38 @@ void DOS_Shell::CMD_RMDIR(char * args) {
 	}
 }
 
-static void FormatNumber(Bit32u num,char * buf) {
-	Bit32u numm,numk,numb,numg;
-	numb=num % 1000;
-	num/=1000;
-	numk=num % 1000;
-	num/=1000;
-	numm=num % 1000;
-	num/=1000;
-	numg=num;
-	if (numg) {
-		sprintf(buf,"%d,%03d,%03d,%03d",numg,numm,numk,numb);
-		return;
-	};
-	if (numm) {
-		sprintf(buf,"%d,%03d,%03d",numm,numk,numb);
-		return;
-	};
-	if (numk) {
-		sprintf(buf,"%d,%03d",numk,numb);
-		return;
-	};
-	sprintf(buf,"%d",numb);
+static std::string format_number(size_t num)
+{
+	constexpr size_t petabyte_si = 1'000'000'000'000'000;
+	assert(num <= petabyte_si);
+	const auto b = static_cast<unsigned>(num % 1000);
+	num /= 1000;
+	const auto kb = static_cast<unsigned>(num % 1000);
+	num /= 1000;
+	const auto mb = static_cast<unsigned>(num % 1000);
+	num /= 1000;
+	const auto gb = static_cast<unsigned>(num % 1000);
+	num /= 1000;
+	const auto tb = static_cast<unsigned>(num);
+	char buf[22];
+	if (tb) {
+		safe_sprintf(buf, "%u,%03u,%03u,%03u,%03u", tb, gb, mb, kb, b);
+		return buf;
+	}
+	if (gb) {
+		safe_sprintf(buf, "%u,%03u,%03u,%03u", gb, mb, kb, b);
+		return buf;
+	}
+	if (mb) {
+		safe_sprintf(buf, "%u,%03u,%03u", mb, kb, b);
+		return buf;
+	}
+	if (kb) {
+		safe_sprintf(buf, "%u,%03u", kb, b);
+		return buf;
+	}
+	sprintf(buf, "%u", b);
+	return buf;
 }
 
 struct DtaResult {
@@ -599,7 +611,6 @@ static std::vector<int> calc_column_widths(const std::vector<int> &word_widths,
 
 void DOS_Shell::CMD_DIR(char * args) {
 	HELP("DIR");
-	char numformat[16];
 
 	std::string line;
 	if (GetEnvStr("DIRCMD",line)){
@@ -678,8 +689,9 @@ void DOS_Shell::CMD_DIR(char * args) {
 
 	if (!optB) {
 		if (print_label) {
-			const char *label = Drives[drive_idx]->GetLabel();
-			WriteOut(MSG_Get("SHELL_CMD_DIR_VOLUME"), drive_letter, label);
+			const auto label = To_Label(Drives[drive_idx]->GetLabel());
+			WriteOut(MSG_Get("SHELL_CMD_DIR_VOLUME"), drive_letter,
+			         label.c_str());
 			p_count += 1;
 		}
 		WriteOut(MSG_Get("SHELL_CMD_DIR_INTRO"), path);
@@ -827,12 +839,13 @@ void DOS_Shell::CMD_DIR(char * args) {
 		}
 
 		if (is_dir) {
-			WriteOut("%-8s %-3s   %-16s %02d-%02d-%04d %2d:%02d\n",
+			WriteOut("%-8s %-3s   %-21s %02d-%02d-%04d %2d:%02d\n",
 			         name, ext, "<DIR>", day, month, year, hour, minute);
 		} else {
-			FormatNumber(size, numformat);
-			WriteOut("%-8s %-3s   %16s %02d-%02d-%04d %2d:%02d\n",
-			         name, ext, numformat, day, month, year, hour, minute);
+			const auto file_size = format_number(size);
+			WriteOut("%-8s %-3s   %21s %02d-%02d-%04d %2d:%02d\n",
+			         name, ext, file_size.c_str(), day, month, year,
+			         hour, minute);
 		}
 		show_press_any_key();
 	}
@@ -846,25 +859,29 @@ void DOS_Shell::CMD_DIR(char * args) {
 
 	// Show the summary of results
 	if (!optB) {
-		FormatNumber(byte_count, numformat);
-		WriteOut(MSG_Get("SHELL_CMD_DIR_BYTES_USED"), file_count, numformat);
+		const auto bytes_used = format_number(byte_count);
+		WriteOut(MSG_Get("SHELL_CMD_DIR_BYTES_USED"), file_count,
+		         bytes_used.c_str());
 		show_press_any_key();
 
-		Bit8u drive = dta.GetSearchDrive();
-		Bitu free_space = 1024 * 1024 * 100;
+		uint8_t drive = dta.GetSearchDrive();
+		size_t free_space = 1024 * 1024 * 100;
 		if (Drives[drive]) {
-			Bit16u bytes_sector;
-			Bit8u  sectors_cluster;
-			Bit16u total_clusters;
-			Bit16u free_clusters;
+			uint16_t bytes_sector;
+			uint8_t sectors_cluster;
+			uint16_t total_clusters;
+			uint16_t free_clusters;
 			Drives[drive]->AllocationInfo(&bytes_sector,
 			                              &sectors_cluster,
 			                              &total_clusters,
 			                              &free_clusters);
-			free_space = bytes_sector * sectors_cluster * free_clusters;
+			free_space = bytes_sector;
+			free_space *= sectors_cluster;
+			free_space *= free_clusters;
 		}
-		FormatNumber(free_space, numformat);
-		WriteOut(MSG_Get("SHELL_CMD_DIR_BYTES_FREE"), dir_count, numformat);
+		const auto bytes = format_number(free_space);
+		WriteOut(MSG_Get("SHELL_CMD_DIR_BYTES_FREE"), dir_count,
+		         bytes.c_str());
 	}
 	dos.dta(save_dta);
 }
@@ -1392,18 +1409,15 @@ void DOS_Shell::CMD_CALL(char * args){
 
 void DOS_Shell::CMD_DATE(char * args) {
 	HELP("DATE");
-	if (ScanCMDBool(args,"H")) {
-		// synchronize date with host parameter
-		time_t curtime;
-		struct tm *loctime;
-		curtime = time (NULL);
-		loctime = localtime (&curtime);
-
-		reg_cx = loctime->tm_year+1900;
-		reg_dh = loctime->tm_mon+1;
-		reg_dl = loctime->tm_mday;
-
-		reg_ah=0x2b; // set system date
+	if (ScanCMDBool(args, "H")) {
+		// synchronize date with host
+		const time_t curtime = time(nullptr);
+		struct tm datetime;
+		cross::localtime_r(&curtime, &datetime);
+		reg_ah = 0x2b; // set system date
+		reg_cx = static_cast<uint16_t>(datetime.tm_year + 1900);
+		reg_dh = static_cast<uint8_t>(datetime.tm_mon + 1);
+		reg_dl = static_cast<uint8_t>(datetime.tm_mday);
 		CALLBACK_RunRealInt(0x21);
 		return;
 	}
@@ -1453,24 +1467,27 @@ void DOS_Shell::CMD_DATE(char * args) {
 
 void DOS_Shell::CMD_TIME(char * args) {
 	HELP("TIME");
-	if (ScanCMDBool(args,"H")) {
-		// synchronize time with host parameter
-		time_t curtime;
-		struct tm *loctime;
-		curtime = time (NULL);
-		loctime = localtime (&curtime);
+	if (ScanCMDBool(args, "H")) {
+		// synchronize time with host
+		const time_t curtime = time(NULL);
+		struct tm datetime;
+		cross::localtime_r(&curtime, &datetime);
 
-		//reg_cx = loctime->;
-		//reg_dh = loctime->;
-		//reg_dl = loctime->;
-
-		// reg_ah=0x2d; // set system time TODO
-		// CALLBACK_RunRealInt(0x21);
-
-		Bit32u ticks=(Bit32u)(((double)(loctime->tm_hour*3600+
-										loctime->tm_min*60+
-										loctime->tm_sec))*18.206481481);
-		mem_writed(BIOS_TIMER,ticks);
+		// Original IBM PC used ~1.19MHz crystal for timer, because at
+		// 1.19MHz, 2^16 ticks is ~1 hour, making it easy to count
+		// hours and days. More precisely:
+		//
+		// clock updates at 1193180/65536 ticks per second.
+		// ticks per second ≈ 18.2
+		// ticks per hour   ≈ 65543
+		// ticks per day    ≈ 1573040
+		//
+		constexpr uint64_t ticks_per_day = 1573040;
+		const auto seconds_now = (datetime.tm_hour * 3600 +
+		                          datetime.tm_min * 60 +
+		                          datetime.tm_sec);
+		const auto ticks_now = ticks_per_day * seconds_now / (24 * 3600);
+		mem_writed(BIOS_TIMER, static_cast<uint32_t>(ticks_now));
 		return;
 	}
 	bool timeonly = ScanCMDBool(args,"T");

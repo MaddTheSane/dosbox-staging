@@ -79,6 +79,7 @@ MidiHandler Midi_none;
    Each header provides an independent midi interface. */
 
 #include "midi_fluidsynth.h"
+#include "midi_mt32.h"
 
 //--Disabled 2011-09-25 by Alun Bestor: all MIDI handling is now done by Boxer
 //#if defined(MACOSX)
@@ -292,6 +293,11 @@ getdefault:
 				// Users needs to opt-in, otherwise
 				// fluidsynth will slow down emulator
 				// startup for all games.
+				continue;
+			}
+			if (name == "mt32") {
+				// Never select mt32 automatically.
+				// Users needs to opt-in.
 				continue;
 			}
 			if (handler->Open(conf)) {

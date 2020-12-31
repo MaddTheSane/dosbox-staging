@@ -12,10 +12,10 @@ jobs:
         conf:
           - name: MSVC 32-bit
             arch: x86
-            max_warnings: 295
+            max_warnings: 289
           - name: MSVC 64-bit
             arch: x64
-            max_warnings: 2009
+            max_warnings: 1996
     steps:
       - name:  Backup existing vcpkg installation
         shell: pwsh
@@ -67,7 +67,7 @@ jobs:
         shell: pwsh
         env:
           MAX_WARNINGS: ${{ matrix.conf.max_warnings }}
-        run: python scripts\count-warnings.py -lf --msvc vs\build.log
+        run: python scripts\count-warnings.py -f --msvc vs\build.log
 
 
   build_windows_vs_release:
@@ -134,6 +134,7 @@ jobs:
 
           # Prepare content
           readonly RELEASE_DIR=${{ matrix.conf.vs-release-dirname }}/Release
+          ls "vs/$RELEASE_DIR"
           mkdir -p dest/doc
           cp vs/$RELEASE_DIR/dosbox.exe           dest/
           cp COPYING                              dest/COPYING.txt
@@ -143,10 +144,9 @@ jobs:
           cp README                               dest/doc/manual.txt
           cp vs/$RELEASE_DIR/libfluidsynth-2.dll  dest/
           cp vs/$RELEASE_DIR/glib-2.dll           dest/ # fluidsynth dependency
-          cp vs/$RELEASE_DIR/libintl.dll          dest/ # glib dependency
+          cp vs/$RELEASE_DIR/intl-8.dll           dest/ # glib dependency
           cp vs/$RELEASE_DIR/pcre.dll             dest/ # glib dependency
-          cp vs/$RELEASE_DIR/libiconv.dll         dest/ # glib dependency
-          cp vs/$RELEASE_DIR/libcharset.dll       dest/ # iconv dependency
+          cp vs/$RELEASE_DIR/iconv-2.dll          dest/ # glib dependency
           cp vs/$RELEASE_DIR/ogg.dll              dest/
           cp vs/$RELEASE_DIR/opus.dll             dest/
           cp vs/$RELEASE_DIR/SDL2.dll             dest/
