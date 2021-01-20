@@ -57,19 +57,11 @@
 /* Define to 1 to use a unaligned memory access */
 #define C_UNALIGNED_MEMORY 1
 
-/* environ is defined */
-#define ENVIRON_INCLUDED 1
-
-/* environ can be linked */
-#define ENVIRON_LINKED 1
-
 /* Prevent <windows.h> from clobbering std::min and std::max */
 #define NOMINMAX 1
 
 /* Define to 1 if you want serial passthrough support. */
 #define C_DIRECTSERIAL 1
-
-#define INLINE __forceinline
 
 // Enables mathematical constants under Visual Studio, such as M_PI
 // https://docs.microsoft.com/en-us/cpp/c-runtime-library/math-constants

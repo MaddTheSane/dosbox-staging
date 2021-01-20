@@ -1,5 +1,8 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -19,13 +22,19 @@
 #ifndef DOSBOX_SETUP_H
 #define DOSBOX_SETUP_H
 
+#include "dosbox.h"
+
 #include <cstdio>
+#include <deque>
 #include <list>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
-#include "support.h"
+using parse_environ_result_t = std::list<std::tuple<std::string, std::string>>;
+
+parse_environ_result_t parse_environ(const char * const * envp) noexcept;
 
 class Hex {
 private:
@@ -135,15 +144,7 @@ public:
 
 	const std::string propname;
 
-	Property(const std::string &name, Changeable::Value when)
-		: propname(name),
-		  value(),
-		  suggested_values{},
-		  default_value(),
-		  change(when)
-	{
-		assertm(!name.empty(), "Property name can't be empty.");
-	}
+	Property(const std::string &name, Changeable::Value when);
 
 	virtual ~Property() = default;
 
@@ -282,32 +283,39 @@ public:
 
 #define NO_SUCH_PROPERTY "PROP_NOT_EXIST"
 
+typedef void (*SectionFunction)(Section *);
+
 class Section {
 private:
-	typedef void (*SectionFunction)(Section*);
-
 	/* Wrapper class around startup and shutdown functions. the variable
-	 * canchange indicates it can be called on configuration changes */
+	 * changeable_at_runtime indicates it can be called on configuration
+	 * changes */
 	struct Function_wrapper {
 		SectionFunction function;
-		bool canchange;
+		bool changeable_at_runtime;
 
 		Function_wrapper(SectionFunction const fn, bool ch)
 		        : function(fn),
-		          canchange(ch)
+		          changeable_at_runtime(ch)
 		{}
 	};
 
-	std::list<Function_wrapper> initfunctions = {};
-	std::list<Function_wrapper> destroyfunctions = {};
+	std::deque<Function_wrapper> early_init_functions = {};
+	std::deque<Function_wrapper> initfunctions = {};
+	std::deque<Function_wrapper> destroyfunctions = {};
 	std::string sectionname;
 public:
 	Section(const std::string &name) : sectionname(name) {}
 
 	virtual ~Section() = default; // Children must call executedestroy!
 
-	void AddInitFunction(SectionFunction func, bool canchange = false);
-	void AddDestroyFunction(SectionFunction func, bool canchange = false);
+	void AddEarlyInitFunction(SectionFunction func,
+	                          bool changeable_at_runtime = false);
+	void AddInitFunction(SectionFunction func, bool changeable_at_runtime = false);
+	void AddDestroyFunction(SectionFunction func,
+	                        bool changeable_at_runtime = false);
+
+	void ExecuteEarlyInit(bool initall = true);
 	void ExecuteInit(bool initall=true);
 	void ExecuteDestroy(bool destroyall=true);
 	const char* GetName() const {return sectionname.c_str();}
@@ -322,9 +330,9 @@ class Prop_multival_remain;
 
 class Section_prop : public Section {
 private:
-	std::list<Property *> properties = {};
-	typedef std::list<Property*>::iterator it;
-	typedef std::list<Property*>::const_iterator const_it;
+	std::deque<Property *> properties = {};
+	typedef std::deque<Property*>::iterator it;
+	typedef std::deque<Property*>::const_iterator const_it;
 
 public:
 	Section_prop(const std::string &name) : Section(name) {}

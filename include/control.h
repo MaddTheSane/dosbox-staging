@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -22,7 +22,8 @@
 #include "dosbox.h"
 
 #include <cassert>
-#include <list>
+#include <deque>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -41,11 +42,7 @@ class Config {
 public:
 	CommandLine * cmdline;
 private:
-	std::list<Section*> sectionlist;
-	typedef std::list<Section*>::iterator it;
-	typedef std::list<Section*>::reverse_iterator reverse_it;
-	typedef std::list<Section*>::const_iterator const_it;
-	typedef std::list<Section*>::const_reverse_iterator const_reverse_it;
+	std::deque<Section*> sectionlist;
 	void (* _start_function)(void);
 	bool secure_mode; //Sandbox mode
 public:
@@ -70,20 +67,29 @@ public:
 
 	~Config();
 
-	Section_line * AddSection_line(char const * const _name,void (*_initfunction)(Section*));
-	Section_prop * AddSection_prop(char const * const _name,void (*_initfunction)(Section*),bool canchange=false);
-	
-	Section* GetSection(int index);
-	Section* GetSection(std::string const&_sectionname) const;
-	Section* GetSectionFromProperty(char const * const prop) const;
+	Section_prop *AddEarlySectionProp(const char *name,
+	                                  SectionFunction func,
+	                                  bool changeable_at_runtime = false);
+
+	Section_line *AddSection_line(const char *section_name, SectionFunction func);
+
+	Section_prop *AddSection_prop(const char *section_name,
+	                              SectionFunction func,
+	                              bool changeable_at_runtime = false);
+
+	auto begin() { return sectionlist.begin(); }
+	auto end() { return sectionlist.end(); }
+
+	Section *GetSection(const std::string &section_name) const;
+	Section *GetSectionFromProperty(const char *prop) const;
 
 	void SetStartUp(void (*_function)(void));
-	void Init();
+	void Init() const;
 	void ShutDown();
 	void StartUp();
 	bool PrintConfig(const std::string &filename) const;
 	bool ParseConfigFile(char const * const configfilename);
-	void ParseEnv(char ** envp);
+	void ParseEnv();
 	bool SecureMode() const { return secure_mode; }
 	void SwitchToSecureMode() { secure_mode = true; }//can't be undone
 	Verbosity GetStartupVerbosity() const;

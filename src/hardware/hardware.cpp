@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,21 +16,23 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "hardware.h"
+
 #include <cerrno>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "cross.h"
 #include "dosbox.h"
-#include "hardware.h"
-#include "setup.h"
-#include "support.h"
-#include "mem.h"
+#include "fs_utils.h"
 #include "mapper.h"
+#include "mem.h"
 #include "pic.h"
 #include "render.h"
-#include "cross.h"
-#include "fs_utils.h"
+#include "setup.h"
+#include "string_utils.h"
+#include "support.h"
 
 #if (C_SSHOT)
 #include <png.h>
@@ -309,6 +311,30 @@ static void CAPTURE_VideoEvent(bool pressed) {
 	}
 }
 #endif
+
+void CAPTURE_VideoStart() {
+#if (C_SSHOT)
+	if (CaptureState & CAPTURE_VIDEO) {
+		LOG_MSG("Already capturing video.");
+	} else {
+		CAPTURE_VideoEvent(true);
+	}
+#else
+	LOG_MSG("Avi capturing has not been compiled in");
+#endif
+}
+
+void CAPTURE_VideoStop() {
+#if (C_SSHOT)
+	if (CaptureState & CAPTURE_VIDEO) {
+		CAPTURE_VideoEvent(true);
+	} else {
+		LOG_MSG("Not capturing video.");
+	}
+#else 
+	LOG_MSG("Avi capturing has not been compiled in");
+#endif
+}
 
 void CAPTURE_AddImage(Bitu width, Bitu height, Bitu bpp, Bitu pitch, Bitu flags, float fps, Bit8u * data, Bit8u * pal) {
 #if (C_SSHOT)

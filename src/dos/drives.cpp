@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -18,7 +18,7 @@
 
 #include "drives.h"
 
-#include "support.h"
+#include "string_utils.h"
 
 bool WildFileCmp(const char *file, const char *wild)
 {
@@ -138,6 +138,10 @@ char * DOS_Drive::getSystemPath(void) {
 }
 //--End of modifications
 
+void DOS_Drive::SetDir(const char *path)
+{
+	safe_strcpy(curdir, path);
+}
 
 // static members variables
 int DriveManager::currentDrive;

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,12 +16,13 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
 #include "dosbox.h"
+
 #include "bios.h"
 #include "bios_disk.h"
 #include "setup.h"
 #include "support.h"
+#include "string_utils.h"
 #include "../ints/int10.h"
 #include "regs.h"
 #include "callback.h"

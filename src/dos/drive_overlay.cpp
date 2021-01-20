@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,23 +16,21 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-#include "dosbox.h"
-#include "dos_inc.h"
 #include "drives.h"
-#include "support.h"
-#include "cross.h"
-#include "inout.h"
-#include "timer.h"
 
 #include <vector>
 #include <string>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <errno.h>
 
+#include "dos_inc.h"
+#include "string_utils.h"
+#include "cross.h"
+#include "inout.h"
+#include "timer.h"
 #include "fs_utils.h"
 
 #define OVERLAY_DIR 1
@@ -45,7 +43,6 @@ using namespace std;
 //Convert back to DOS PATH
 #define	CROSS_DOSFILENAME(blah) strreplace(blah,'/','\\')
 #endif
-
 
 /* 
  * design principles/limitations/requirements:

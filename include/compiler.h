@@ -1,5 +1,7 @@
 /*
- *  Copyright (C) 2019-2020  The DOSBox Team
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2019-2021  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -29,6 +31,14 @@
 
 #ifndef __has_cpp_attribute // for compatibility with non-supporting compilers
 #define __has_cpp_attribute(x) 0
+#endif
+
+// Function-like macro __has_attribute was introduced in GCC 5.x and Clang,
+// alongside __has_cpp_attribute, and with the same logic.
+// See: https://clang.llvm.org/docs/LanguageExtensions.html#has-attribute
+
+#ifndef __has_attribute // for compatibility with non-supporting compilers
+#define __has_attribute(x) 0
 #endif
 
 // When passing the -Wunused flag to GCC or Clang, entities that are unused by
@@ -67,6 +77,32 @@
 #define GCC_ATTRIBUTE(x) /* attribute not supported */
 #endif
 
+// Wrapper for various compiler extensions for inlining aggresively.
+//
+// There is NO way to truly FORCE compiler to do inlining, therefore all these
+// methods are only strong hints, usually non-preferrable over simple
+// 'inline' keyword.
+//
+// Normal C++ 'inline' is indicator that there might be more than one
+// definition for the function (as long as all definitions are the same).
+// It's used to define functions in C++ headers. Compiler will automatically
+// try to inline (embed compiled code without function call) any function
+// defined in a header.
+//
+// For details about GCC/Clang always_inline, see:
+// https://gcc.gnu.org/onlinedocs/gcc/Common-Function-Attributes.html#Common-Function-Attributes
+//
+// For details about MSVC __forceinline, see:
+// https://docs.microsoft.com/en-us/cpp/cpp/inline-functions-cpp#inline-__inline-and-__forceinline
+
+#if __has_attribute(always_inline)
+#define INLINE inline __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#define INLINE __forceinline
+#else
+#define INLINE inline
+#endif
+
 // GCC_LIKELY macro is incorrectly named, because other compilers support
 // this feature as well (e.g. Clang, Intel); leave it be for now, at
 // least until full support for C++20 [[likely]] attribute will start arriving
@@ -84,7 +120,7 @@
 #define GCC_UNLIKELY
 #endif
 
-// XSTR and STR macros can be used turning defines into string literals:
+// XSTR and STR macros can be used for turning defines into string literals:
 //
 // #define FOO 4
 // printf("It's a " STR(FOO));  // prints "It's a FOO"

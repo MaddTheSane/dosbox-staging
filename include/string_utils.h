@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2019-2020  The dosbox-staging team
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -21,12 +21,51 @@
 #ifndef DOSBOX_STRING_UTILS_H
 #define DOSBOX_STRING_UTILS_H
 
+#include "dosbox.h"
+
+#include <cassert>
 #include <cstdarg>
 #include <cstring>
 #include <string>
 
-#include "support.h"
+/* Copy a string into C array
+ *
+ * This function copies string pointed by src to a fixed-size buffer dst.
+ * At most N bytes from src are copied, where N is size of dst. If exactly
+ * N bytes are copied, then terminating null byte is put into dst, thus
+ * buffer overrun is prevented.
+ *
+ * Function returns pointer to buffer to be compatible with strcpy.
+ *
+ * This is a safer drop-in replacement for strcpy function (when used to fill
+ * buffers, whose size is known at compilation time), however some caveats
+ * still apply:
+ *
+ * - src cannot be null, otherwise the behaviour is undefined
+ * - dst and src strings must not overlap, otherwise the behaviour is undefined
+ * - src string must be null-terminated, otherwise the behaviour is undefined
+ *
+ * Usage:
+ *
+ *     char buffer[2];
+ *     safe_strcpy(buffer, "abc");
+ *     // buffer is filled with "a"
+ */
+template <size_t N>
+char *safe_strcpy(char (&dst)[N], const char *src) noexcept
+{
+	assert(src != nullptr);
+	assert(src < &dst[0] || src > &dst[N - 1]);
+	snprintf(dst, N, "%s", src);
+	return &dst[0];
+}
 
+template <size_t N>
+char *safe_strcat(char (&dst)[N], const char *src) noexcept
+{
+	strncat(dst, src, N - strnlen(dst, N) - 1);
+	return &dst[0];
+}
 
 template <size_t N>
 int safe_sprintf(char (&dst)[N], const char *fmt, ...)

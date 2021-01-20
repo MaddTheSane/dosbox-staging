@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -19,6 +19,7 @@
 #include "dosbox.h"
 
 #if C_MODEM
+
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,7 +27,7 @@
 #include <fstream>
 #include <sstream>
 
-#include "support.h"
+#include "string_utils.h"
 #include "serialport.h"
 #include "softmodem.h"
 #include "misc_util.h"
@@ -1048,4 +1049,4 @@ void CSerialModem::updateModemControlLines() {
 }
 */
 
-#endif
+#endif // C_MODEM

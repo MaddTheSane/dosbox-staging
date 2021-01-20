@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Copyright (c) 2019-2020 Kevin R Croft <krcroft@gmail.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Copyright (C) 2019-2021  Kevin R. Croft <krcroft@gmail.com>
 
 # This simple script is used to build, test, and archive the log output from
 # various sanitizer-builds.
@@ -34,6 +35,9 @@ cd "$(dirname "${0}")/../.."
 # Make a directory to hold our build and run output
 mkdir -p "${logs}"
 
+# SAN-specific environment variables
+export LSAN_OPTIONS="suppressions=.lsan-suppress:verbosity=0"
+
 for sanitizer in "${sanitizers[@]}"; do
 
 	# Build DOSBox for each sanitizer
@@ -46,7 +50,7 @@ for sanitizer in "${sanitizers[@]}"; do
 	# Exercise the testcase(s) for each sanitizer
 	# Sanitizers return non-zero if one or more issues were found,
 	# so we or-to-true to ensure our script doesn't end here.
-	time xvfb-run ./src/dosbox -c exit \
+	time xvfb-run ./src/dosbox -c "autotype -w 0.1 e x i t enter" \
 		&> "${logs}/${compiler}-${sanitizer}-EnterExit.log" || true
 
 done

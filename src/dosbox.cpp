@@ -1,5 +1,8 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,13 +19,14 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "dosbox.h"
 
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include "dosbox.h"
+
 #include "debug.h"
 #include "cpu.h"
 #include "video.h"
@@ -34,6 +38,7 @@
 #include "timer.h"
 #include "dos_inc.h"
 #include "setup.h"
+#include "shell.h"
 #include "control.h"
 #include "cross.h"
 #include "programs.h"
@@ -49,6 +54,7 @@
 #include "hardware.h"
 
 Config * control;
+bool exit_requested = false;
 MachineType machine;
 SVGACards svgaCard;
 
@@ -154,11 +160,12 @@ static Bitu Normal_Loop(void) {
 			if (DEBUG_ExitLoop()) return 0;
 #endif
 		} else {
-			GFX_Events();
-            //--Check again at this point in case our own events have cancelled the emulation.
-            if (!boxer_runLoopShouldContinue()) return 1;
-            //--End of modifications
-			if (ticksRemain>0) {
+			if (!GFX_Events())
+				return 0;
+			//--Check again at this point in case our own events have cancelled the emulation.
+			if (!boxer_runLoopShouldContinue()) return 1;
+			//--End of modifications
+			if (ticksRemain > 0) {
 				TIMER_AddTick();
 				ticksRemain--;
 			} else {increaseticks();return 0;}
@@ -334,7 +341,7 @@ void DOSBOX_RunMachine(void){
         //Boxer knows which iteration of the runloop is running (in case of nested runloops).
         void *contextInfo;
         boxer_runLoopWillStartWithContextInfo(&contextInfo);
-		ret=(*loop)();
+		ret=(*loop)() == 0 && !exit_requested;
         boxer_runLoopDidFinishWithContextInfo(contextInfo);
         //--End of modifications.
 	} while (!ret);
@@ -843,14 +850,14 @@ void DOSBOX_Init(void) {
 	Pstring = secprop->Add_string("joysticktype",Property::Changeable::WhenIdle,"auto");
 	Pstring->Set_values(joytypes);
 	Pstring->Set_help(
-		"Type of joystick to emulate: auto (default), none,\n"
+		"Type of joystick to emulate: auto (default),\n"
+		"none (disables joystick emulation),\n"
 		"2axis (supports two joysticks),\n"
 		"4axis (supports one joystick, first joystick used),\n"
 		"4axis_2 (supports one joystick, second joystick used),\n"
 		"fcs (Thrustmaster), ch (CH Flightstick).\n"
-		"none disables joystick emulation.\n"
 		"auto chooses emulation depending on real joystick(s).\n"
-		"(Remember to reset dosbox's mapperfile if you saved it earlier)");
+		"(Remember to reset DOSBox's mapperfile if you saved it earlier)");
 
 	Pbool = secprop->Add_bool("timed",Property::Changeable::WhenIdle,true);
 	Pbool->Set_help("enable timed intervals for axis. Experiment with this option, if your joystick drifts (away).");

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
 #include <time.h>
 #include <stdio.h>
 #include "cross.h"
-#include "support.h"
+#include "string_utils.h"
 #include "cpu.h"
 #include "regs.h"
 #include "inout.h"

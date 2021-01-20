@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -15,7 +15,6 @@
  *  with this program; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
-
 
 #include "libserial.h"
 
@@ -476,5 +475,5 @@ void SERIAL_setRTS(COMPORT port, bool value) {
 	long flag = TIOCM_RTS;
 	ioctl(port->porthandle, value?TIOCMBIS:TIOCMBIC, &flag);
 }
-#endif
 
+#endif

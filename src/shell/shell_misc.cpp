@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,7 +26,12 @@
 
 #include "regs.h"
 #include "callback.h"
-#include "support.h"
+#include "string_utils.h"
+
+DOS_Shell::~DOS_Shell() {
+	delete bf;
+	bf = nullptr;
+}
 
 //--Added 2010-01-21 by Alun Bestor to let Boxer hook into DOSBox internals
 #include "BXCoalface.h"
@@ -59,7 +64,7 @@ void DOS_Shell::InputCommand(char * line) {
 
 	std::list<std::string>::iterator it_history = l_history.begin(), it_completion = l_completion.begin();
 
-	while (size) {
+	while (size && !exit_requested) {
 		dos.echo=false;
 		
 		//--Modified 2012-08-19 by Alun Bestor to let Boxer inject its own input

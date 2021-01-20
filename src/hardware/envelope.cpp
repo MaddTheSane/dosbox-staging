@@ -1,8 +1,8 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2020  The dosbox-staging team
- *  Copyright (c) 2019-2020  Kevin R Croft <krcroft@gmail.com>
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2019-2021  Kevin R. Croft <krcroft@gmail.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -66,7 +66,7 @@ void Envelope::Update(const uint32_t frame_rate,
 
 bool Envelope::ClampSample(intptr_t &sample, const intptr_t lip)
 {
-	if (abs(sample) > edge) {
+	if (std::abs(sample) > edge) {
 		sample = clamp(sample, -lip, lip);
 		return true;
 	}

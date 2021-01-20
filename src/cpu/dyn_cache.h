@@ -1,8 +1,8 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2002-2020  The DOSBox Team
- *  Copyright (C) 2020-2020  The dosbox-staging team
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -178,9 +178,10 @@ public:
 
 	void writeb(PhysPt addr, Bitu val) override
 	{
-		assert((old_pagehandler->flags & PFLAG_HASROM) == 0x0);
-		assert(old_pagehandler->flags & PFLAG_READABLE);
-
+		if (GCC_UNLIKELY(old_pagehandler->flags&PFLAG_HASROM)) return;
+		if (GCC_UNLIKELY((old_pagehandler->flags&PFLAG_READABLE)!=PFLAG_READABLE)) {
+			E_Exit("wb:non-readable code page found that is no ROM page");
+		}
 		addr&=4095;
 		if (host_readb(hostmem+addr)==(Bit8u)val) return;
 		host_writeb(hostmem+addr,val);
@@ -202,9 +203,10 @@ public:
 
 	void writew(PhysPt addr, Bitu val) override
 	{
-		assert((old_pagehandler->flags & PFLAG_HASROM) == 0x0);
-		assert(old_pagehandler->flags & PFLAG_READABLE);
-
+		if (GCC_UNLIKELY(old_pagehandler->flags&PFLAG_HASROM)) return;
+		if (GCC_UNLIKELY((old_pagehandler->flags&PFLAG_READABLE)!=PFLAG_READABLE)) {
+			E_Exit("ww:non-readable code page found that is no ROM page");
+		}
 		addr&=4095;
 		if (host_readw(hostmem+addr)==(Bit16u)val) return;
 		host_writew(hostmem+addr,val);
@@ -226,9 +228,10 @@ public:
 
 	void writed(PhysPt addr, Bitu val) override
 	{
-		assert((old_pagehandler->flags & PFLAG_HASROM) == 0x0);
-		assert(old_pagehandler->flags & PFLAG_READABLE);
-
+		if (GCC_UNLIKELY(old_pagehandler->flags&PFLAG_HASROM)) return;
+		if (GCC_UNLIKELY((old_pagehandler->flags&PFLAG_READABLE)!=PFLAG_READABLE)) {
+			E_Exit("wd:non-readable code page found that is no ROM page");
+		}
 		addr&=4095;
 		if (host_readd(hostmem+addr)==(Bit32u)val) return;
 		host_writed(hostmem+addr,val);
@@ -250,9 +253,10 @@ public:
 
 	bool writeb_checked(PhysPt addr, Bitu val) override
 	{
-		assert((old_pagehandler->flags & PFLAG_HASROM) == 0x0);
-		assert(old_pagehandler->flags & PFLAG_READABLE);
-
+		if (GCC_UNLIKELY(old_pagehandler->flags&PFLAG_HASROM)) return false;
+		if (GCC_UNLIKELY((old_pagehandler->flags&PFLAG_READABLE)!=PFLAG_READABLE)) {
+			E_Exit("cb:non-readable code page found that is no ROM page");
+		}
 		addr&=4095;
 		if (host_readb(hostmem+addr)==(Bit8u)val) return false;
 		// see if there's code where we are writing to
@@ -279,9 +283,10 @@ public:
 
 	bool writew_checked(PhysPt addr, Bitu val) override
 	{
-		assert((old_pagehandler->flags & PFLAG_HASROM) == 0x0);
-		assert(old_pagehandler->flags & PFLAG_READABLE);
-
+		if (GCC_UNLIKELY(old_pagehandler->flags&PFLAG_HASROM)) return false;
+		if (GCC_UNLIKELY((old_pagehandler->flags&PFLAG_READABLE)!=PFLAG_READABLE)) {
+			E_Exit("cw:non-readable code page found that is no ROM page");
+		}
 		addr&=4095;
 		if (host_readw(hostmem+addr)==(Bit16u)val) return false;
 		// see if there's code where we are writing to
@@ -308,9 +313,10 @@ public:
 
 	bool writed_checked(PhysPt addr, Bitu val) override
 	{
-		assert((old_pagehandler->flags & PFLAG_HASROM) == 0x0);
-		assert(old_pagehandler->flags & PFLAG_READABLE);
-
+		if (GCC_UNLIKELY(old_pagehandler->flags&PFLAG_HASROM)) return false;
+		if (GCC_UNLIKELY((old_pagehandler->flags&PFLAG_READABLE)!=PFLAG_READABLE)) {
+			E_Exit("cd:non-readable code page found that is no ROM page");
+		}
 		addr&=4095;
 		if (host_readd(hostmem+addr)==(Bit32u)val) return false;
 		// see if there's code where we are writing to
@@ -412,14 +418,15 @@ public:
 	void ClearRelease()
 	{
 		// clear out all cache blocks in this page
-		for (Bitu index=0;index<(1+DYN_PAGE_HASH);index++) {
-			CacheBlock *block = hash_map[index];
-			while (block) {
-				CacheBlock *nextblock = block->hash.next;
-				block->page.handler = 0; // no need, full clear
-				block->Clear();
-				block=nextblock;
-			}
+		Bitu count=active_blocks;
+		CacheBlock **map=hash_map;
+		for (CacheBlock * block=*map;count;count--) {
+			while (block==NULL)
+				block=*++map;
+			CacheBlock * nextblock=block->hash.next;
+			block->page.handler=0;			// no need, full clear
+			block->Clear();
+			block=nextblock;
 		}
 		Release(); // now can release this page
 	}
@@ -618,30 +625,54 @@ static void cache_closeblock()
 }
 
 // place an 8bit value into the cache
+
+static INLINE void cache_addb(uint8_t val, uint8_t *pos)
+{
+	*pos = val;
+}
+
 static inline void cache_addb(uint8_t val)
 {
-	*cache.pos = val;
+	cache_addb(val, cache.pos);
 	cache.pos += sizeof(uint8_t);
 }
 
 // place a 16bit value into the cache
+
+static INLINE void cache_addw(uint16_t val, uint8_t *pos)
+{
+	write_unaligned_uint16(pos, val);
+}
+
 static inline void cache_addw(uint16_t val)
 {
-	write_unaligned_uint16(cache.pos, val);
+	cache_addw(val, cache.pos);
 	cache.pos += sizeof(uint16_t);
 }
 
 // place a 32bit value into the cache
+
+static INLINE void cache_addd(uint32_t val, uint8_t *pos)
+{
+	write_unaligned_uint32(pos, val);
+}
+
 static inline void cache_addd(uint32_t val)
 {
-	write_unaligned_uint32(cache.pos, val);
+	cache_addd(val, cache.pos);
 	cache.pos += sizeof(uint32_t);
 }
 
 // place a 64bit value into the cache
+
+static INLINE void cache_addq(uint64_t val, uint8_t *pos)
+{
+	write_unaligned_uint64(pos, val);
+}
+
 static inline void cache_addq(uint64_t val)
 {
-	write_unaligned_uint64(cache.pos, val);
+	cache_addq(val, cache.pos);
 	cache.pos += sizeof(uint64_t);
 }
 
@@ -655,7 +686,7 @@ static void cache_block_closing(uint8_t *block_start, Bitu block_size);
 #endif
 
 /* Define temporary pagesize so the MPROTECT case and the regular case share as much code as possible */
-#if (C_HAVE_MPROTECT)
+#if defined(HAVE_MPROTECT)
 #define PAGESIZE_TEMP PAGESIZE
 #else
 #define PAGESIZE_TEMP 4096
@@ -671,8 +702,7 @@ static void cache_init(bool enable) {
 		cache_initialized = true;
 		if (cache_blocks == NULL) {
 			// allocate the cache blocks memory
-			cache_blocks = (CacheBlock *)malloc(CACHE_BLOCKS *
-			                                    sizeof(CacheBlock));
+			cache_blocks = (CacheBlock *)malloc(CACHE_BLOCKS * sizeof(CacheBlock));
 			if (!cache_blocks)
 				E_Exit("Allocating cache_blocks has failed");
 			memset(cache_blocks, 0, sizeof(CacheBlock) * CACHE_BLOCKS);
@@ -706,10 +736,10 @@ static void cache_init(bool enable) {
 			                                              // pointer.
 
 			cache_code_link_blocks=cache_code;
-			cache_code += PAGESIZE_TEMP;
+			cache_code=cache_code+PAGESIZE_TEMP;
 
-#if (C_HAVE_MPROTECT)
-			if(mprotect(cache_code_link_blocks,CACHE_TOTAL+CACHE_MAXSIZE+PAGESIZE_TEMP,PROT_WRITE|PROT_READ) != 0)
+#if defined(HAVE_MPROTECT)
+			if(mprotect(cache_code_link_blocks,CACHE_TOTAL+CACHE_MAXSIZE+PAGESIZE_TEMP,PROT_WRITE|PROT_READ))
 				LOG_MSG("Setting execute permission on the code cache has failed");
 #endif
 			CacheBlock *block = cache_getblock();
@@ -721,37 +751,19 @@ static void cache_init(bool enable) {
 		}
 		// setup the default blocks for block linkage returns
 		cache.pos=&cache_code_link_blocks[0];
-#if (C_DYNAMIC_X86)
 		link_blocks[0].cache.start=cache.pos;
-		gen_return(BR_Link1);
+		// link code that returns with a special return code
+		dyn_return(BR_Link1,false);
 		cache.pos=&cache_code_link_blocks[32];
 		link_blocks[1].cache.start=cache.pos;
-		gen_return(BR_Link2);
-#elif (C_DYNREC)
-		core_dynrec.runcode = (BlockReturn(*)(uint8_t *))cache.pos;
-		// can use op to PAGESIZE_TEMP-64 bytes
+		// link code that returns with a special return code
+		dyn_return(BR_Link2,false);
+
+#if (C_DYNREC)
+		cache.pos=&cache_code_link_blocks[64];
+		core_dynrec.runcode=(BlockReturn (*)(Bit8u*))cache.pos;
+//		link_blocks[1].cache.start=cache.pos;
 		dyn_run_code();
-		cache_block_before_close();
-		cache_block_closing(cache_code_link_blocks,
-		                    cache.pos - cache_code_link_blocks);
-
-		cache.pos = &cache_code_link_blocks[PAGESIZE_TEMP - 64];
-		link_blocks[0].cache.start = cache.pos;
-		// link code that returns with a special return code
-		// must be less than 32 bytes
-		dyn_return(BR_Link1, false);
-		cache_block_before_close();
-		cache_block_closing(link_blocks[0].cache.start,
-		                    cache.pos - link_blocks[0].cache.start);
-
-		cache.pos = &cache_code_link_blocks[PAGESIZE_TEMP - 32];
-		link_blocks[1].cache.start = cache.pos;
-		// link code that returns with a special return code
-		// must be less than 32 bytes
-		dyn_return(BR_Link2, false);
-		cache_block_before_close();
-		cache_block_closing(link_blocks[1].cache.start,
-		                    cache.pos - link_blocks[1].cache.start);
 #endif
 
 		cache.free_pages=0;

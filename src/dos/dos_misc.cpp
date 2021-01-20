@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,14 +16,13 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "dos_inc.h"
 
-#include "dosbox.h"
+#include <list>
+
 #include "callback.h"
 #include "mem.h"
 #include "regs.h"
-#include "dos_inc.h"
-#include <list>
-
 
 static Bitu call_int2f,call_int2a;
 

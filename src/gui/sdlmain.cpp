@@ -1,8 +1,8 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2002-2020  The DOSBox Team
- *  Copyright (C) 2019-2020  The dosbox-staging team
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -180,22 +180,22 @@ PFNGLVERTEXATTRIBPOINTERPROC glVertexAttribPointer = NULL;
 
 #endif // C_OPENGL
 
-#if !(ENVIRON_INCLUDED)
-extern char** environ;
-#endif
-
 #ifdef WIN32
 #include <winuser.h>
 #define STDOUT_FILE "stdout.txt"
 #define STDERR_FILE "stderr.txt"
 #endif
 
-#if C_SET_PRIORITY
+#if defined(HAVE_SETPRIORITY)
 #include <sys/resource.h>
-#define PRIO_TOTAL (PRIO_MAX-PRIO_MIN)
+
+#define PRIO_TOTAL (PRIO_MAX - PRIO_MIN)
 #endif
 
 SDL_bool mouse_is_captured = SDL_FALSE; // global for mapper
+
+// SDL allows pixels sizes (color-depth) from 1 to 4 bytes
+constexpr uint8_t MAX_BYTES_PER_PIXEL = 4;
 
 // Masks to be passed when creating SDL_Surface.
 // Remove ifndef if they'll be needed for MacOS X builds.
@@ -490,10 +490,11 @@ static void SetIcon()
 
 #endif
 
-static void KillSwitch(bool pressed) {
-	if (!pressed)
-		return;
-	throw 1;
+static void RequestExit(bool pressed)
+{
+	exit_requested = pressed;
+	if (exit_requested)
+		DEBUG_LOG_MSG("SDL: Exit requested");
 }
 
 MAYBE_UNUSED static void PauseDOSBox(bool pressed)
@@ -514,15 +515,16 @@ MAYBE_UNUSED static void PauseDOSBox(bool pressed)
 	while (paused) {
 		SDL_WaitEvent(&event);    // since we're not polling, cpu usage drops to 0.
 		switch (event.type) {
-			case SDL_QUIT: KillSwitch(true); break;
-			case SDL_WINDOWEVENT:
-				if (event.window.event == SDL_WINDOWEVENT_RESTORED) {
-					// We may need to re-create a texture and more
-					GFX_ResetScreen();
-				}
-				break;
-			case SDL_KEYDOWN:   // Must use Pause/Break Key to resume.
-			case SDL_KEYUP:
+		case SDL_QUIT: RequestExit(true); break;
+
+		case SDL_WINDOWEVENT:
+			if (event.window.event == SDL_WINDOWEVENT_RESTORED) {
+				// We may need to re-create a texture and more
+				GFX_ResetScreen();
+			}
+			break;
+		case SDL_KEYDOWN: // Must use Pause/Break Key to resume.
+		case SDL_KEYUP:
 			if(event.key.keysym.sym == SDLK_PAUSE) {
 				const uint16_t outkeymod = event.key.keysym.mod;
 				if (inkeymod != outkeymod) {
@@ -540,7 +542,7 @@ MAYBE_UNUSED static void PauseDOSBox(bool pressed)
 			if (event.key.keysym.sym == SDLK_q &&
 			   (event.key.keysym.mod == KMOD_RGUI || event.key.keysym.mod == KMOD_LGUI)) {
 				/* On macs, all aps exit when pressing cmd-q */
-				KillSwitch(true);
+				RequestExit(true);
 				break;
 			}
 #endif
@@ -1276,10 +1278,15 @@ dosurface:
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
 
-		Bit8u* emptytex = new Bit8u[texsize * texsize * 4];
-		memset((void*) emptytex, 0, texsize * texsize * 4);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, texsize, texsize, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, (const GLvoid*)emptytex);
-		delete [] emptytex;
+		const auto texture_area_bytes = static_cast<size_t>(texsize) *
+		                                texsize * MAX_BYTES_PER_PIXEL;
+		uint8_t *emptytex = new uint8_t[texture_area_bytes];
+		assert(emptytex);
+
+		memset(emptytex, 0, texture_area_bytes);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, texsize, texsize, 0,
+		             GL_BGRA_EXT, GL_UNSIGNED_BYTE, emptytex);
+		delete[] emptytex;
 
 		glClearColor (0.0f, 0.0f, 0.0f, 1.0f);
 
@@ -1726,9 +1733,10 @@ static void GUI_ShutDown(Section *)
 	CleanupSDLResources();
 }
 
-static void SetPriority(PRIORITY_LEVELS level) {
-
-#if C_SET_PRIORITY
+static void SetPriority(PRIORITY_LEVELS level)
+{
+	// TODO replace platform-specific API with SDL_SetThreadPriority
+#if defined(HAVE_SETPRIORITY)
 // Do nothing if priorties are not the same and not root, else the highest
 // priority can not be set as users can only lower priority (not restore it)
 
@@ -1754,7 +1762,7 @@ static void SetPriority(PRIORITY_LEVELS level) {
 	case PRIORITY_LEVEL_HIGHEST:
 		SetPriorityClass(GetCurrentProcess(),HIGH_PRIORITY_CLASS);
 		break;
-#elif C_SET_PRIORITY
+#elif defined(HAVE_SETPRIORITY)
 /* Linux use group as dosbox has mulitple threads under linux */
 	case PRIORITY_LEVEL_PAUSE:	// if DOSBox is paused, assume idle priority
 	case PRIORITY_LEVEL_LOWEST:
@@ -2308,7 +2316,7 @@ static void GUI_StartUp(Section *sec)
 
 	// Apply the user's mouse settings
 	Section_prop* s = section->Get_multival("capture_mouse")->GetSection();
-	const std::string control_choice = s->Get_string("capture_mouse (first value)");
+	const std::string control_choice = s->Get_string("capture_mouse_first_value");
 	std::string mouse_control_msg;
 	if (control_choice == "onclick") {
 		sdl.mouse.control_choice = CaptureOnClick;
@@ -2325,8 +2333,9 @@ static void GUI_StartUp(Section *sec)
 	} else {
 		assert(sdl.mouse.control_choice == CaptureOnClick);
 	}
-	std:: string middle_control_msg;
-	if (std::string(s->Get_string("capture_mouse (second value)")) == "middlerelease") {
+	const std::string mclick_choice = s->Get_string("capture_mouse_second_value");
+	std::string middle_control_msg;
+	if (mclick_choice == "middlerelease") {
 		sdl.mouse.middle_will_release = true;
 		if (sdl.mouse.control_choice & (CaptureOnClick | CaptureOnStart))
 			middle_control_msg = " and middle-click will uncapture the mouse";
@@ -2354,8 +2363,7 @@ static void GUI_StartUp(Section *sec)
 	                        SDL_HINT_OVERRIDE);
 
 	/* Get some Event handlers */
-	MAPPER_AddHandler(KillSwitch, SDL_SCANCODE_F9, MMOD1,
-	                  "shutdown", "Shutdown");
+	MAPPER_AddHandler(RequestExit, SDL_SCANCODE_F9, MMOD1, "shutdown", "Shutdown");
 	MAPPER_AddHandler(SwitchFullScreen, SDL_SCANCODE_RETURN, MMOD2,
 	                  "fullscr", "Fullscreen");
 	MAPPER_AddHandler(Restart, SDL_SCANCODE_HOME, MMOD1 | MMOD2,
@@ -2525,15 +2533,18 @@ static void FinalizeWindowState()
 	GFX_ResetScreen();
 }
 
-void GFX_Events() {
-	//Don't poll too often. This can be heavy on the OS, especially Macs.
-	//In idle mode 3000-4000 polls are done per second without this check.
-	//Macs, with this code,  max 250 polls per second. (non-macs unused default max 500)
-	//Currently not implemented for all platforms, given the ALT-TAB stuff for WIN32.
-#if defined (MACOSX)
+bool GFX_Events()
+{
+#if defined(MACOSX)
+	// Don't poll too often. This can be heavy on the OS, especially Macs.
+	// In idle mode 3000-4000 polls are done per second without this check.
+	// Macs, with this code,  max 250 polls per second. (non-macs unused
+	// default max 500). Currently not implemented for all platforms, given
+	// the ALT-TAB stuff for WIN32.
 	static int last_check = 0;
 	int current_check = GetTicks();
-	if (current_check - last_check <=  DB_POLLSKIP) return;
+	if (current_check - last_check <= DB_POLLSKIP)
+		return true;
 	last_check = current_check;
 #endif
 
@@ -2656,7 +2667,8 @@ void GFX_Events() {
 				DEBUG_LOG_MSG("SDL: The window manager "
 				              "requests that the window be "
 				              "closed");
-				continue;
+				RequestExit(true);
+				break;
 
 #if SDL_VERSION_ATLEAST(2, 0, 5)
 			case SDL_WINDOWEVENT_TAKE_FOCUS:
@@ -2698,7 +2710,9 @@ void GFX_Events() {
 						SDL_WaitEvent(&ev);
 
 						switch (ev.type) {
-						case SDL_QUIT: throw(0); break; // a bit redundant at linux at least as the active events gets before the quit event.
+						case SDL_QUIT:
+							RequestExit(true);
+							break;
 						case SDL_WINDOWEVENT:     // wait until we get window focus back
 							if ((ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST) || (ev.window.event == SDL_WINDOWEVENT_MINIMIZED) || (ev.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) || (ev.window.event == SDL_WINDOWEVENT_RESTORED) || (ev.window.event == SDL_WINDOWEVENT_EXPOSED)) {
 								// We've got focus back, so unpause and break out of the loop
@@ -2735,9 +2749,7 @@ void GFX_Events() {
 			if (sdl.mouse.control_choice != NoMouse)
 				HandleMouseButton(&event.button);
 			break;
-		case SDL_QUIT:
-			throw(0);
-			break;
+		case SDL_QUIT: RequestExit(true); break;
 #ifdef WIN32
 		case SDL_KEYDOWN:
 		case SDL_KEYUP:
@@ -2759,13 +2771,14 @@ void GFX_Events() {
 			/* On macs CMD-Q is the default key to close an application */
 			if (event.key.keysym.sym == SDLK_q &&
 			    (event.key.keysym.mod == KMOD_RGUI || event.key.keysym.mod == KMOD_LGUI)) {
-				KillSwitch(true);
+				RequestExit(true);
 				break;
 			}
 #endif
 		default: MAPPER_CheckEvent(&event);
 		}
 	}
+	return !exit_requested;
 }
 
 #if defined (WIN32)
@@ -2826,7 +2839,7 @@ void Config_Add_SDL() {
 	Prop_int *Pint; // use pint for new properties
 	Prop_int *pint;
 	Prop_multival* Pmulti;
-	Section_prop* Psection;
+	Section_prop* psection;
 
 	constexpr auto always = Property::Changeable::Always;
 	constexpr auto deprecated = Property::Changeable::Deprecated;
@@ -2910,9 +2923,11 @@ void Config_Add_SDL() {
 	Pmulti->SetValue(mouse_control_defaults);
 
 	// Add the mouse and middle control as sub-sections
-	Psection = Pmulti->GetSection();
-	Psection->Add_string("capture_mouse (first value)", always, mouse_controls[0])->Set_values(mouse_controls);
-	Psection->Add_string("capture_mouse (second value)", always, middle_controls[0])->Set_values(middle_controls);
+	psection = Pmulti->GetSection();
+	psection->Add_string("capture_mouse_first_value", always, mouse_controls[0])
+	        ->Set_values(mouse_controls);
+	psection->Add_string("capture_mouse_second_value", always, middle_controls[0])
+	        ->Set_values(middle_controls);
 
 	// Construct and set the help block using defaults set above
 	std::string mouse_control_help(
@@ -3373,9 +3388,7 @@ int main(int argc, char* argv[]) {
 			mt32_rom_dir.c_str(), safe_strerror(errno).c_str());
 #endif // C_MT32EMU
 
-#if (ENVIRON_LINKED)
-		control->ParseEnv(environ);
-#endif
+		control->ParseEnv();
 //		UI_Init();
 //		if (control->cmdline->FindExist("-startui")) UI_Run(false);
 		/* Init all the sections */

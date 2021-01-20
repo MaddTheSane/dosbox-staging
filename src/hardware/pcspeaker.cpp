@@ -1,5 +1,8 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -486,10 +489,7 @@ public:
 		spkr.chan->SetPeakAmplitude(
 		        static_cast<uint32_t>(AMPLITUDE_POSITIVE));
 	}
-	~PCSPEAKER(){
-		Section_prop * section=static_cast<Section_prop *>(m_configuration);
-		if(!section->Get_bool("pcspeaker")) return;
-	}
+
 	PCSPEAKER(const PCSPEAKER&) = delete; // prevent copying
 	PCSPEAKER& operator= (const PCSPEAKER&) = delete; // prevent assignment
 };

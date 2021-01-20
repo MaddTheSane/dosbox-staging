@@ -97,6 +97,7 @@ This means that this file has had too many modifications to be safely replaceabl
 
 /* Define to 1 if you have the mprotect function */
 #define C_HAVE_MPROTECT 1
+#define HAVE_MPROTECT
 
 /* Define to 1 to enable heavy debugging, also have to enable C_DEBUG */
 /* #undef C_HEAVY_DEBUG */

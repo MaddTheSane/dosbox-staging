@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -19,19 +19,21 @@
 #include "setup.h"
 
 #include <algorithm>
-
-#include "dosbox.h"
-#include "cross.h"
-#include "control.h"
-#include "support.h"
+#include <climits>
+#include <cstdlib>
 #include <fstream>
-#include <string>
-#include <sstream>
-#include <list>
-#include <stdlib.h>
-#include <stdio.h>
 #include <limits>
-#include <limits.h>
+#include <regex>
+#include <sstream>
+
+#include "control.h"
+#include "string_utils.h"
+
+#ifdef _MSC_VER
+_CRTIMP extern char **_environ;
+#else
+extern char **environ;
+#endif
 
 using namespace std;
 static std::string current_config_dir; // Set by parseconfigfile so Prop_path can use it to construct the realpath
@@ -220,6 +222,17 @@ string Value::ToString() const {
 			break;
 	}
 	return oss.str();
+}
+
+Property::Property(const std::string &name, Changeable::Value when)
+        : propname(name),
+          value(),
+          suggested_values{},
+          default_value(),
+          change(when)
+{
+	assertm(std::regex_match(name, std::regex{"[a-zA-Z0-9_]+"}),
+	        "Only letters, digits, and underscores are allowed in property name");
 }
 
 bool Property::CheckValue(Value const& in, bool warn){
@@ -749,7 +762,7 @@ bool Config::PrintConfig(const std::string &filename) const
 	fprintf(outfile, MSG_Get("CONFIGFILE_INTRO"), VERSION);
 	fprintf(outfile, "\n");
 
-	for (const_it tel = sectionlist.begin(); tel != sectionlist.end(); ++tel){
+	for (auto tel = sectionlist.cbegin(); tel != sectionlist.cend(); ++tel) {
 		/* Print out the Section header */
 		safe_strcpy(temp, (*tel)->GetName());
 		lowcase(temp);
@@ -822,11 +835,26 @@ bool Config::PrintConfig(const std::string &filename) const
 	return true;
 }
 
-Section_prop* Config::AddSection_prop(char const * const _name,void (*_initfunction)(Section*),bool canchange) {
-	Section_prop* blah = new Section_prop(_name);
-	blah->AddInitFunction(_initfunction,canchange);
-	sectionlist.push_back(blah);
-	return blah;
+Section_prop *Config::AddEarlySectionProp(const char *name,
+                                          SectionFunction func,
+                                          bool changeable_at_runtime)
+{
+	Section_prop *s = new Section_prop(name);
+	s->AddEarlyInitFunction(func, changeable_at_runtime);
+	sectionlist.push_back(s);
+	return s;
+}
+
+Section_prop *Config::AddSection_prop(const char *section_name,
+                                      SectionFunction func,
+                                      bool changeable_at_runtime)
+{
+	assertm(std::regex_match(section_name, std::regex{"[a-zA-Z0-9]+"}),
+	        "Only letters and digits are allowed in section name");
+	Section_prop *s = new Section_prop(section_name);
+	s->AddInitFunction(func, changeable_at_runtime);
+	sectionlist.push_back(s);
+	return s;
 }
 
 Section_prop::~Section_prop()
@@ -838,74 +866,88 @@ Section_prop::~Section_prop()
 		delete (*prop);
 }
 
-Section_line* Config::AddSection_line(char const * const _name,void (*_initfunction)(Section*)) {
-	Section_line* blah = new Section_line(_name);
-	blah->AddInitFunction(_initfunction);
+Section_line *Config::AddSection_line(const char *section_name, SectionFunction func)
+{
+	assertm(std::regex_match(section_name, std::regex{"[a-zA-Z0-9]+"}),
+	        "Only letters and digits are allowed in section name");
+	Section_line *blah = new Section_line(section_name);
+	blah->AddInitFunction(func);
 	sectionlist.push_back(blah);
 	return blah;
 }
 
+void Config::Init() const
+{
+	for (const auto &sec : sectionlist)
+		sec->ExecuteEarlyInit();
 
-void Config::Init() {
-	for (const_it tel=sectionlist.begin(); tel!=sectionlist.end(); ++tel) {
-		(*tel)->ExecuteInit();
-	}
+	for (const auto &sec : sectionlist)
+		sec->ExecuteInit();
 }
 
-void Section::AddInitFunction(SectionFunction func, bool canchange)
+void Section::AddEarlyInitFunction(SectionFunction func, bool changeable_at_runtime)
 {
-	initfunctions.emplace_back(func, canchange);
+	early_init_functions.emplace_back(func, changeable_at_runtime);
 }
 
-void Section::AddDestroyFunction(SectionFunction func, bool canchange)
+void Section::AddInitFunction(SectionFunction func, bool changeable_at_runtime)
 {
-	destroyfunctions.emplace_front(func, canchange);
+	initfunctions.emplace_back(func, changeable_at_runtime);
+}
+
+void Section::AddDestroyFunction(SectionFunction func, bool changeable_at_runtime)
+{
+	destroyfunctions.emplace_front(func, changeable_at_runtime);
+}
+
+void Section::ExecuteEarlyInit(bool init_all)
+{
+	for (const auto &fn : early_init_functions)
+		if (init_all || fn.changeable_at_runtime)
+			fn.function(this);
 }
 
 void Section::ExecuteInit(bool initall) {
-	typedef std::list<Function_wrapper>::iterator func_it;
+	typedef std::deque<Function_wrapper>::iterator func_it;
 	for (func_it tel = initfunctions.begin(); tel != initfunctions.end(); ++tel) {
-		if (initall || (*tel).canchange) (*tel).function(this);
+		if (initall || (*tel).changeable_at_runtime)
+			(*tel).function(this);
 	}
 }
 
 void Section::ExecuteDestroy(bool destroyall) {
-	typedef std::list<Function_wrapper>::iterator func_it;
+	typedef std::deque<Function_wrapper>::iterator func_it;
 	for (func_it tel = destroyfunctions.begin(); tel != destroyfunctions.end(); ) {
-		if (destroyall || (*tel).canchange) {
+		if (destroyall || (*tel).changeable_at_runtime) {
 			(*tel).function(this);
 			tel = destroyfunctions.erase(tel); //Remove destroyfunction once used
-		} else ++tel;
+		} else
+			++tel;
 	}
 }
 
-Config::~Config() {
-	reverse_it cnt = sectionlist.rbegin();
-	while (cnt != sectionlist.rend()) {
+Config::~Config()
+{
+	for (auto cnt = sectionlist.rbegin(); cnt != sectionlist.rend(); ++cnt)
 		delete (*cnt);
-		cnt++;
-	}
 }
 
-Section* Config::GetSection(int index) {
-	for (it tel = sectionlist.begin(); tel != sectionlist.end(); ++tel){
-		if (!index--) return (*tel);
+Section *Config::GetSection(const std::string &section_name) const
+{
+	for (auto *el : sectionlist) {
+		if (!strcasecmp(el->GetName(), section_name.c_str()))
+			return el;
 	}
-	return NULL;
+	return nullptr;
 }
 
-Section* Config::GetSection(string const& _sectionname) const {
-	for (const_it tel = sectionlist.begin(); tel != sectionlist.end(); ++tel){
-		if (!strcasecmp((*tel)->GetName(),_sectionname.c_str())) return (*tel);
+Section *Config::GetSectionFromProperty(const char *prop) const
+{
+	for (auto *el : sectionlist) {
+		if (el->GetPropValue(prop) != NO_SUCH_PROPERTY)
+			return el;
 	}
-	return NULL;
-}
-
-Section* Config::GetSectionFromProperty(char const * const prop) const {
-   	for (const_it tel = sectionlist.begin(); tel != sectionlist.end(); ++tel){
-		if ((*tel)->GetPropValue(prop) != NO_SUCH_PROPERTY) return (*tel);
-	}
-	return NULL;
+	return nullptr;
 }
 
 bool Config::ParseConfigFile(char const * const configfilename) {
@@ -965,27 +1007,52 @@ bool Config::ParseConfigFile(char const * const configfilename) {
 	return true;
 }
 
-/*const char* Config::GetPrimaryConfigFile() {
-	return configfile.c_str();
-}*/
+parse_environ_result_t parse_environ(const char * const * envp) noexcept
+{
+	assert(envp);
 
-void Config::ParseEnv(char ** envp) {
-	for(char** env=envp; *env;env++) {
-		char copy[1024];
-		safe_strcpy(copy, *env);
-		if(strncasecmp(copy,"DOSBOX_",7))
+	// Filter envirnment variables in following format:
+	// DOSBOX_SECTIONNAME_PROPNAME=VALUE (prefix, section, and property
+	// names are case-insensitive).
+	std::list<std::tuple<std::string, std::string>> props_to_set;
+	for (const char * const *str = envp; *str; str++) {
+		const char *env_var = *str;
+		if (strncasecmp(env_var, "DOSBOX_", 7) != 0)
 			continue;
-		char* sec_name = &copy[7];
-		if(!(*sec_name))
+		const std::string rest = (env_var + 7);
+		const auto section_delimiter = rest.find('_');
+		if (section_delimiter == string::npos)
 			continue;
-		char* prop_name = strrchr(sec_name,'_');
-		if(!prop_name || !(*prop_name))
+		const auto section_name = rest.substr(0, section_delimiter);
+		if (section_name.empty())
 			continue;
-		*prop_name++=0;
-		Section* sect = GetSection(sec_name);
-		if(!sect)
+		const auto prop_name_and_value = rest.substr(section_delimiter + 1);
+		if (prop_name_and_value.empty() || !isalpha(prop_name_and_value[0]))
 			continue;
-		sect->HandleInputline(prop_name);
+		props_to_set.emplace_back(std::make_tuple(section_name,
+		                                          prop_name_and_value));
+	}
+
+	return props_to_set;
+}
+
+void Config::ParseEnv()
+{
+#ifdef _MSC_VER
+	const char *const *envp = _environ;
+#else
+	const char *const *envp = environ;
+#endif
+	if (envp == nullptr)
+		return;
+
+	for (const auto &set_prop_desc : parse_environ(envp)) {
+		const auto section_name = std::get<0>(set_prop_desc);
+		Section *sec = GetSection(section_name);
+		if (!sec)
+			continue;
+		const auto prop_name_and_value = std::get<1>(set_prop_desc);
+		sec->HandleInputline(prop_name_and_value);
 	}
 }
 

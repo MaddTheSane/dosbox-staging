@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,8 +16,6 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
-
 #include "decoder_basic.h"
 #include "operators.h"
 #include "decoder_opcodes.h"
@@ -33,7 +31,7 @@
 
 static CacheBlock *CreateCacheBlock(CodePageHandler *codepage, PhysPt start, Bitu max_opcodes)
 {
-#if (C_HAVE_MPROTECT)
+#if defined(HAVE_MPROTECT)
 			if(mprotect(cache_code_link_blocks,CACHE_TOTAL+CACHE_MAXSIZE+PAGESIZE_TEMP,PROT_WRITE|PROT_READ) != 0)
 				LOG_MSG("Setting execute permission on the code cache has failed");
 #endif
@@ -615,7 +613,7 @@ illegalopcode:
 	goto finish_block;
 finish_block:
 
-#if (C_HAVE_MPROTECT)
+#if defined(HAVE_MPROTECT)
 			if(mprotect(cache_code_link_blocks,CACHE_TOTAL+CACHE_MAXSIZE+PAGESIZE_TEMP,PROT_EXEC|PROT_READ) != 0)
 				LOG_MSG("Setting execute permission on the code cache has failed");
 #endif

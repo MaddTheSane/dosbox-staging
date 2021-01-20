@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -28,6 +28,12 @@
 //--End of modifications
 
 
+// The exit_requested bool is a conditional break in the parse-loop and
+// machine-loop. Set it to true to gracefully quit in expected circumstances.
+extern bool exit_requested;
+
+// The E_Exit function throws an exception to quit. Call it in unexpected
+// circumstances.
 //[[noreturn]] void E_Exit(const char *message, ...)
 //        GCC_ATTRIBUTE(__format__(__printf__, 1, 2));
 

@@ -1,5 +1,8 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,10 +19,12 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
-#include <string.h>
-#include "dosbox.h"
 #include "inout.h"
+
+#include <cassert>
+#include <limits>
+#include <cstring>
+
 #include "setup.h"
 #include "cpu.h"
 //--Modified 2009-02-26 by Alun Bestor: Incorrect folder path that wont work in XCode project

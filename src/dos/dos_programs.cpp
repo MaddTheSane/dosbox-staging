@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -43,6 +43,7 @@
 #include "setup.h"
 #include "shell.h"
 #include "support.h"
+#include "string_utils.h"
 #include "../ints/int10.h"
 
 #if defined(WIN32)

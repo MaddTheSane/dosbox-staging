@@ -1,5 +1,8 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -39,7 +42,7 @@
 #include "dos_inc.h"
 #include "dos_mscdex.h"
 #include "fs_utils.h"
-#include "support.h"
+#include "string_utils.h"
 #include "cross.h"
 #include "inout.h"
 

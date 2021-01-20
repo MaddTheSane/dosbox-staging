@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,6 +26,7 @@
 #include "cross.h"
 #include "dos_inc.h"
 #include "drives.h"
+#include "string_utils.h"
 #include "support.h"
 
 //--Added 2009-12-26 by Alun Bestor to allow Boxer to hook into DOSBox internals

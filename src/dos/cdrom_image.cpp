@@ -1,5 +1,8 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -41,6 +44,7 @@
 #include "drives.h"
 #include "fs_utils.h"
 #include "setup.h"
+#include "string_utils.h"
 #include "support.h"
 
 using namespace std;
@@ -910,9 +914,8 @@ bool CDROM_Interface_Image::ReadSectors(PhysPt buffer,
 	return success;
 }
 
-bool CDROM_Interface_Image::LoadUnloadMedia(bool unload)
+bool CDROM_Interface_Image::LoadUnloadMedia(bool /*unload*/)
 {
-	(void)unload; // unused by part of the API
 	return true;
 }
 
