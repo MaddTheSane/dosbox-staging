@@ -30,15 +30,6 @@ This means that this file has had too many modifications to be safely replaceabl
  */
 
 
-/* Determines if the compilers supports always_inline attribute. */
-//--Modified 2018-01-30 by C.W. Betts to enable inlining for release builds
-#if defined(BOXER_DEBUG) && BOXER_DEBUG
-#undef C_ATTRIBUTE_ALWAYS_INLINE
-#else
-#define C_ATTRIBUTE_ALWAYS_INLINE 1
-#endif
-//--End of modifications
-
 #define CONF_BRAND "boxer"
 
 /* Determines if the compilers supports fastcall attribute. */
@@ -278,19 +269,6 @@ This means that this file has had too many modifications to be safely replaceabl
 
 /* Define to `int` if you don't have socklen_t */
 /* #undef socklen_t */
-
-
-#if C_ATTRIBUTE_ALWAYS_INLINE
-#define INLINE inline __attribute__((always_inline))
-#else
-#define INLINE inline
-#endif
-
-#if C_ATTRIBUTE_FASTCALL
-#define DB_FASTCALL __attribute__((fastcall))
-#else
-#define DB_FASTCALL
-#endif
 
 
 //--Modified 2009-02-09 by Alun Bestor: instead of going through this rigmarole, we simply map DOSBox's types to the predefined system types.
