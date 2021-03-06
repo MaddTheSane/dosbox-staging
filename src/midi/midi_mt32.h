@@ -26,7 +26,10 @@
 
 #if C_MT32EMU
 
+#include <atomic>
 #include <memory>
+#include <thread>
+#include <vector>
 
 #define MT32EMU_API_TYPE 3
 #include <mt32emu/mt32emu.h>
@@ -34,56 +37,54 @@
 #error Incompatible mt32emu library version
 #endif
 
-#include <SDL_thread.h>
-
 #include "mixer.h"
+#include "rwqueue.h"
+#include "soft_limiter.h"
 
 class MidiHandler_mt32 final : public MidiHandler {
 private:
-	// Scoped types
 	using channel_t = std::unique_ptr<MixerChannel, decltype(&MIXER_DelChannel)>;
-	using conditional_t = std::unique_ptr<SDL_cond, decltype(&SDL_DestroyCond)>;
-	using mutex_t = std::unique_ptr<SDL_mutex, decltype(&SDL_DestroyMutex)>;
-	static void DeleteThread(SDL_Thread *t);
-	using thread_t = std::unique_ptr<SDL_Thread, decltype(&MidiHandler_mt32::DeleteThread)>;
 
 public:
 	using service_t = std::unique_ptr<MT32Emu::Service>;
 
-	~MidiHandler_mt32();
-
+	MidiHandler_mt32();
+	~MidiHandler_mt32() override;
 	void Close() override;
 	const char *GetName() const override { return "mt32"; }
 	bool Open(const char *conf) override;
 	void PlayMsg(const uint8_t *msg) override;
 	void PlaySysex(uint8_t *sysex, size_t len) override;
+	void PrintStats();
 
 private:
 	uint32_t GetMidiEventTimestamp() const;
 	void MixerCallBack(uint16_t len);
-	static int ProcessingThread(void *data);
-	void RenderingLoop();
+	void SetMixerLevel(const AudioFrame &desired) noexcept;
+	uint16_t GetRemainingFrames();
+	void Render();
 
 	// Managed objects
 	channel_t channel{nullptr, MIXER_DelChannel};
-	conditional_t framesInBufferChanged{nullptr, &SDL_DestroyCond};
-	mutex_t lock{nullptr, &SDL_DestroyMutex};
-	thread_t thread{nullptr, &MidiHandler_mt32::DeleteThread};
+
+	std::vector<int16_t> play_buffer = {};
+	static constexpr auto num_buffers = 4;
+	RWQueue<std::vector<int16_t>> playable{num_buffers};
+	RWQueue<std::vector<int16_t>> backstock{num_buffers};
+
 	service_t service{};
+	std::thread renderer{};
+	AudioFrame limiter_ratio = {1.0f, 1.0f};
+	SoftLimiter soft_limiter;
 
-	std::vector<int16_t> audioBuffer = {};
+	// The following two members let us determine the total number of played
+	// frames, which is used by GetMidiEventTimestamp() to calculate a total
+	// time offset.
+	uint32_t total_buffers_played = 0;
+	uint16_t last_played_frame = 0; // relative frame-offset in the play buffer
 
-	// Ongoing state-tracking
-	volatile uint32_t playedBuffers = 0;
-	volatile uint16_t renderPos = 0;
-	volatile uint16_t playPos = 0;
-
-	// Buffer properties
-	uint16_t framesPerAudioBuffer = 0;
-	uint16_t minimumRenderFrames = 0;
-
+	std::atomic_bool keep_rendering = {};
 	bool is_open = false;
-	volatile bool stopProcessing = true;
 };
 
 #endif // C_MT32EMU

@@ -58,15 +58,18 @@ Bitu DEBUG_EnableDebugger(void);
 
 static Bitu ZDRIVE_NUM = 25;
 
-static const char* UnmountHelper(char umount) {
-	int i_drive;
-	if (umount < '0' || umount > 3+'0')
-		i_drive = drive_index(umount);
-	else
-		i_drive = umount - '0';
+static const char *UnmountHelper(char umount)
+{
+	const char drive_id = toupper(umount);
+	const bool using_drive_number = (drive_id >= '0' && drive_id <= '3');
+	const bool using_drive_letter = (drive_id >= 'A' && drive_id <= 'Z');
 
-	if (i_drive >= DOS_DRIVES || i_drive < 0)
-		return MSG_Get("PROGRAM_MOUNT_UMOUNT_NOT_MOUNTED");
+	if (!using_drive_number && !using_drive_letter)
+		return MSG_Get("PROGRAM_MOUNT_DRIVEID_ERROR");
+
+	const uint8_t i_drive = using_drive_number ? (drive_id - '0')
+	                                           : drive_index(drive_id);
+	assert(i_drive < DOS_DRIVES);
 
 	if (i_drive < MAX_DISK_IMAGES && Drives[i_drive] == NULL && !imageDiskList[i_drive])
 		return MSG_Get("PROGRAM_MOUNT_UMOUNT_NOT_MOUNTED");
@@ -100,19 +103,31 @@ static const char* UnmountHelper(char umount) {
 
 class MOUNT : public Program {
 public:
-	void Move_Z(char new_z) {
-		char newz_drive = (char) toupper(new_z);
-		int i_newz = drive_index(newz_drive);
-		if (i_newz >= 0 && i_newz < DOS_DRIVES-1 && !Drives[i_newz]) {
-			ZDRIVE_NUM = i_newz;
+	void Move_Z(char new_z)
+	{
+		const char new_drive_z = toupper(new_z);
+
+		if (new_drive_z < 'A' || new_drive_z > 'Z') {
+			WriteOut(MSG_Get("PROGRAM_MOUNT_DRIVEID_ERROR"), new_drive_z);
+			return;
+		}
+
+		const uint8_t new_idx = drive_index(new_drive_z);
+
+		if (Drives[new_idx]) {
+			WriteOut(MSG_Get("PROGRAM_MOUNT_MOVE_Z_ERROR_1"), new_drive_z);
+			return;
+		}
+
+		if (new_idx < DOS_DRIVES - 1) {
+			ZDRIVE_NUM = new_idx;
 			/* remap drives */
-			Drives[i_newz] = Drives[25];
+			Drives[new_idx] = Drives[25];
 			Drives[25] = 0;
 			if (!first_shell) return; //Should not be possible
 			/* Update environment */
 			std::string line = "";
-			char ppp[2] = {newz_drive,0};
-			std::string tempenv = ppp; tempenv += ":\\";
+			std::string tempenv = {new_drive_z, ':', '\\'};
 			if (first_shell->GetEnvStr("PATH",line)) {
 				std::string::size_type idx = line.find('=');
 				std::string value = line.substr(idx +1 , std::string::npos);
@@ -129,10 +144,12 @@ public:
 			/* Update batch file if running from Z: (very likely: autoexec) */
 			if (first_shell->bf) {
 				std::string &name = first_shell->bf->filename;
-				if (name.length() > 2 &&  name[0] == 'Z' && name[1] == ':') name[0] = newz_drive;
+				if (starts_with("Z:", name))
+					name[0] = new_drive_z;
 			}
 			/* Change the active drive */
-			if (DOS_GetDefaultDrive() == 25) DOS_SetDrive(i_newz);
+			if (DOS_GetDefaultDrive() == 25)
+				DOS_SetDrive(new_idx);
 		}
 	}
 
@@ -1129,14 +1146,11 @@ void RESCAN::Run(void)
 
 	if (cmd->FindCommand(1,temp_line)) {
 		//-A -All /A /All
-		if (temp_line.size() >= 2
-			&& (temp_line[0] == '-' ||
-			    temp_line[0] == '/')
-			&& (temp_line[1] == 'a' ||
-			    temp_line[1] == 'A') ) {
-	 		all = true;
-		}
-		else if (temp_line.size() == 2 && temp_line[1] == ':') {
+		if (temp_line.size() >= 2 &&
+		    (temp_line[0] == '-' || temp_line[0] == '/') &&
+		    (temp_line[1] == 'a' || temp_line[1] == 'A')) {
+			all = true;
+		} else if (temp_line.size() == 2 && temp_line[1] == ':') {
 			lowcase(temp_line);
 			drive  = temp_line[0] - 'a';
 		}
@@ -1661,6 +1675,7 @@ void DOS_SetupPrograms(void) {
 	MSG_Add("PROGRAM_MOUNT_UMOUNT_NOT_MOUNTED","Drive %c isn't mounted.\n");
 	MSG_Add("PROGRAM_MOUNT_UMOUNT_SUCCESS","Drive %c has successfully been removed.\n");
 	MSG_Add("PROGRAM_MOUNT_UMOUNT_NO_VIRTUAL","Virtual Drives can not be unMOUNTed.\n");
+	MSG_Add("PROGRAM_MOUNT_DRIVEID_ERROR", "'%c' is not a valid drive identifier.\n");
 	MSG_Add("PROGRAM_MOUNT_WARNING_WIN","\033[31;1mMounting c:\\ is NOT recommended. Please mount a (sub)directory next time.\033[0m\n");
 	MSG_Add("PROGRAM_MOUNT_WARNING_OTHER","\033[31;1mMounting / is NOT recommended. Please mount a (sub)directory next time.\033[0m\n");
 	MSG_Add("PROGRAM_MOUNT_NO_OPTION", "Warning: Ignoring unsupported option '%s'.\n");
@@ -1670,14 +1685,16 @@ void DOS_SetupPrograms(void) {
 	MSG_Add("PROGRAM_MOUNT_OVERLAY_SAME_AS_BASE","The overlay directory can not be the same as underlying drive.\n");
 	MSG_Add("PROGRAM_MOUNT_OVERLAY_GENERIC_ERROR","Something went wrong.\n");
 	MSG_Add("PROGRAM_MOUNT_OVERLAY_STATUS","Overlay %s on drive %c mounted.\n");
+	MSG_Add("PROGRAM_MOUNT_MOVE_Z_ERROR_1", "Can't move drive Z. Drive %c is mounted already.\n");
 
-	MSG_Add("PROGRAM_MEM_CONVEN","%10d Kb free conventional memory\n");
-	MSG_Add("PROGRAM_MEM_EXTEND","%10d Kb free extended memory\n");
-	MSG_Add("PROGRAM_MEM_EXPAND","%10d Kb free expanded memory\n");
-	MSG_Add("PROGRAM_MEM_UPPER","%10d Kb free upper memory in %d blocks (largest UMB %d Kb)\n");
+	MSG_Add("PROGRAM_MEM_CONVEN", "%10d kB free conventional memory\n");
+	MSG_Add("PROGRAM_MEM_EXTEND", "%10d kB free extended memory\n");
+	MSG_Add("PROGRAM_MEM_EXPAND", "%10d kB free expanded memory\n");
+	MSG_Add("PROGRAM_MEM_UPPER",
+	        "%10d kB free upper memory in %d blocks (largest UMB %d kB)\n");
 
-	MSG_Add("PROGRAM_LOADFIX_ALLOC","%d kb allocated.\n");
-	MSG_Add("PROGRAM_LOADFIX_DEALLOC","%d kb freed.\n");
+	MSG_Add("PROGRAM_LOADFIX_ALLOC", "%d kB allocated.\n");
+	MSG_Add("PROGRAM_LOADFIX_DEALLOC", "%d kB freed.\n");
 	MSG_Add("PROGRAM_LOADFIX_DEALLOCALL","Used memory freed.\n");
 	MSG_Add("PROGRAM_LOADFIX_ERROR","Memory allocation error.\n");
 
@@ -1701,7 +1718,7 @@ void DOS_SetupPrograms(void) {
 		"For information about basic mount type \033[34;1mintro mount\033[0m\n"
 		"For information about CD-ROM support type \033[34;1mintro cdrom\033[0m\n"
 		"For information about special keys type \033[34;1mintro special\033[0m\n"
-		"To access DOSBox Staging's wiki, visit:\033[34;1m\n"
+		"For more imformation, visit DOSBox Staging wiki:\033[34;1m\n"
 		"https://github.com/dosbox-staging/dosbox-staging/wiki\033[0m\n"
 		"\n"
 		"\033[31;1mDOSBox will stop/exit without a warning if an error occurred!\033[0m\n"
@@ -1735,11 +1752,11 @@ void DOS_SetupPrograms(void) {
 		"\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xBC\033[0m\n"
 		);
 	MSG_Add("PROGRAM_INTRO_MOUNT_END",
-		"When the mount has successfully completed you can type \033[34;1mc:\033[0m to go to your freshly\n"
+		"After successfully mounting the disk you can type \033[34;1mc:\033[0m to go to your freshly\n"
 		"mounted C-drive. Typing \033[34;1mdir\033[0m there will show its contents."
 		" \033[34;1mcd\033[0m will allow you to\n"
 		"enter a directory (recognised by the \033[33;1m[]\033[0m in a directory listing).\n"
-		"You can run programs/files which end with \033[31m.exe .bat\033[0m and \033[31m.com\033[0m.\n"
+		"You can run programs/files with extensions \033[31m.exe .bat\033[0m and \033[31m.com\033[0m.\n"
 		);
 	MSG_Add("PROGRAM_INTRO_CDROM",
 		"\033[2J\033[32;1mHow to mount a virtual CD-ROM Drive in DOSBox:\033[0m\n"
@@ -1754,7 +1771,7 @@ void DOS_SetupPrograms(void) {
 		"\n"
 		"\033[34;1mmount D C:\\example -t cdrom -label CDLABEL\033[0m\n"
 		"\n"
-		"Additionally, you can use IMGMOUNT to mount ISO images or CUE files:\n"
+		"Additionally, you can use imgmount to mount iso or cue/bin images:\n"
 		"\n"
 		"\033[34;1mimgmount D C:\\cd.iso -t cdrom\033[0m\n"
 		);
@@ -1794,8 +1811,8 @@ void DOS_SetupPrograms(void) {
 	MSG_Add("PROGRAM_BOOT_IMAGE_NOT_OPEN","Cannot open %s");
 	MSG_Add("PROGRAM_BOOT_BOOT","Booting from drive %c...\n");
 	MSG_Add("PROGRAM_BOOT_CART_WO_PCJR","PCjr cartridge found, but machine is not PCjr");
-	MSG_Add("PROGRAM_BOOT_CART_LIST_CMDS","Available PCjr cartridge commandos:%s");
-	MSG_Add("PROGRAM_BOOT_CART_NO_CMDS","No PCjr cartridge commandos found");
+	MSG_Add("PROGRAM_BOOT_CART_LIST_CMDS", "Available PCjr cartridge commands: %s");
+	MSG_Add("PROGRAM_BOOT_CART_NO_CMDS", "No PCjr cartridge commands found");
 
 	MSG_Add("PROGRAM_LOADROM_SPECIFY_FILE","Must specify ROM file to load.\n");
 	MSG_Add("PROGRAM_LOADROM_CANT_OPEN","ROM file not accessible.\n");
@@ -1811,7 +1828,7 @@ void DOS_SetupPrograms(void) {
 	        "Mount a CD-ROM, floppy, or disk image to a drive letter.\n"
 	        "\n"
 	        "Usage:\n"
-	        "  \033[32;1mimgmount\033[0m \033[37;1mDRIVE\033[0m \033[36;1mCDROM-SET\033[0m [CDROM-SET2 [..]] [-fs iso] -t cdrom|iso \n"
+	        "  \033[32;1mimgmount\033[0m \033[37;1mDRIVE\033[0m \033[36;1mCDROM-SET\033[0m [CDROM-SET2 [..]] [-fs iso] -t cdrom|iso\n"
 	        "  \033[32;1mimgmount\033[0m \033[37;1mDRIVE\033[0m \033[36;1mIMAGEFILE\033[0m [IMAGEFILE2 [..]] [-fs fat] -t hdd|floppy\n"
 	        "  \033[32;1mimgmount\033[0m \033[37;1mDRIVE\033[0m \033[36;1mBOOTIMAGE\033[0m [-fs fat|none] -t hdd -size GEOMETRY\n"
 	        "  \033[32;1mimgmount\033[0m -u \033[37;1mDRIVE\033[0m  (unmounts the DRIVE's image)\n"

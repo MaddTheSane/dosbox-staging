@@ -76,24 +76,19 @@ MidiHandler::MidiHandler() : next(handler_list)
 
 MidiHandler Midi_none;
 
+//--Disabled 2011-09-25 by Alun Bestor: all MIDI handling is now done by Boxer
 /* Include different midi drivers, lowest ones get checked first for default.
    Each header provides an independent midi interface. */
-
-#include "midi_fluidsynth.h"
-#include "midi_mt32.h"
-
-//--Disabled 2011-09-25 by Alun Bestor: all MIDI handling is now done by Boxer
+//
+//#include "midi_fluidsynth.h"
+//#include "midi_mt32.h"
+//
 //#if defined(MACOSX)
 //
-//#if defined(C_SUPPORTS_COREMIDI)
 //#include "midi_coremidi.h"
-//#endif
-//
-//#if defined(C_SUPPORTS_COREAUDIO)
 //#include "midi_coreaudio.h"
-//#endif
 //
-//#elif defined (WIN32)
+//#elif defined(WIN32)
 //
 //#include "midi_win32.h"
 //
@@ -105,11 +100,7 @@ MidiHandler Midi_none;
 //
 //#endif
 //
-//#if defined (HAVE_ALSA)
-//
 //#include "midi_alsa.h"
-//
-//#endif
 //--End of modifications
 
 struct DB_Midi {
@@ -119,7 +110,7 @@ struct DB_Midi {
 	uint8_t cmd_buf[8];
 	uint8_t rt_buf[8];
 	struct {
-		uint8_t buf[SYSEX_SIZE];
+		uint8_t buf[MIDI_SYSEX_SIZE];
 		size_t used;
 		uint32_t delay; // ms
 		uint32_t start; // ms
@@ -164,7 +155,8 @@ void MIDI_RawOutByte(uint8_t data)
 	/* Test for a active sysex tranfer */
 	if (midi.status==0xf0) {
 		if (!(data&0x80)) {
-			if (midi.sysex.used<(SYSEX_SIZE-1)) midi.sysex.buf[midi.sysex.used++] = data;
+			if (midi.sysex.used < (MIDI_SYSEX_SIZE - 1))
+				midi.sysex.buf[midi.sysex.used++] = data;
 			return;
 		} else {
 			midi.sysex.buf[midi.sysex.used++] = 0xf7;

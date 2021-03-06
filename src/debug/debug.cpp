@@ -16,8 +16,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
 #include "dosbox.h"
+
 #if C_DEBUG
 
 #include <string.h>
@@ -306,14 +306,14 @@ public:
 	bool					IsActive		(void)						{ return active; };
 	void					Activate		(bool _active);
 
-	EBreakpoint				GetType			(void)						{ return type; };
-	bool					GetOnce			(void)						{ return once; };
-	PhysPt					GetLocation		(void)						{ return location; };
-	Bit16u					GetSegment		(void)						{ return segment; };
-	Bit32u					GetOffset		(void)						{ return offset; };
-	Bit8u					GetIntNr		(void)						{ return intNr; };
-	Bit16u					GetValue		(void)						{ return ahValue; };
-	Bit16u					GetOther		(void)						{ return alValue; };
+	EBreakpoint GetType() const noexcept { return type; }
+	bool GetOnce() const noexcept { return once; }
+	PhysPt GetLocation() const noexcept { return location; }
+	uint16_t GetSegment() const noexcept { return segment; }
+	uint32_t GetOffset() const noexcept { return offset; }
+	uint8_t GetIntNr() const noexcept { return intNr; }
+	uint16_t GetValue() const noexcept { return ahValue; }
+	uint16_t GetOther() const noexcept { return alValue; }
 
 	// statics
 	static CBreakpoint*		AddBreakpoint		(Bit16u seg, Bit32u off, bool once);
@@ -350,13 +350,16 @@ private:
 	bool		once;
 
 	static std::list<CBreakpoint*>	BPoints;
+#if C_HEAVY_DEBUG
+	friend bool DEBUG_HeavyIsBreakpoint(void);
+#endif
 };
 
 CBreakpoint::CBreakpoint(void):
+type(BKPNT_UNKNOWN),
 location(0),oldData(0xCC),
-active(false),once(false),
 segment(0),offset(0),intNr(0),ahValue(0),alValue(0),
-type(BKPNT_UNKNOWN) { };
+active(false),once(false){ };
 
 void CBreakpoint::Activate(bool _active)
 {
@@ -1576,6 +1579,21 @@ char* AnalyzeInstruction(char* inst, bool saveSelector) {
 };
 
 
+Bit32s DEBUG_Run(Bit32s amount,bool quickexit) {
+	skipFirstInstruction = true;
+	CPU_Cycles = amount;
+	Bit32s ret = (*cpudecoder)();
+	if (quickexit) SetCodeWinStart();
+	else {
+		// ensure all breakpoints are activated
+		CBreakpoint::ActivateBreakpoints();
+		DOSBOX_SetNormalLoop();
+	}
+	return ret;
+}
+
+
+
 Bit32u DEBUG_CheckKeys(void) {
 	Bits ret=0;
 	bool numberrun = false;
@@ -1584,19 +1602,15 @@ Bit32u DEBUG_CheckKeys(void) {
 
 	if (key >='1' && key <='5' && strlen(codeViewData.inputStr) == 0) {
 		const Bit32s v[] ={5,500,1000,5000,10000};
-		CPU_Cycles= v[key - '1'];
 
-		skipFirstInstruction = true;
-
-		ret = (*cpudecoder)();
-		SetCodeWinStart();
+		ret = DEBUG_Run(v[key - '1'],true);
 
 		/* Setup variables so we end up at the proper ret processing */
 		numberrun = true;
 
 		// Don't redraw the screen if it's going to get redrawn immediately
 		// afterwards, to avoid resetting oldregs.
-		if (ret == debugCallback)
+		if (ret == static_cast<Bits>(debugCallback))
 			skipDraw = true;
 		key = -1;
 	}
@@ -1734,16 +1748,8 @@ Bit32u DEBUG_CheckKeys(void) {
 				debugging=false;
 				DrawCode(); // update code window to show "running" status
 
-				skipFirstInstruction = true; // for heavy debugger
-				CPU_Cycles = 1;
-				ret=(*cpudecoder)();
-
-				// ensure all breakpoints are activated
-				CBreakpoint::ActivateBreakpoints();
-
+				ret = DEBUG_Run(1,false);
 				skipDraw = true; // don't update screen after this instruction
-
-				DOSBOX_SetNormalLoop();
 				break;
 		case KEY_F(8):	// Toggle printable characters
 				showPrintable = !showPrintable;
@@ -1762,25 +1768,15 @@ Bit32u DEBUG_CheckKeys(void) {
 				break;
 		case KEY_F(10):	// Step over inst
 				if (StepOver()) {
-					skipFirstInstruction = true; // for heavy debugger
-					CPU_Cycles = 1;
-					ret=(*cpudecoder)();
-
-					DOSBOX_SetNormalLoop();
-
-					// ensure all breakpoints are activated
-					CBreakpoint::ActivateBreakpoints();
+					ret = DEBUG_Run(1,false);
 					skipDraw = true;
 					break;
 				}
 				// If we aren't stepping over something, do a normal step.
-				// NB: Fall-through
+				/* FALLTHROUGH */
 		case KEY_F(11):	// trace into
 				exitLoop = false;
-				skipFirstInstruction = true; // for heavy debugger
-				CPU_Cycles = 1;
-				ret = (*cpudecoder)();
-				SetCodeWinStart();
+				ret = DEBUG_Run(1,true);
 				break;
 		case 0x0A: //Parse typed Command
 				codeViewData.inputStr[MAXCMDLEN] = '\0';
@@ -2067,7 +2063,8 @@ static void LogCPUInfo(void) {
 };
 
 #if C_HEAVY_DEBUG
-static void LogInstruction(Bit16u segValue, Bit32u eipValue,  ofstream& out) {
+static void LogInstruction(uint16_t segValue, uint32_t eipValue, ofstream &out)
+{
 	static char empty[23] = { 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,0 };
 
 	if (cpuLogType == 3) { //Log only cs:ip.
@@ -2130,7 +2127,7 @@ static void LogInstruction(Bit16u segValue, Bit32u eipValue,  ofstream& out) {
 		    << " CR0:" << setw(8) << cpu.cr0;
 	}
 	out << endl;
-};
+}
 #endif
 
 // DEBUG.COM stuff
@@ -2187,22 +2184,22 @@ private:
 	bool	active;
 };
 
-void DEBUG_CheckExecuteBreakpoint(Bit16u seg, Bit32u off)
+void DEBUG_CheckExecuteBreakpoint(uint16_t seg, uint32_t off)
 {
 	if (pDebugcom && pDebugcom->IsActive()) {
 		CBreakpoint::AddBreakpoint(seg,off,true);
 		CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
 		pDebugcom = 0;
-	};
-};
+	}
+}
 
-Bitu DEBUG_EnableDebugger(void)
+Bitu DEBUG_EnableDebugger()
 {
 	exitLoop = true;
 	DEBUG_Enable(true);
 	CPU_Cycles=CPU_CycleLeft=0;
 	return 0;
-};
+}
 
 static void DEBUG_ProgramStart(Program * * make) {
 	*make=new DEBUG;
@@ -2261,23 +2258,23 @@ void DEBUG_Init(Section* sec) {
 
 // DEBUGGING VAR STUFF
 
-void CDebugVar::InsertVariable(char* name, PhysPt adr)
+void CDebugVar::InsertVariable(char *name, PhysPt adr)
 {
 	varList.push_back(new CDebugVar(name,adr));
-};
+}
 
-void CDebugVar::DeleteAll(void)
+void CDebugVar::DeleteAll()
 {
 	std::vector<CDebugVar*>::iterator i;
 	CDebugVar* bp;
 	for(i=varList.begin(); i != varList.end(); i++) {
 		bp = static_cast<CDebugVar*>(*i);
 		delete bp;
-	};
+	}
 	(varList.clear)();
-};
+}
 
-CDebugVar* CDebugVar::FindVar(PhysPt pt)
+CDebugVar *CDebugVar::FindVar(PhysPt pt)
 {
 	if (varList.empty()) return 0;
 
@@ -2286,11 +2283,12 @@ CDebugVar* CDebugVar::FindVar(PhysPt pt)
 	for(std::vector<CDebugVar*>::size_type i = 0; i != s; i++) {
 		bp = static_cast<CDebugVar*>(varList[i]);
 		if (bp->GetAdr() == pt) return bp;
-	};
+	}
 	return 0;
-};
+}
 
-bool CDebugVar::SaveVars(char* name) {
+bool CDebugVar::SaveVars(char *name)
+{
 	if (varList.size() > 65535) return false;
 
 	FILE* f = fopen(name,"wb+");
@@ -2309,12 +2307,12 @@ bool CDebugVar::SaveVars(char* name) {
 		// adr
 		PhysPt adr = bp->GetAdr();
 		fwrite(&adr,1,sizeof(adr),f);
-	};
+	}
 	fclose(f);
 	return true;
-};
+}
 
-bool CDebugVar::LoadVars(char* name)
+bool CDebugVar::LoadVars(char *name)
 {
 	FILE* f = fopen(name,"rb");
 	if (!f) return false;
@@ -2334,10 +2332,10 @@ bool CDebugVar::LoadVars(char* name)
 		if (fread(&adr,sizeof(adr),1,f) != 1) break;
 		// insert
 		InsertVariable(name,adr);
-	};
+	}
 	fclose(f);
 	return true;
-};
+}
 
 static void SaveMemory(Bit16u seg, Bit32u ofs1, Bit32u num) {
 	FILE* f = fopen("MEMDUMP.TXT","wt");
@@ -2409,7 +2407,8 @@ static void OutputVecTable(char* filename) {
 }
 
 #define DEBUG_VAR_BUF_LEN 16
-static void DrawVariables(void) {
+static void DrawVariables()
+{
 	if (CDebugVar::varList.empty()) return;
 
 	CDebugVar *dv;
@@ -2452,7 +2451,7 @@ static void DrawVariables(void) {
 	}
 
 	if (windowchanges) wrefresh(dbg.win_var);
-};
+}
 #undef DEBUG_VAR_BUF_LEN
 // HEAVY DEBUGGING STUFF
 
@@ -2491,8 +2490,8 @@ struct TLogInst {
 
 TLogInst logInst[LOGCPUMAX];
 
-void DEBUG_HeavyLogInstruction(void) {
-
+void DEBUG_HeavyLogInstruction()
+{
 	static char empty[23] = { 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,0 };
 
 	PhysPt start = GetAddress(SegValue(cs),reg_eip);
@@ -2505,7 +2504,7 @@ void DEBUG_HeavyLogInstruction(void) {
 		Bitu reslen = strlen(res);
 		if (reslen < 22) memset(res + reslen, ' ',22 - reslen);
 		res[22] = 0;
-	};
+	}
 
 	Bitu len = strlen(dline);
 	if (len < 30) memset(dline + len,' ',30 - len);
@@ -2538,9 +2537,10 @@ void DEBUG_HeavyLogInstruction(void) {
 	inst.i    = GETFLAGBOOL(IF);
 
 	if (++logCount >= LOGCPUMAX) logCount = 0;
-};
+}
 
-void DEBUG_HeavyWriteLogInstruction(void) {
+void DEBUG_HeavyWriteLogInstruction()
+{
 	if (!logHeavy) return;
 	logHeavy = false;
 
@@ -2577,7 +2577,7 @@ void DEBUG_HeavyWriteLogInstruction(void) {
 
 	out.close();
 	DEBUG_ShowMsg("DEBUG: Done.\n");
-};
+}
 
 bool DEBUG_HeavyIsBreakpoint(void) {
 	static Bitu zero_count = 0;
@@ -2610,7 +2610,7 @@ bool DEBUG_HeavyIsBreakpoint(void) {
 		skipFirstInstruction = false;
 		return false;
 	}
-	if (CBreakpoint::CheckBreakpoint(SegValue(cs),reg_eip)) {
+	if (!CBreakpoint::BPoints.empty() && CBreakpoint::CheckBreakpoint(SegValue(cs),reg_eip)) {
 		return true;
 	}
 	return false;
@@ -2618,7 +2618,4 @@ bool DEBUG_HeavyIsBreakpoint(void) {
 
 #endif // HEAVY DEBUG
 
-
 #endif // DEBUG
-
-

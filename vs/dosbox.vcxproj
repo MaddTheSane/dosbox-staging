@@ -237,6 +237,8 @@
     </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\src\dosbox.cpp" />
+    <ClCompile Include="..\src\main.cpp" />
     <ClCompile Include="..\src\cpu\callback.cpp" />
     <ClCompile Include="..\src\cpu\core_dynrec.cpp" />
     <ClCompile Include="..\src\cpu\core_dyn_x86.cpp" />
@@ -252,7 +254,6 @@
     <ClCompile Include="..\src\debug\debug_disasm.cpp" />
     <ClCompile Include="..\src\debug\debug_gui.cpp" />
     <ClCompile Include="..\src\debug\debug_win32.cpp" />
-    <ClCompile Include="..\src\dosbox.cpp" />
     <ClCompile Include="..\src\dos\cdrom.cpp" />
     <ClCompile Include="..\src\dos\cdrom_image.cpp" />
     <ClCompile Include="..\src\dos\dos.cpp" />
@@ -364,12 +365,15 @@
     <ClCompile Include="..\src\misc\fs_utils_win32.cpp" />
     <ClCompile Include="..\src\misc\messages.cpp" />
     <ClCompile Include="..\src\misc\programs.cpp" />
+    <ClCompile Include="..\src\misc\rwqueue.cpp" />
     <ClCompile Include="..\src\misc\setup.cpp" />
+    <ClCompile Include="..\src\misc\soft_limiter.cpp" />
     <ClCompile Include="..\src\misc\support.cpp" />
     <ClCompile Include="..\src\shell\shell.cpp" />
     <ClCompile Include="..\src\shell\shell_batch.cpp" />
     <ClCompile Include="..\src\shell\shell_cmds.cpp" />
     <ClCompile Include="..\src\shell\shell_misc.cpp" />
+    <ClCompile Include="..\src\platform\visualc\version.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\src\winres.rc" />
@@ -409,9 +413,11 @@
     <ClInclude Include="..\include\programs.h" />
     <ClInclude Include="..\include\regs.h" />
     <ClInclude Include="..\include\render.h" />
+    <ClInclude Include="..\include\rwqueue.h" />
     <ClInclude Include="..\include\serialport.h" />
     <ClInclude Include="..\include\setup.h" />
     <ClInclude Include="..\include\shell.h" />
+    <ClInclude Include="..\include\soft_limiter.h" />
     <ClInclude Include="..\include\string_utils.h" />
     <ClInclude Include="..\include\support.h" />
     <ClInclude Include="..\include\timer.h" />

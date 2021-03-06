@@ -27,6 +27,7 @@
 #include "BXCoalface.h"
 //--End of modifications
 
+int sdl_main(int argc, char *argv[]);
 
 // The exit_requested bool is a conditional break in the parse-loop and
 // machine-loop. Set it to true to gracefully quit in expected circumstances.
@@ -43,6 +44,8 @@ const char* MSG_Get(char const *);     //get messages from the internal language
 class Section;
 
 typedef Bitu (LoopHandler)(void);
+
+const char *DOSBOX_GetDetailedVersion() noexcept;
 
 void DOSBOX_RunMachine();
 void DOSBOX_SetLoop(LoopHandler * handler);

@@ -16,11 +16,12 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "shell.h"
+
 #include <climits>
 #include <stdlib.h>
 #include <string.h>
 
-#include "shell.h"
 #include "support.h"
 
 //--Added 2013-09-22 by Alun Bestor to let Boxer track batch files

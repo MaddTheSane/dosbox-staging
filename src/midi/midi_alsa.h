@@ -24,6 +24,8 @@
 
 #include "midi_handler.h"
 
+#if C_ALSA
+
 #define ALSA_PCM_OLD_HW_PARAMS_API
 #define ALSA_PCM_OLD_SW_PARAMS_API
 #include <alsa/asoundlib.h>
@@ -150,8 +152,10 @@ public:
 
 	void Close() override
 	{
-		if (seq_handle)
+		if (seq_handle) {
+			HaltSequence();
 			snd_seq_close(seq_handle);
+		}
 	}
 
 	bool Open(const char *conf) override
@@ -223,5 +227,7 @@ public:
 };
 
 MidiHandler_alsa Midi_alsa;
+
+#endif // C_ALSA
 
 #endif

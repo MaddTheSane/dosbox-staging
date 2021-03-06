@@ -93,12 +93,13 @@ There is generally no speed advantage when raising this value.
 .
 :CONFIG_STARTUP_VERBOSITY
 Controls verbosity prior to displaying the program:
-       | Show splash | Show welcome | Show early stdout
-high   |     yes     |     yes      |       yes
-medium |     no      |     yes      |       yes
-low    |     no      |     no       |       yes
-quiet  |     no      |     no       |       no
-auto   | 'low' if exec or dir is passed, otherwise 'high'
+Verbosity   | Splash | Welcome | Early stdout
+high        |  yes   |   yes   |    yes
+medium      |  no    |   yes   |    yes
+low         |  no    |   no    |    yes
+quiet       |  no    |   no    |    no
+splash_only |  yes   |   no    |    no
+auto        | 'low' if exec or dir is passed, otherwise 'high'
 .
 :CONFIG_FRAMESKIP
 How many frames DOSBox skips before drawing one.
@@ -207,11 +208,6 @@ An optional percentage will scale the SoundFont's volume.
 For example: 'soundfont.sf2 50' will attenuate it by 50 percent.
 The scaling percentage can range from 1 to 500.
 .
-:CONFIG_SYNTH_THREADS
-If set to a value greater than 1, then additional synthesis
-threads will be created to take advantage of many CPU cores.
-(min 1, max 256)
-.
 :CONFIG_MODEL
 Model of synthesizer to use. The default (auto) prefers CM-32L
 if both sets of ROMs are provided. For early Sierra games and Dune 2
@@ -219,10 +215,10 @@ it's recommended to use 'mt32', while newer games typically made
 use of the CM-32L's extra sound effects (use 'auto' or 'cm32l')
 .
 :CONFIG_ROMDIR
-The directory holding the required MT-32 and/or CM-32L ROMs
-named as follows:
-  MT32_CONTROL.ROM or CM32L_CONTROL.ROM - control ROM files(s).
-  MT32_PCM.ROM or CM32L_PCM.ROM - PCM ROM file(s).
+The directory containing one or both pairs of MT-32 and/or CM-32L ROMs.
+The files must be named in capitals, as follows:
+  - MT-32 ROM pair: MT32_CONTROL.ROM and MT32_PCM.ROM
+  - CM-32L ROM pair: CM32L_CONTROL.ROM and CM32L_PCM.ROM
 The directory can be absolute or relative, or leave it blank to
 use the 'mt32-roms' directory in your DOSBox configuration
 directory, followed by checking other common system locations.
@@ -398,7 +394,7 @@ Additional config files:
 
 .
 :PROGRAM_CONFIG_CONFDIR
-DOSBox %s configuration directory: 
+DOSBox Staging %s configuration directory: 
 %s
 
 
@@ -420,7 +416,7 @@ Use -writelang or -wl filename to write the current language strings.
 -r [parameters]
  Restart DOSBox, either using the previous parameters or any that are appended.
 -wcp [filename]
- Write config file to the program directory, dosbox.conf or the specified 
+ Write config file to the program directory, dosbox.conf or the specified
  filename.
 -wcd
  Write to the default config file in the config directory.
@@ -562,6 +558,10 @@ Drive %c has successfully been removed.
 Virtual Drives can not be unMOUNTed.
 
 .
+:PROGRAM_MOUNT_DRIVEID_ERROR
+'%c' is not a valid drive identifier.
+
+.
 :PROGRAM_MOUNT_WARNING_WIN
 [31;1mMounting c:\ is NOT recommended. Please mount a (sub)directory next time.[0m
 
@@ -597,28 +597,32 @@ Something went wrong.
 Overlay %s on drive %c mounted.
 
 .
+:PROGRAM_MOUNT_MOVE_Z_ERROR_1
+Can't move drive Z. Drive %c is mounted already.
+
+.
 :PROGRAM_MEM_CONVEN
-%10d Kb free conventional memory
+%10d kB free conventional memory
 
 .
 :PROGRAM_MEM_EXTEND
-%10d Kb free extended memory
+%10d kB free extended memory
 
 .
 :PROGRAM_MEM_EXPAND
-%10d Kb free expanded memory
+%10d kB free expanded memory
 
 .
 :PROGRAM_MEM_UPPER
-%10d Kb free upper memory in %d blocks (largest UMB %d Kb)
+%10d kB free upper memory in %d blocks (largest UMB %d kB)
 
 .
 :PROGRAM_LOADFIX_ALLOC
-%d kb allocated.
+%d kB allocated.
 
 .
 :PROGRAM_LOADFIX_DEALLOC
-%d kb freed.
+%d kB freed.
 
 .
 :PROGRAM_LOADFIX_DEALLOCALL
@@ -680,7 +684,7 @@ DOSBox creates a shell for you which looks like old plain DOS.
 For information about basic mount type [34;1mintro mount[0m
 For information about CD-ROM support type [34;1mintro cdrom[0m
 For information about special keys type [34;1mintro special[0m
-To access DOSBox Staging's wiki, visit:[34;1m
+For more imformation, visit DOSBox Staging wiki:[34;1m
 https://github.com/dosbox-staging/dosbox-staging/wiki[0m
 
 [31;1mDOSBox will stop/exit without a warning if an error occurred![0m
@@ -710,10 +714,10 @@ You have to mount the directory containing the files.
 
 .
 :PROGRAM_INTRO_MOUNT_END
-When the mount has successfully completed you can type [34;1mc:[0m to go to your freshly
+After successfully mounting the disk you can type [34;1mc:[0m to go to your freshly
 mounted C-drive. Typing [34;1mdir[0m there will show its contents. [34;1mcd[0m will allow you to
 enter a directory (recognised by the [33;1m[][0m in a directory listing).
-You can run programs/files which end with [31m.exe .bat[0m and [31m.com[0m.
+You can run programs/files with extensions [31m.exe .bat[0m and [31m.com[0m.
 
 .
 :PROGRAM_INTRO_CDROM
@@ -729,7 +733,7 @@ If it doesn't work you might have to tell DOSBox the label of the CD-ROM:
 
 [34;1mmount D C:\example -t cdrom -label CDLABEL[0m
 
-Additionally, you can use IMGMOUNT to mount ISO images or CUE files:
+Additionally, you can use imgmount to mount iso or cue/bin images:
 
 [34;1mimgmount D C:\cd.iso -t cdrom[0m
 
@@ -798,10 +802,10 @@ Booting from drive %c...
 PCjr cartridge found, but machine is not PCjr
 .
 :PROGRAM_BOOT_CART_LIST_CMDS
-Available PCjr cartridge commandos:%s
+Available PCjr cartridge commands: %s
 .
 :PROGRAM_BOOT_CART_NO_CMDS
-No PCjr cartridge commandos found
+No PCjr cartridge commands found
 .
 :PROGRAM_LOADROM_SPECIFY_FILE
 Must specify ROM file to load.
@@ -835,7 +839,7 @@ mounts compact disc image(s) or floppy disk image(s) to a given drive letter.
 Mount a CD-ROM, floppy, or disk image to a drive letter.
 
 Usage:
-  [32;1mimgmount[0m [37;1mDRIVE[0m [36;1mCDROM-SET[0m [CDROM-SET2 [..]] [-fs iso] -t cdrom|iso 
+  [32;1mimgmount[0m [37;1mDRIVE[0m [36;1mCDROM-SET[0m [CDROM-SET2 [..]] [-fs iso] -t cdrom|iso
   [32;1mimgmount[0m [37;1mDRIVE[0m [36;1mIMAGEFILE[0m [IMAGEFILE2 [..]] [-fs fat] -t hdd|floppy
   [32;1mimgmount[0m [37;1mDRIVE[0m [36;1mBOOTIMAGE[0m [-fs fat|none] -t hdd -size GEOMETRY
   [32;1mimgmount[0m -u [37;1mDRIVE[0m  (unmounts the DRIVE's image)
@@ -1399,13 +1403,27 @@ View or set the reported DOS version.
 
 .
 :SHELL_CMD_VER_HELP_LONG
-VER
-VER SET version_number
-VER SET major_version [minor_version]
+Usage:
+  [32;1mver[0m
+  [32;1mver[0m [37;1mset[0m [36;1mVERSION[0m
+
+Where:
+  [36;1mVERSION[0m can be a whole number, such as [36;1m5[0m, or include a two-digit decimal
+          value, such as: [36;1m6.22[0m, [36;1m7.01[0m, or [36;1m7.10[0m. The decimal can alternatively be
+          space-separated, such as: [36;1m6 22[0m, [36;1m7 01[0m, or [36;1m7 10[0m.
+
+Notes:
+  The DOS version can also be set in the configuration file under the [dos]
+  section using the "ver = [36;1mVERSION[0m" setting.
+
+Examples:
+  [32;1mver[0m [37;1mset[0m [36;1m6.22[0m
+  [32;1mver[0m [37;1mset[0m [36;1m7 10[0m
 
 .
 :SHELL_CMD_VER_VER
-DOSBox Staging version %s. Reported DOS version %d.%02d.
+DOSBox Staging version %s
+DOS version %d.%02d
 
 .
 :SHELL_CMD_VER_INVALID

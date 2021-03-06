@@ -13,17 +13,17 @@ Jakiej rozdzielczo˜ci u¾y† w peˆnym ekranie: 'original', 'desktop',
 lub dokˆadna rozdzielczo˜† (np. 1024x768).
 .
 :CONFIG_WINDOWRESOLUTION
-Set window size to be used when running in windowed mode:
-  default:   Select the best option based on your
-             environment and other settings.
-  original:  Resize window to the resolution picked by
-             the emulated program.
-  resizable: Make the emulator window resizable.
-             This is an experimental option, works only with
-             output=opengl and glshader=sharp (or none)
-  <custom>:  Scale the window content to the indicated
-             dimensions, in WxH format. For example: 1024x768.
-             Scaling is not performed for output=surface.
+Ustaw wielko˜† okna w trybie okienkowym:
+  default:   Wybierz najlepsz¥ opcj© dla twojego
+             ˜rodowiska.
+  original:  Zmieä wielko˜† okna do rozdzielczo˜ci wybranej przez
+             emulowany program.
+  resizable: Ustaw okno o zmiennej wielko˜ci.
+             To jest eksperymentalna opcja, dziaˆa tylko z
+             output=opengl i glshader=sharp (lub none)
+  <custom>:  Skaluj zawarto˜† okna do wybranej wielko˜ci, u¾yj
+             wielko˜ci w formacie XxY, na przykˆad: 1024x768.
+             Skalowanie nie dziaˆa dla output=surface.
 .
 :CONFIG_OUTPUT
 What video system to use for output.
@@ -93,12 +93,13 @@ There is generally no speed advantage when raising this value.
 .
 :CONFIG_STARTUP_VERBOSITY
 Controls verbosity prior to displaying the program:
-       | Show splash | Show welcome | Show early stdout
-high   |     yes     |     yes      |       yes
-medium |     no      |     yes      |       yes
-low    |     no      |     no       |       yes
-quiet  |     no      |     no       |       no
-auto   | 'low' if exec or dir is passed, otherwise 'high'
+            | Splash | Welcome | Early stdout
+high        |  yes   |   yes   |     yes
+medium      |  no    |   yes   |     yes
+low         |  no    |   no    |     yes
+quiet       |  no    |   no    |     no
+splash_only |  yes   |   no    |     no
+auto        | 'low' if exec or dir is passed, otherwise 'high'
 .
 :CONFIG_FRAMESKIP
 How many frames DOSBox skips before drawing one.
@@ -207,11 +208,6 @@ An optional percentage will scale the SoundFont's volume.
 For example: 'soundfont.sf2 50' will attenuate it by 50 percent.
 The scaling percentage can range from 1 to 500.
 .
-:CONFIG_SYNTH_THREADS
-If set to a value greater than 1, then additional synthesis
-threads will be created to take advantage of many CPU cores.
-(min 1, max 256)
-.
 :CONFIG_MODEL
 Model of synthesizer to use. The default (auto) prefers CM-32L
 if both sets of ROMs are provided. For early Sierra games and Dune 2
@@ -219,10 +215,10 @@ it's recommended to use 'mt32', while newer games typically made
 use of the CM-32L's extra sound effects (use 'auto' or 'cm32l')
 .
 :CONFIG_ROMDIR
-The directory holding the required MT-32 and/or CM-32L ROMs
-named as follows:
-  MT32_CONTROL.ROM or CM32L_CONTROL.ROM - control ROM files(s).
-  MT32_PCM.ROM or CM32L_PCM.ROM - PCM ROM file(s).
+The directory containing one or both pairs of MT-32 and/or CM-32L ROMs.
+The files must be named in capitals, as follows:
+  - MT-32 ROM pair: MT32_CONTROL.ROM and MT32_PCM.ROM
+  - CM-32L ROM pair: CM32L_CONTROL.ROM and CM32L_PCM.ROM
 The directory can be absolute or relative, or leave it blank to
 use the 'mt32-roms' directory in your DOSBox configuration
 directory, followed by checking other common system locations.
@@ -296,14 +292,14 @@ Sample rate of the Tandy 3-Voice generation.
 Enable Disney Sound Source emulation. (Covox Voice Master and Speech Thing compatible).
 .
 :CONFIG_JOYSTICKTYPE
-Type of joystick to emulate: auto (default), none,
+Type of joystick to emulate: auto (default),
+none (disables joystick emulation),
 2axis (supports two joysticks),
 4axis (supports one joystick, first joystick used),
 4axis_2 (supports one joystick, second joystick used),
 fcs (Thrustmaster), ch (CH Flightstick).
-none disables joystick emulation.
 auto chooses emulation depending on real joystick(s).
-(Remember to reset dosbox's mapperfile if you saved it earlier)
+(Remember to reset DOSBox's mapperfile if you saved it earlier)
 .
 :CONFIG_TIMED
 enable timed intervals for axis. Experiment with this option, if your joystick drifts (away).
@@ -369,20 +365,19 @@ Common settings are 3.3, 5.0, 6.22, and 7.1.
 Language code of the keyboard layout (or none).
 .
 :CONFIG_IPX
-Enable ipx over UDP/IP emulation.
+Wˆ¥cz emulacj© IPX po UDP/IP.
 .
 :AUTOEXEC_CONFIGFILE_HELP
-Lines in this section will be run at startup.
-You can put your MOUNT lines here.
+Linie w tej sekcji zostan¥ uruchomione przy starcie.
+Mo¾esz umie˜ci† tu np. komendy MOUNT.
 
 .
 :CONFIGFILE_INTRO
-# This is the configuration file for dosbox-staging (%s).
-# Lines starting with a '#' character are comments.
-
+# To jest plik konfiguracyjny dla dosbox-staging (%s).
+# Linie zaczynaj¥ce si© od # s¥ komentarzami.
 .
 :CONFIG_SUGGESTED_VALUES
-Possible values
+Mo¾liwe warto˜ci.
 .
 :PROGRAM_CONFIG_NOCONFIGFILE
 No config file loaded!
@@ -398,14 +393,14 @@ Additional config files:
 
 .
 :PROGRAM_CONFIG_CONFDIR
-DOSBox %s configuration directory: 
+Katalog z konfiguracj¥ DOSBox Staging %s: 
 %s
 
 
 .
 :PROGRAM_CONFIG_FILE_ERROR
 
-Can't open file %s
+Nie mo¾na otworzy† pliku %s
 
 .
 :PROGRAM_CONFIG_FILE_WHICH
@@ -420,7 +415,7 @@ Use -writelang or -wl filename to write the current language strings.
 -r [parameters]
  Restart DOSBox, either using the previous parameters or any that are appended.
 -wcp [filename]
- Write config file to the program directory, dosbox.conf or the specified 
+ Write config file to the program directory, dosbox.conf or the specified
  filename.
 -wcd
  Write to the default config file in the config directory.
@@ -432,6 +427,9 @@ Use -writelang or -wl filename to write the current language strings.
 -axadd [line] adds a line to the autoexec section.
 -axtype prints the content of the autoexec section.
 -securemode switches to secure mode.
+-avistart starts AVI recording.
+-avistop stops AVI recording.
+-startmapper starts the keymapper.
 -get "section property" returns the value of the property.
 -set "section property=value" sets the value.
 
@@ -469,35 +467,35 @@ DOSBox configuration contains the following sections:
 
 .
 :PROGRAM_CONFIG_SECURE_ON
-Switched to secure mode.
+Przeˆ¥czono w tryb bezpieczny.
 
 .
 :PROGRAM_CONFIG_SECURE_DISALLOW
-This operation is not permitted in secure mode.
+Ta operacja nie jest mo¾liwa w trybie bezpiecznym.
 
 .
 :PROGRAM_CONFIG_SECTION_ERROR
-Section "%s" doesn't exist.
+Sekcja %s nie istnieje.
 
 .
 :PROGRAM_CONFIG_VALUE_ERROR
-"%s" is not a valid value for property %s.
+"%s" nie jest poprawn¥ warto˜ci¥ parametru %s.
 
 .
 :PROGRAM_CONFIG_PROPERTY_ERROR
-No such section or property.
+Brak takiej sekcji lub parametru.
 
 .
 :PROGRAM_CONFIG_NO_PROPERTY
-There is no property "%s" in section "%s".
+Brak parametru %s w sekcji %s.
 
 .
 :PROGRAM_CONFIG_SET_SYNTAX
-Correct syntax: config -set "section property".
+Poprawna skˆadnia: config -set "sekcja parametr".
 
 .
 :PROGRAM_CONFIG_GET_SYNTAX
-Correct syntax: config -get "section property".
+Poprawna skˆadnia: config -get "sekcja parametr".
 
 .
 :PROGRAM_CONFIG_PRINT_STARTUP
@@ -507,11 +505,11 @@ DOSBox was started with the following command line parameters:
 
 .
 :PROGRAM_CONFIG_MISSINGPARAM
-Missing parameter.
+Zabrakˆo parametru.
 
 .
 :PROGRAM_MOUNT_CDROMS_FOUND
-CDROMs found: %d
+Znalezione CD-ROMy: %d
 
 .
 :PROGRAM_MOUNT_STATUS_DRIVE
@@ -556,15 +554,19 @@ Dysk %c zostaˆ pomy˜lnie odmontowany.
 
 .
 :PROGRAM_MOUNT_UMOUNT_NO_VIRTUAL
-Virtual Drives can not be unMOUNTed.
+Dyski wirtualne nie mog¥ zosta† odmontowane.
+
+.
+:PROGRAM_MOUNT_DRIVEID_ERROR
+'%c' nie jest prawidˆowym identyfikatorem dysku.
 
 .
 :PROGRAM_MOUNT_WARNING_WIN
-[31;1mMounting c:\ is NOT recommended. Please mount a (sub)directory next time.[0m
+[31;1mMontowanie dysku C:\ nie jest zalecane. Prosz© nast©pnym razem zamontowa† (pod)katalog.[0m
 
 .
 :PROGRAM_MOUNT_WARNING_OTHER
-[31;1mMounting / is NOT recommended. Please mount a (sub)directory next time.[0m
+[31;1mMontowanie katalogu / nie jest zalecane.Prosz© nast©pnym razem zamontowa† (pod)katalog.[0m
 
 .
 :PROGRAM_MOUNT_NO_OPTION
@@ -587,87 +589,91 @@ The overlay directory can not be the same as underlying drive.
 
 .
 :PROGRAM_MOUNT_OVERLAY_GENERIC_ERROR
-Something went wrong.
+Co˜ poszˆo nie tak.
 
 .
 :PROGRAM_MOUNT_OVERLAY_STATUS
 Overlay %s on drive %c mounted.
 
 .
+:PROGRAM_MOUNT_MOVE_Z_ERROR_1
+Nie mo¾na przenie˜† dysku Z. Dysk %c jest ju¾ zamontowany.
+
+.
 :PROGRAM_MEM_CONVEN
-%10d Kb free conventional memory
+%10d kB wolnej pami©ci konwencjonalnej
 
 .
 :PROGRAM_MEM_EXTEND
-%10d Kb free extended memory
+%10d kB wolnej pami©ci rozszerzonej
 
 .
 :PROGRAM_MEM_EXPAND
-%10d Kb free expanded memory
+%10d kB wolnej pami©ci stronicowej
 
 .
 :PROGRAM_MEM_UPPER
-%10d Kb free upper memory in %d blocks (largest UMB %d Kb)
+%10d kB wolnej pami©ci g¢rnej w %d blokach (najwi©kszy blok %d kB)
 
 .
 :PROGRAM_LOADFIX_ALLOC
-%d kb allocated.
+%d kB zaalokowanych.
 
 .
 :PROGRAM_LOADFIX_DEALLOC
-%d kb freed.
+%d kB zwolnionych.
 
 .
 :PROGRAM_LOADFIX_DEALLOCALL
-Used memory freed.
+U¾yta pami©† zwolniona.
 
 .
 :PROGRAM_LOADFIX_ERROR
-Memory allocation error.
+Bˆ¥d alokacji pami©ci.
 
 .
 :MSCDEX_SUCCESS
-MSCDEX installed.
+MSCDEX zainstalowany.
 
 .
 :MSCDEX_ERROR_MULTIPLE_CDROMS
-MSCDEX: Failure: Drive-letters of multiple CD-ROM drives have to be continuous.
+MSCDEX: Bˆ¥d: Litery dysk¢w wielu nap©d¢w CD-ROM musz¥ nast©powa† po sobie.
 
 .
 :MSCDEX_ERROR_NOT_SUPPORTED
-MSCDEX: Failure: Not yet supported.
+MSCDEX: Bˆ¥d: jeszcze nie obsˆugiwane.
 
 .
 :MSCDEX_ERROR_PATH
-MSCDEX: Specified location is not a CD-ROM drive.
+MSCDEX: Podana ˜cie¾ka nie jest prowadzi do nap©du CD-ROM.
 
 .
 :MSCDEX_ERROR_OPEN
-MSCDEX: Failure: Invalid file or unable to open.
+MSCDEX: Bˆ¥d: Nieprawidˆowy plik lub brak dost©pu.
 
 .
 :MSCDEX_TOO_MANY_DRIVES
-MSCDEX: Failure: Too many CD-ROM drives (max: 5). MSCDEX Installation failed.
+MSCDEX: Bˆ¥d: Za du¾o nap©d¢w CD-ROM (maksymalnie: 5). Instalacja MSCDEX nieudana.
 
 .
 :MSCDEX_LIMITED_SUPPORT
-MSCDEX: Mounted subdirectory: limited support.
+MSCDEX: Zamontowano podkatalog: ograniczone wsparcie.
 
 .
 :MSCDEX_INVALID_FILEFORMAT
-MSCDEX: Failure: File is either no ISO/CUE image or contains errors.
+MSCDEX: Bˆ¥d: Plik nie jest obrazem ISO/CUE lub zawiera bˆ©dy.
 
 .
 :MSCDEX_UNKNOWN_ERROR
-MSCDEX: Failure: Unknown error.
+MSCDEX: Bˆ¥d: Nieznany bˆ¥d.
 
 .
 :MSCDEX_WARNING_NO_OPTION
-MSCDEX: Warning: Ignoring unsupported option '%s'.
+MSCDEX: Ostrze¾enie: Zignorowano niewspieran¥ opcj© '%s'.
 
 .
 :PROGRAM_RESCAN_SUCCESS
-Drive cache cleared.
+Pami©† podr©czna dysku wyczyszczona.
 
 .
 :PROGRAM_INTRO
@@ -825,32 +831,32 @@ BASIC ROM loaded.
 
 .
 :SHELL_CMD_IMGMOUNT_HELP
-mounts compact disc image(s) or floppy disk image(s) to a given drive letter.
+Zamontuj obraz dysku CD, dyskietki lub dysku twardego do wybranej litery dysku.
 
 .
 :SHELL_CMD_IMGMOUNT_HELP_LONG
-Mount a CD-ROM, floppy, or disk image to a drive letter.
+Zamontuj obraz dysku CD, dyskietki lub dysku twardego do wybranej litery dysku.
 
-Usage:
-  [32;1mimgmount[0m [37;1mDRIVE[0m [36;1mCDROM-SET[0m [CDROM-SET2 [..]] [-fs iso] -t cdrom|iso 
-  [32;1mimgmount[0m [37;1mDRIVE[0m [36;1mIMAGEFILE[0m [IMAGEFILE2 [..]] [-fs fat] -t hdd|floppy
-  [32;1mimgmount[0m [37;1mDRIVE[0m [36;1mBOOTIMAGE[0m [-fs fat|none] -t hdd -size GEOMETRY
-  [32;1mimgmount[0m -u [37;1mDRIVE[0m  (unmounts the DRIVE's image)
+U¾ycie:
+  [32;1mimgmount[0m [37;1mDYSK[0m [36;1mOBRAZ-CD[0m [OBRAZ-CD2 [..]] [-fs iso] -t cdrom|iso
+  [32;1mimgmount[0m [37;1mDYSK[0m [36;1mOBRAZ[0m [OBRAZ2 [..]] [-fs fat] -t hdd|floppy
+  [32;1mimgmount[0m [37;1mDYSK[0m [36;1mOBRAZ-STARTOWY[0m [-fs fat|none] -t hdd -size GEOMETRIA
+  [32;1mimgmount[0m -u [37;1mDYSK[0m  (odmontuj obraz DYSKu)
 
-Where:
-  [37;1mDRIVE[0m     is the drive letter where the image will be mounted: a, c, d, ...
-  [36;1mCDROM-SET[0m is an ISO, CUE+BIN, CUE+ISO, or CUE+ISO+FLAC/OPUS/OGG/MP3/WAV
-  [36;1mIMAGEFILE[0m is a hard drive or floppy image in FAT16 or FAT12 format
-  [36;1mBOOTIMAGE[0m is a bootable disk image with specified -size GEOMETRY:
-            bytes-per-sector,sectors-per-head,heads,cylinders
-Notes:
-  - Ctrl+F4 swaps & mounts the next CDROM-SET or IMAGEFILE, if provided.
+Gdzie:
+  [37;1mDYSK[0m           jest liter¥ do kt¢rej obraz b©dzie zamontowany: A, C, D, ...
+  [36;1mOBRAZ-CD[0m       to ISO, CUE+BIN, CUE+ISO lub CUE+ISO+FLAC/OPUS/OGG/MP3/WAV
+  [36;1mOBRAZ[0m          jest obrazem dysku twardego lub dyskietki (FAT16 lub FAT12)
+  [36;1mOBRAZ-STARTOWY[0m jest startowym obrazem dysku ze specyficzn¥ geometri¥
+  GEOMETRIA      pliki-w-sektorze,sektory-w-gˆowicy,gˆowice,cylindry
 
-Examples:
-  [32;1mimgmount[0m [37;1mD[0m [36;1m/home/USERNAME/games/doom.iso[0m -t cdrom
+Notatki:
+  - Ctrl+F4 zamienia i montuje nast©pny OBRAZ lub OBRAZ-CD.    
+Przykˆady:
+  [32;1mimgmount[0m [37;1mD[0m [36;1m/home/UZYTKOWNIK/gry/doom.iso[0m -t cdrom
   [32;1mimgmount[0m [37;1mD[0m [36;1mcd/quake1.cue[0m -t cdrom
-  [32;1mimgmount[0m [37;1mA[0m [36;1mfloppy1.img floppy2.img floppy3.img[0m -t floppy
-  [32;1mimgmount[0m [37;1mC[0m [36;1m~/dos/c_drive.img[0m -t hdd
+  [32;1mimgmount[0m [37;1mA[0m [36;1mdyskietka1.img dyskietka2.img[0m -t floppy
+  [32;1mimgmount[0m [37;1mC[0m [36;1m~/dos/dysk_c.img[0m -t hdd
   [32;1mimgmount[0m [37;1mC[0m [36;1mbootable.img[0m -t hdd -fs none -size 512,63,32,1023
 
 .
@@ -949,11 +955,11 @@ Using multiple files is only supported for cue/iso images.
 
 .
 :PROGRAM_KEYB_INFO
-Codepage %i has been loaded
+Strona kodowa %i zostaˆa zaˆadowana
 
 .
 :PROGRAM_KEYB_INFO_LAYOUT
-Codepage %i has been loaded for layout %s
+Strona kodowa %i zostaˆa zaˆadowana dla ukˆadu klawiatury %s
 
 .
 :PROGRAM_KEYB_SHOWHELP
@@ -971,67 +977,63 @@ Ukˆad klawiatury %s zostaˆ wczytany dla strony kodowej %i
 
 .
 :PROGRAM_KEYB_FILENOTFOUND
-Keyboard file %s not found
+Nie znaleziono pliku klawiatury %s
 
 
 .
 :PROGRAM_KEYB_INVALIDFILE
-Keyboard file %s invalid
+Plik klawiatury %s jest nieprawidˆowy
 
 .
 :PROGRAM_KEYB_LAYOUTNOTFOUND
-No layout in %s for codepage %i
+Brak ukˆadu klawiatury w %s dla strony kodowej %i
 
 .
 :PROGRAM_KEYB_INVCPFILE
-None or invalid codepage file for layout %s
+Brak lub nieprawidˆowy plik strony kodowej dla ukˆadu klawiatury %s
 
 
 .
 :SHELL_ILLEGAL_PATH
-Illegal Path.
+Nieprawidˆowa ˜cie¾ka
 
 .
 :SHELL_CMD_HELP
-If you want a list of all supported commands type [33;1mhelp /all[0m .
-A short list of the most often used commands:
+Je˜li chcesz zobaczy† list© wszystkich obsˆugiwanych komend, wpisz [33;1mhelp /all[0m .
+Kr¢tka lista najcz©˜ciej u¾ywanych komend:
 
 .
 :SHELL_CMD_ECHO_ON
-ECHO is on.
+ECHO jest wˆ¥czone.
 
 .
 :SHELL_CMD_ECHO_OFF
-ECHO is off.
-
-.
-:SHELL_ILLEGAL_CONTROL_CHARACTER
-Unexpected control character: Dec %03u and Hex %#04x.
+ECHO jest wyˆ¥czone.
 
 .
 :SHELL_ILLEGAL_SWITCH
-Illegal switch: %s.
+Nieprawidˆowy przeˆ¥cznik: %s.
 
 .
 :SHELL_MISSING_PARAMETER
-Required parameter missing.
+Brak wymaganego parametru.
 
 .
 :SHELL_CMD_CHDIR_ERROR
-Unable to change to: %s.
+Nie mo¾na przej˜† do: %s.
 
 .
 :SHELL_CMD_CHDIR_HINT
-Hint: To change to different drive type [31m%c:[0m
+Aby przej˜† do innego dysku wpisz [31m%c:[0m
 
 .
 :SHELL_CMD_CHDIR_HINT_2
-directoryname is longer than 8 characters and/or contains spaces.
-Try [31mcd %s[0m
+Nazwa katalogu jest dˆu¾sza ni¾ 8 znak¢w i/lub zawiera spacje.
+Spr¢buj [31mcd %s[0m
 
 .
 :SHELL_CMD_CHDIR_HINT_3
-You are still on drive Z:, change to a mounted drive with [31mC:[0m.
+Ci¥gle jeste˜ na dysku Z:, Wpisz [31mC:[0m aby przej˜† na zamontowany dysk.
 
 .
 :SHELL_CMD_DATE_HELP
@@ -1158,7 +1160,7 @@ Nieprawidˆowa komenda: %s.
 Naci˜nij dowolny klawisz, aby kontynuowa†...
 .
 :SHELL_CMD_PAUSE_HELP
-Waits for 1 keystroke to continue.
+Czekaj na wci˜ni©cie klawisza aby kontynuowa†.
 
 .
 :SHELL_CMD_COPY_FAILURE
@@ -1263,15 +1265,15 @@ DIR [drive:][path][filename] [/[W|B]] [/P] [/[AD]|[A-D]] [/O[-][N|E|S|D]]
 
 .
 :SHELL_CMD_ECHO_HELP
-Display messages and enable/disable command echoing.
+Wy˜wietla wiadomo˜ci i wˆ¥cza/wyˆ¥cza wypisywanie wykonywanych komend.
 
 .
 :SHELL_CMD_EXIT_HELP
-Exit from the shell.
+Wyˆ¥cz konsol©.
 
 .
 :SHELL_CMD_HELP_HELP
-Show help.
+Poka¾ pomoc.
 
 .
 :SHELL_CMD_MKDIR_HELP
@@ -1279,8 +1281,8 @@ Stw¢rz katalog.
 
 .
 :SHELL_CMD_MKDIR_HELP_LONG
-MKDIR [drive:][path]
-MD [drive:][path]
+MKDIR [dysk:][˜cie¾ka]
+MD [dysk:][˜cie¾ka]
 
 .
 :SHELL_CMD_RMDIR_HELP
@@ -1288,12 +1290,12 @@ Usuä katalog.
 
 .
 :SHELL_CMD_RMDIR_HELP_LONG
-RMDIR [drive:][path]
-RD [drive:][path]
+RMDIR [dysk:][˜cie¾ka]
+RD [dysk:][˜cie¾ka]
 
 .
 :SHELL_CMD_SET_HELP
-Change environment variables.
+Zmieä warto˜ci zmiennych ˜rodowiskowych.
 
 .
 :SHELL_CMD_IF_HELP
@@ -1321,22 +1323,22 @@ Dodaj komentarz w skrypcie.
 
 .
 :SHELL_CMD_REM_HELP_LONG
-REM [comment]
+REM [komentarz]
 
 .
 :SHELL_CMD_NO_WILD
-This is a simple version of the command, no wildcards allowed!
+To prosta wersja komendy, symbole wieloznaczne nie s¥ dozwolone!
 
 .
 :SHELL_CMD_RENAME_HELP
-Renames one or more files.
+Zmieä nazw© jednego lub wielu plik¢w.
 
 .
 :SHELL_CMD_RENAME_HELP_LONG
-RENAME [drive:][path]filename1 filename2.
-REN [drive:][path]filename1 filename2.
+RENAME [dysk:][˜cie¾ka]nazwapliku1 nazwapliku2.
+REN [dysk:][˜cie¾ka]nazwapliku1 nazwapliku2.
 
-Note that you can not specify a new drive or path for your destination file.
+Pami©taj, ¾e nie mo¾esz okre˜li† nowego dysku i ˜cie¾ki dla pliku docelowego.
 
 .
 :SHELL_CMD_DELETE_HELP
@@ -1348,19 +1350,19 @@ Kopiuj plik.
 
 .
 :SHELL_CMD_CALL_HELP
-Start a batch file from within another batch file.
+Uruchom skrypt z innego skryptu.
 
 .
 :SHELL_CMD_SUBST_HELP
-Assign an internal directory to a drive.
+Przyporz¥dkuj wewn©trzny katalog do dysku.
 
 .
 :SHELL_CMD_LOADHIGH_HELP
-Loads a program into upper memory (requires xms=true,umb=true).
+Wczytaj program do pami©ci g¢rnej (wymaga xms=true,umb=true).
 
 .
 :SHELL_CMD_LS_HELP
-List directory contents.
+Wypisz zawarto˜† katalogu.
 
 .
 :SHELL_CMD_LS_HELP_LONG
@@ -1368,41 +1370,55 @@ ls [/?] [PATTERN]
 
 .
 :SHELL_CMD_LS_PATH_ERR
-ls: cannot access '%s': No such file or directory
+ls: nie ma dost©pu do '%s': Nie ma takiego pliku ani katalogu
 
 .
 :SHELL_CMD_CHOICE_HELP
-Waits for a keypress and sets ERRORLEVEL.
+Czeka na wci˜ni©cie klawisza i ustawia ERRORLEVEL.
 
 .
 :SHELL_CMD_CHOICE_HELP_LONG
-CHOICE [/C:choices] [/N] [/S] text
-  /C[:]choices  -  Specifies allowable keys.  Default is: yn.
-  /N  -  Do not display the choices at end of prompt.
-  /S  -  Enables case-sensitive choices to be selected.
-  text  -  The text to display as a prompt.
+CHOICE [/C:mo¾liwo˜ci] [/N] [/S] tekst
+  /C[:]mo¾liwo˜ci  -  Okre˜la dost©pne klawisze.  Domy˜lnie: yn.
+  /N  -  Nie wy˜wietlaj mo¾liwo˜ci na koniec zgˆoszenia.
+  /S  -  Wˆ¥cza rozr¢¾nianie wielko˜ci liter mo¾liwo˜ci.
+  tekst  -  Tekst wy˜wietlany w zgˆoszeniu.
 
 .
 :SHELL_CMD_ATTRIB_HELP
-Does nothing. Provided for compatibility.
+Nie powoduje ¾adnego efektu. Dostarczone dla zachowania kompatybilno˜ci.
 
 .
 :SHELL_CMD_PATH_HELP
-Provided for compatibility.
+Dostarczone dla zachowania kompatybilno˜ci.
 
 .
 :SHELL_CMD_VER_HELP
-View or set the reported DOS version.
+Poka¾ lub ustaw raportowan© wersj© DOS.
 
 .
 :SHELL_CMD_VER_HELP_LONG
-VER
-VER SET version_number
-VER SET major_version [minor_version]
+U¾ycie:
+  [32;1mver[0m
+  [32;1mver[0m [37;1mset[0m [36;1mWERSJA[0m
+
+Gdzie:
+  [36;1mWERSJA[0m mo¾e zawiera† numer gˆ¢wny, np. [36;1m5[0m lub tak¾e dwucyfrowy numer
+         dodatkowy, jak np. [36;1m6.22[0m, [36;1m7.01[0m lub [36;1m7.10[0m.  Numer dodatkowy wersji
+         mo¾e by† r¢wnie¾ odseparowany spacj¥, np: [36;1m6 22[0m, [36;1m7 01[0m, lub [36;1m7 10[0m.
+
+Notatki:
+  Wersja DOS mo¾e by† r¢wnie¾ zmieniona w pliku konfiguracyjnym w sekcji [dos]
+  ustawiaj¥c "ver = [36;1mWERSJA[0m".
+
+Przykˆady:
+  [32;1mver[0m [37;1mset[0m [36;1m6.22[0m
+  [32;1mver[0m [37;1mset[0m [36;1m7 10[0m
 
 .
 :SHELL_CMD_VER_VER
-DOSBox Staging version %s. Reported DOS version %d.%02d.
+DOSBox Staging wersja %s
+DOS wersja %d.%02d
 
 .
 :SHELL_CMD_VER_INVALID

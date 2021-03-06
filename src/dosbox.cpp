@@ -56,6 +56,11 @@
 #include "midi.h"
 #include "hardware.h"
 
+#if C_NE2000
+//#include "ne2000.h"
+void NE2K_Init(Section* sec);
+#endif
+
 Config * control;
 bool exit_requested = false;
 MachineType machine;
@@ -474,17 +479,21 @@ void DOSBOX_Init(void) {
 	secprop->AddInitFunction(&TIMER_Init);//done
 	secprop->AddInitFunction(&CMOS_Init);//done
 
-	const char *verbosity_choices[] = {"high",   "medium", "low",
-	                                   "quiet", "auto",   0};
+	const char *verbosity_choices[] = {"high",  "medium",
+	                                   "low",   "splash_only",
+	                                   "quiet", "auto",
+	                                   0};
 	Pstring = secprop->Add_string("startup_verbosity", only_at_start, "high");
 	Pstring->Set_values(verbosity_choices);
-	Pstring->Set_help("Controls verbosity prior to displaying the program:\n"
-	"       | Show splash | Show welcome | Show early stdout\n"
-	"high   |     yes     |     yes      |       yes\n"
-	"medium |     no      |     yes      |       yes\n"
-	"low    |     no      |     no       |       yes\n"
-	"quiet  |     no      |     no       |       no\n"
-	"auto   | 'low' if exec or dir is passed, otherwise 'high'");
+	Pstring->Set_help(
+	        "Controls verbosity prior to displaying the program:\n"
+	        "Verbosity   | Splash | Welcome | Early stdout\n"
+	        "high        |  yes   |   yes   |    yes\n"
+	        "medium      |  no    |   yes   |    yes\n"
+	        "low         |  no    |   no    |    yes\n"
+	        "quiet       |  no    |   no    |    no\n"
+	        "splash_only |  yes   |   no    |    no\n"
+	        "auto        | 'low' if exec or dir is passed, otherwise 'high'");
 
 	secprop=control->AddSection_prop("render",&RENDER_Init,true);
 	Pint = secprop->Add_int("frameskip",Property::Changeable::Always,0);
@@ -626,10 +635,10 @@ void DOSBOX_Init(void) {
 	const char *midi_devices[] = {
 		"auto",
 #if defined(MACOSX)
-#ifdef C_SUPPORTS_COREMIDI
+#if C_COREMIDI
 		"coremidi",
 #endif
-#ifdef C_SUPPORTS_COREAUDIO
+#if C_COREAUDIO
 		"coreaudio",
 #endif
 #elif defined(WIN32)
@@ -637,7 +646,7 @@ void DOSBOX_Init(void) {
 #else
 		"oss",
 #endif
-#if defined(HAVE_ALSA)
+#if C_ALSA
 		"alsa",
 #endif
 #if C_FLUIDSYNTH
@@ -682,10 +691,10 @@ void DOSBOX_Init(void) {
 	        "- This option has no effect when using the built-in synthesizers\n"
 	        "  (mididevice = fluidsynth or mt32).\n"
 #endif
-#ifdef C_SUPPORTS_COREAUDIO
+#if C_COREAUDIO
 	        "- When using CoreAudio, you can specify a soundfont here.\n"
 #endif
-#if defined(HAVE_ALSA)
+#if C_ALSA
 	        "- When using ALSA, use Linux command 'aconnect -l' to list open\n"
 	        "  MIDI ports, and select one (for example 'midiconfig=14:0'\n"
 	        "  for sequencer client 14, port 0).\n"
@@ -961,6 +970,45 @@ void DOSBOX_Init(void) {
 	Pbool = secprop->Add_bool("ipx",Property::Changeable::WhenIdle, false);
 	Pbool->Set_help("Enable ipx over UDP/IP emulation.");
 #endif
+
+#if C_NE2000
+	secprop=control->AddSection_prop("ne2000",&NE2K_Init,true);
+	MSG_Add("NE2000_CONFIGFILE_HELP",
+		"macaddr -- The physical address the emulator will use on your network.\n"
+		"           If you have multiple DOSBoxes running on your network,\n"
+		"           this has to be changed. Modify the last three number blocks.\n"
+		"           I.e. AC:DE:48:88:99:AB.\n"
+		"realnic -- Specifies which of your network interfaces is used.\n"
+		"           Write \'list\' here to see the list of devices in the\n"
+		"           Status Window. Then make your choice and put either the\n"
+		"           interface number (2 or something) or a part of your adapters\n"
+		"           name, e.g. VIA here.\n"
+
+	);
+
+	Pbool = secprop->Add_bool("ne2000", Property::Changeable::WhenIdle, true);
+	Pbool->Set_help("Enable Ethernet passthrough. Requires [Win]Pcap.");
+
+	Phex = secprop->Add_hex("nicbase", Property::Changeable::WhenIdle, 0x300);
+	Phex->Set_help("The base address of the NE2000 board.");
+
+	Pint = secprop->Add_int("nicirq", Property::Changeable::WhenIdle, 3);
+	Pint->Set_help("The interrupt it uses. Note serial2 uses IRQ3 as default.");
+
+	Pstring = secprop->Add_string("macaddr", Property::Changeable::WhenIdle,"AC:DE:48:88:99:AA");
+	Pstring->Set_help("The physical address the emulator will use on your network.\n"
+		"If you have multiple DOSBoxes running on your network,\n"
+		"this has to be changed for each. AC:DE:48 is an address range reserved for\n"
+		"private use, so modify the last three number blocks.\n"
+		"I.e. AC:DE:48:88:99:AB.");
+	
+	Pstring = secprop->Add_string("realnic", Property::Changeable::WhenIdle,"list");
+	Pstring->Set_help("Specifies which of your network interfaces is used.\n"
+		"Write \'list\' here to see the list of devices in the\n"
+		"Status Window. Then make your choice and put either the\n"
+		"interface number (2 or something) or a part of your adapters\n"
+		"name, e.g. VIA here.");
+#endif // C_NE2000
 //	secprop->AddInitFunction(&CREDITS_Init);
 
 	//TODO ?

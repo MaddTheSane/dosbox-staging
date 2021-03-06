@@ -16,8 +16,10 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "dos_system.h"
 
 #include <string.h>
+
 #include "dosbox.h"
 #include "callback.h"
 #include "regs.h"
@@ -26,11 +28,8 @@
 #include "dos_inc.h"
 #include "support.h"
 #include "parport.h"
-#include "drives.h" //Wildcmp
-/* Include all the devices */
-
+#include "drives.h"
 #include "dev_con.h"
-
 
 DOS_Device * Devices[DOS_DEVICES];
 

@@ -807,8 +807,8 @@ static SDL_Window *SetupWindowScaled(SCREEN_TYPES screen_type, bool resizable)
 		double ratio_w=(double)fixedWidth/(sdl.draw.width*sdl.draw.scalex);
 		double ratio_h=(double)fixedHeight/(sdl.draw.height*sdl.draw.scaley);
 		if ( ratio_w < ratio_h) {
-			sdl.clip.w=fixedWidth;
-			sdl.clip.h=(Bit16u)(sdl.draw.height*sdl.draw.scaley*ratio_w + 0.1); //possible rounding issues
+			sdl.clip.w = fixedWidth;
+			sdl.clip.h = (Bit16u)(sdl.draw.height * sdl.draw.scaley*ratio_w + 0.1); //possible rounding issues
 		} else {
 			/*
 			 * The 0.4 is there to correct for rounding issues.
@@ -1317,8 +1317,9 @@ dosurface:
 			if (glIsList(sdl.opengl.displaylist)) glDeleteLists(sdl.opengl.displaylist, 1);
 			sdl.opengl.displaylist = glGenLists(1);
 			glNewList(sdl.opengl.displaylist, GL_COMPILE);
-			glClear(GL_COLOR_BUFFER_BIT);
 
+			//Create one huge triangle and only display a portion.
+			//When using a quad, there was scaling bug (certain resolutions on Nvidia chipsets) in the seam
 			glBegin(GL_TRIANGLES);
 			// upper left
 			glTexCoord2f(0,0); glVertex2f(-1.0f, 1.0f);
@@ -1583,7 +1584,6 @@ void GFX_EndUpdate( const Bit16u *changedLines ) {
 		glClear(GL_COLOR_BUFFER_BIT);
 		if (sdl.opengl.pixel_buffer_object) {
 			glUnmapBufferARB(GL_PIXEL_UNPACK_BUFFER_EXT);
-			glBindTexture(GL_TEXTURE_2D, sdl.opengl.texture);
 			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, sdl.draw.width,
 			                sdl.draw.height, GL_BGRA_EXT,
 			                GL_UNSIGNED_INT_8_8_8_8_REV, 0);
@@ -1591,7 +1591,6 @@ void GFX_EndUpdate( const Bit16u *changedLines ) {
 		} else if (changedLines) {
 			int y = 0;
 			size_t index = 0;
-			glBindTexture(GL_TEXTURE_2D, sdl.opengl.texture);
 			while (y < sdl.draw.height) {
 				if (!(index & 1)) {
 					y += changedLines[index];
@@ -2307,7 +2306,8 @@ static void GUI_StartUp(Section *sec)
 
 	const bool tiny_fullresolution = splash_image.width > sdl.desktop.full.width ||
 	                                 splash_image.height > sdl.desktop.full.height;
-	if (control->GetStartupVerbosity() == Verbosity::High &&
+	if ((control->GetStartupVerbosity() == Verbosity::High ||
+	     control->GetStartupVerbosity() == Verbosity::SplashOnly) &&
 	    !(sdl.desktop.fullscreen && tiny_fullresolution)) {
 		GFX_Start();
 		DisplaySplash(1000);
@@ -2585,7 +2585,7 @@ bool GFX_Events()
 				// DEBUG_LOG_MSG("SDL: Window has been exposed "
 				//               "and should be redrawn");
 
-				/* FIXME: below is not consistently true :(
+				/* TODO: below is not consistently true :(
 				 * seems incorrect on KDE and sometimes on MATE
 				 *
 				 * Note that on Windows/Linux-X11/Wayland/macOS,
@@ -3216,8 +3216,15 @@ void OverrideWMClass()
 #endif
 }
 
-//extern void UI_Init(void);
-int main(int argc, char* argv[]) {
+void GFX_GetSize(int &width, int &height, bool &fullscreen)
+{
+	width = sdl.draw.width;
+	height = sdl.draw.height;
+	fullscreen = sdl.desktop.fullscreen;
+}
+
+int sdl_main(int argc, char *argv[])
+{
 	int rcode = 0; // assume good until proven otherwise
 	try {
 		Disable_OS_Scaling(); //Do this early on, maybe override it through some parameter.
@@ -3271,7 +3278,7 @@ int main(int argc, char* argv[]) {
 		if (control->cmdline->FindExist("--version") ||
 		    control->cmdline->FindExist("-version") ||
 		    control->cmdline->FindExist("-v")) {
-			printf(version_msg, VERSION);
+			printf(version_msg, DOSBOX_GetDetailedVersion());
 			return 0;
 		}
 
@@ -3296,7 +3303,7 @@ int main(int argc, char* argv[]) {
 	SetConsoleCtrlHandler((PHANDLER_ROUTINE) ConsoleEventHandler,TRUE);
 #endif
 
-	LOG_MSG("dosbox-staging version %s", VERSION);
+	LOG_MSG("dosbox-staging version %s", DOSBOX_GetDetailedVersion());
 	LOG_MSG("---");
 
 	if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO) < 0)
@@ -3402,8 +3409,9 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		MAPPER_BindKeys(); // All subsystem handlers need to be
-		                   // registered at this point to be mappable.
+		// All subsystems' hotkeys need to be registered at this point
+		// to ensure their hotkeys appear in the graphical mapper.
+		MAPPER_BindKeys(sdl_sec);
 		if (control->cmdline->FindExist("-startmapper"))
 			MAPPER_DisplayUI();
 
@@ -3440,10 +3448,4 @@ int main(int argc, char* argv[]) {
 	QuitSDL();
 
 	return rcode;
-}
-
-void GFX_GetSize(int &width, int &height, bool &fullscreen) {
-	width = sdl.draw.width;
-	height = sdl.draw.height;
-	fullscreen = sdl.desktop.fullscreen;
 }

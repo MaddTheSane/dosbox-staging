@@ -18,6 +18,9 @@
 
 #ifndef DOSBOX_JOYSTICK_H
 #define DOSBOX_JOYSTICK_H
+
+#include "dosbox.h"
+
 void JOYSTICK_Enable(Bitu which,bool enabled);
 
 void JOYSTICK_Button(Bitu which,Bitu num,bool pressed);
@@ -34,7 +37,10 @@ float JOYSTICK_GetMove_X(Bitu which);
 
 float JOYSTICK_GetMove_Y(Bitu which);
 
+void JOYSTICK_ParseConfiguredType();
+
 enum JoystickType {
+	JOY_UNSET,
 	JOY_NONE,
 	JOY_AUTO,
 	JOY_2AXIS,
@@ -49,4 +55,5 @@ extern bool gameport_timed;
 //--End of modifications
 extern JoystickType joytype;
 extern bool button_wrapping_enabled;
+
 #endif

@@ -24,6 +24,8 @@
 
 #include "midi_handler.h"
 
+#if C_COREMIDI
+
 #include <CoreMIDI/MIDIServices.h>
 #include <sstream>
 #include <string>
@@ -107,6 +109,9 @@ public:
 
 	void Close() override
 	{
+		if (m_port && m_client)
+			HaltSequence();
+
 		// Dispose the port
 		MIDIPortDispose(m_port);
 
@@ -138,7 +143,7 @@ public:
 	void PlaySysex(uint8_t *sysex, size_t len) override
 	{
 		// Acquire a MIDIPacketList
-		Byte packetBuf[SYSEX_SIZE*4];
+		Byte packetBuf[MIDI_SYSEX_SIZE * 4];
 		MIDIPacketList *packetList = (MIDIPacketList *)packetBuf;
 		m_pCurPacket = MIDIPacketListInit(packetList);
 		
@@ -167,5 +172,7 @@ public:
 };
 
 MidiHandler_coremidi Midi_coremidi;
+
+#endif // C_COREMIDI
 
 #endif

@@ -1,14 +1,23 @@
 # DOSBox Staging
 
 ![GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)
-[![Linux x86\_64 build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Linux%20builds?label=Linux%20(x86_64))](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Linux+builds%22)
-[![Linux other build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Platform%20builds?label=Linux%20(ARM,%20S390x,%20ppc64le))](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Platform+builds%22)
-[![Windows build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Windows%20builds?label=Windows)](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Windows+builds%22)
-[![macOS build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/macOS%20builds?label=macOS)](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22macOS+builds%22)
+[![Chat](https://img.shields.io/discord/514567252864008206?color=%237289da&logo=discord&logoColor=white&label=discord)](https://discord.gg/WwAg3Xf)
 
 This repository attempts to modernize the DOSBox codebase by using current
 development practices and tools, fixing issues, and adding features that better
 support today's systems.
+
+### Build status
+
+[![Linux x86\_64 build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Linux%20builds?label=Linux%20(x86_64))](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Linux+builds%22)
+[![Linux other build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Platform%20builds?label=Linux%20(ARM,%20S390x))](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Platform+builds%22)
+[![Windows build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Windows%20builds?label=Windows%20(x86,%20x86_64))](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Windows+builds%22)
+[![macOS build status](https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/macOS%20builds?label=macOS%20(x86_64))](https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22macOS+builds%22)
+
+### Code quality status
+
+[![Coverity status](https://img.shields.io/coverity/scan/dosbox-staging)][4]
+[![LGTM grade](https://img.shields.io/lgtm/grade/cpp/github/dosbox-staging/dosbox-staging)][3]
 
 ## Summary of differences compared to upstream
 
@@ -19,6 +28,7 @@ support today's systems.
 | **Version control**            | Git                         | [SVN]
 | **Language**                   | C++14                       | C++03<sup>[1]</sup>
 | **SDL**                        | >= 2.0.2                    | 1.2<sup>＊</sup>
+| **Buildsystem**                | Meson or Visual Studio 2019 | Autotools or Visual Studio 2003
 | **CI**                         | Yes                         | No
 | **Static analysis**            | Yes<sup>[2],[3],[4]</sup>   | No
 | **Dynamic analysis**           | Yes                         | No
@@ -54,8 +64,8 @@ Codecs supported for CD-DA emulation:
 | **WAV**        | Yes (built-in)             | Yes - SDL\_sound 1.2 (built-in)<sup>[7],＊</sup>
 | **AIFF**       | No                         | Yes - SDL\_sound 1.2 (built-in)<sup>[7],＊</sup>
 
-<sup>† - 8/16/24 bit-depth, 22.05/44.1/48 kHz, and mono or stereo</sup>\
 <sup>＊- SDL 1.2 was last updated 2013-08-17 and SDL\_sound 2008-04-20</sup>\
+<sup>† - 8/16/24 bit-depth, 22.05/44.1/48 kHz, and mono or stereo</sup>\
 <sup>‡ - 44.1 kHz stereo only</sup>\
 <sup>§ - Broken or unsupported in either SDL\_sound or DOSBox</sup>
 
@@ -77,19 +87,23 @@ Other differences:
 | **Startup verbosity**    | Yes<sup>[11]</sup>                           | N/A
 | **[GUS] enhancements**   | Yes<sup>[12]</sup>                           | N/A
 | **Raw mouse input**      | Yes (`raw_mouse_input=true`)                 | N/A
-| **[FluidSynth] MIDI**    | Yes<sup>[13]</sup> (FluidSynth 2.x)          | Only external synths
+| **[FluidSynth][FS] MIDI**| Yes<sup>[13]</sup> (FluidSynth 2.x)          | Only external synths
+| **[MT-32] emulator**     | Yes<sup>＊</sup> (libmt32emu 2.4.2)          | N/A
 
-[OPL]:https://en.wikipedia.org/wiki/Yamaha_YMF262
-[CGA]:https://en.wikipedia.org/wiki/Color_Graphics_Adapter
-[Wayland]:https://en.wikipedia.org/wiki/Wayland_(display_server_protocol)
-[GUS]: https://en.wikipedia.org/wiki/Gravis_Ultrasound
-[FluidSynth]: http://www.fluidsynth.org/
-[8]:https://www.vogons.org/viewtopic.php?f=9&t=37782
-[9]:https://github.com/dosbox-staging/dosbox-staging/commit/ffe3c5ab7fb5e28bae78f07ea987904f391a7cf8
-[10]:https://github.com/dosbox-staging/dosbox-staging/commit/239396fec83dbba6a1eb1a0f4461f4a427d2be38
-[11]: https://github.com/dosbox-staging/dosbox-staging/pull/477
-[12]: https://github.com/dosbox-staging/dosbox-staging/wiki/Gravis-UltraSound-Enhancements
-[13]: https://github.com/dosbox-staging/dosbox-staging/issues/262#issuecomment-734719260
+<sup>＊- Requires original ROM files</sup>
+
+[OPL]: https://en.wikipedia.org/wiki/Yamaha_YMF262
+[CGA]: https://en.wikipedia.org/wiki/Color_Graphics_Adapter
+[Wayland]: https://en.wikipedia.org/wiki/Wayland_(display_server_protocol)
+[GUS]:   https://en.wikipedia.org/wiki/Gravis_Ultrasound
+[MT-32]: https://en.wikipedia.org/wiki/Roland_MT-32
+[FS]:    http://www.fluidsynth.org/
+[8]:     https://www.vogons.org/viewtopic.php?f=9&t=37782
+[9]:     https://github.com/dosbox-staging/dosbox-staging/commit/ffe3c5ab7fb5e28bae78f07ea987904f391a7cf8
+[10]:    https://github.com/dosbox-staging/dosbox-staging/commit/239396fec83dbba6a1eb1a0f4461f4a427d2be38
+[11]:    https://github.com/dosbox-staging/dosbox-staging/pull/477
+[12]:    https://github.com/dosbox-staging/dosbox-staging/wiki/Gravis-UltraSound-Enhancements
+[13]:    https://github.com/dosbox-staging/dosbox-staging/issues/262#issuecomment-734719260
 
 ## Stable release builds
 
@@ -103,11 +117,7 @@ Other differences:
 
 ## Build instructions
 
-Read [INSTALL](INSTALL) file for a general summary about dependencies and
-configure options and [BUILD.md](BUILD.md) for the comprehensive
-compilation guide.  You can also use helper script
-[`./scripts/build.sh`](scripts/build.sh), that performs builds for many
-useful scenarios (LTO, FDO, sanitizer builds, many others).
+Read [BUILD.md] for the comprehensive compilation guide.
 
 ### Linux, macOS
 
@@ -115,47 +125,49 @@ Install build dependencies appropriate for your OS:
 
 ``` shell
 # Fedora
-sudo dnf install gcc-c++ make automake alsa-lib-devel libpng-devel SDL2-devel \
-                 SDL2_net-devel opusfile-devel fluidsynth-devel
+sudo dnf install ccache gcc-c++ meson alsa-lib-devel libpng-devel \
+                 SDL2-devel SDL2_net-devel opusfile-devel fluidsynth-devel
 ```
 
 ``` shell
 # Debian, Ubuntu
-sudo apt install build-essential automake libasound2-dev libpng-dev \
+sudo apt install ccache build-essential meson libasound2-dev libpng-dev \
                  libsdl2-dev libsdl2-net-dev libopusfile-dev libfluidsynth-dev
 ```
 
 ``` shell
 # Arch, Manjaro
-sudo pacman -S gcc automake alsa-lib libpng sdl2 sdl2_net opusfile fluidsynth
+sudo pacman -S ccache gcc meson alsa-lib libpng sdl2 sdl2_net opusfile \
+               fluidsynth
+```
+
+``` shell
+# openSUSE
+sudo zypper install ccache gcc gcc-c++ meson alsa-devel libpng-devel \
+                    libSDL2-devel libSDL2_net-devel opusfile-devel \
+                    fluidsynth-devel libmt32emu-devel
 ```
 
 ``` shell
 # macOS
 xcode-select --install
-brew install autogen automake libpng sdl2 sdl2_net opusfile fluid-synth
+brew install ccache meson libpng sdl2 sdl2_net opusfile fluid-synth
 ```
 
-Compilation flags suggested for local optimised builds:
+Instructions for creating an optimised release build:
 
 ``` shell
 git clone https://github.com/dosbox-staging/dosbox-staging.git
 cd dosbox-staging
-./autogen.sh
-./configure CPPFLAGS="-DNDEBUG" \
-            CFLAGS="-O3 -march=native" \
-            CXXFLAGS="-O3 -march=native"
-make -j$(nproc)
+meson setup -Dbuildtype=release build
+ninja -C build
+./build/dosbox
 ```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md#build-dosbox-staging) for compilation
-flags more suited for development.
 
 ### Windows - Visual Studio (2019 or newer)
 
-First, you need to setup [vcpkg](https://github.com/microsoft/vcpkg) to
-install build dependencies. Once vcpkg is bootstrapped, open PowerShell,
-and run:
+First, you need to setup [vcpkg] to install build dependencies. Once vcpkg
+is bootstrapped, open PowerShell and run:
 
 ``` powershell
 PS:\> .\vcpkg integrate install
@@ -167,26 +179,33 @@ These two steps will ensure that MSVC finds and links all dependencies.
 Start Visual Studio and open file: `vs\dosbox.sln`. Make sure you have `x64`
 selected as the solution platform.  Use Ctrl+Shift+B to build all projects.
 
-### Windows (MSYS2, MinGW), macOS (MacPorts), Haiku OS, others
+[vcpkg]: https://github.com/microsoft/vcpkg
+
+### Windows (MSYS2), macOS (MacPorts), Haiku, others
 
 Instructions for other build systems and operating systems are documented
-in [BUILD.md](BUILD.md).
+in [BUILD.md]. Links to OS-specific instructions: [MSYS2], [MacPorts],
+[Haiku].
 
-## Imported branches and community patches
+[BUILD.md]: BUILD.md
+[MSYS2]:    docs/build-windows.md
+[MacPorts]: docs/build-macos.md
+[Haiku]:    docs/build-haiku.md
+
+## Imported branches, community patches, old forks
 
 Commits landing in SVN upstream are imported to this repo in a timely manner,
-to the branches matching [`svn/*`] pattern, e.g. [`svn/trunk`].
+see branch [`svn/trunk`].
 
-Other branch name patterns are also in use: [`vogons/*`] for various
-patches posted on the Vogons forum, [`munt/*`] for patches from the Munt
-project, etc.
+- [`svn/*`] - branches from SVN
+- [`forks/*`] - code for various abandoned DOSBox forks
+- [`vogons/*`] - community patches posted on the Vogons forum
 
 Git tags matching pattern `svn/*` are pointing to the commits referenced by SVN
 "tag" paths at the time of creation.
 
-Additionally, we attach some optional metadata to the commits imported from SVN
-in the form of [Git notes](https://git-scm.com/docs/git-notes). To fetch them,
-run:
+Additionally, we attach some optional metadata to the commits in the form of
+[Git notes][git-notes]. To fetch them, run:
 
 ``` shell
 git fetch origin "refs/notes/*:refs/notes/*"
@@ -196,7 +215,8 @@ For some historical context of why this repo exists you can read
 [Vogons thread](https://www.vogons.org/viewtopic.php?p=790065#p790065),
 ([1](https://imgur.com/a/bnJEZcx), [2](https://imgur.com/a/HnG1Ls4))
 
-[`svn/*`]:https://github.com/dosbox-staging/dosbox-staging/branches/all?utf8=%E2%9C%93&query=svn%2F
-[`svn/trunk`]:https://github.com/dosbox-staging/dosbox-staging/tree/svn/trunk
-[`vogons/*`]:https://github.com/dosbox-staging/dosbox-staging/branches/all?utf8=%E2%9C%93&query=vogons%2F
-[`munt/*`]:https://github.com/dosbox-staging/dosbox-staging/branches/all?utf8=%E2%9C%93&query=munt%2F
+[`svn/*`]:     https://github.com/dosbox-staging/dosbox-staging/branches/all?utf8=%E2%9C%93&query=svn%2F
+[`svn/trunk`]: https://github.com/dosbox-staging/dosbox-staging/tree/svn/trunk
+[`vogons/*`]:  https://github.com/dosbox-staging/dosbox-staging/branches/all?utf8=%E2%9C%93&query=vogons%2F
+[`forks/*`]:   https://github.com/dosbox-staging/dosbox-staging/branches/all?utf8=%E2%9C%93&query=forks%2F
+[git-notes]:   https://git-scm.com/docs/git-notes

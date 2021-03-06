@@ -907,12 +907,11 @@ void Section::ExecuteEarlyInit(bool init_all)
 			fn.function(this);
 }
 
-void Section::ExecuteInit(bool initall) {
-	typedef std::deque<Function_wrapper>::iterator func_it;
-	for (func_it tel = initfunctions.begin(); tel != initfunctions.end(); ++tel) {
-		if (initall || (*tel).changeable_at_runtime)
-			(*tel).function(this);
-	}
+void Section::ExecuteInit(bool initall)
+{
+	for (const auto &fn : initfunctions)
+		if (initall || fn.changeable_at_runtime)
+			fn.function(this);
 }
 
 void Section::ExecuteDestroy(bool destroyall) {
@@ -1077,6 +1076,8 @@ Verbosity Config::GetStartupVerbosity() const
 		return Verbosity::Medium;
 	if (user_choice == "low")
 		return Verbosity::Low;
+	if (user_choice == "splash_only")
+		return Verbosity::SplashOnly;
 	if (user_choice == "quiet")
 		return Verbosity::Quiet;
 	// auto-mode

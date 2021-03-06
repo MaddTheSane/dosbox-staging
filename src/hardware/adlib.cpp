@@ -16,11 +16,12 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "adlib.h"
+
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <sys/types.h>
-#include "adlib.h"
 
 #include "cpu.h"
 #include "setup.h"
@@ -847,7 +848,7 @@ Module::Module(Section *configuration)
 	  mixerObject(),
 	  mode(MODE_OPL2), // TODO this is set in Init and there's no good default
 	  reg{0}, // union
-	  ctrl{false, 0, 0xff, 0xff},
+	  ctrl{false, 0, 0xff, 0xff, false},
 	  mixerChan(nullptr),
 	  lastUsed(0),
 	  handler(nullptr),

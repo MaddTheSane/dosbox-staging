@@ -2,7 +2,10 @@
 #define CONF_BRAND "staging-git"
 
 /* Version number of package */
-#define VERSION "git"
+#define VERSION "0.77.0"
+
+/* This macro is going to be overriden via CI */
+#define DOSBOX_DETAILED_VERSION "git"
 
 /* Define to 1 to enable internal debugger, requires libcurses */
 #define C_DEBUG 0
@@ -15,6 +18,9 @@
 
 /* Define to 1 to enable internal modem support, requires SDL_net */
 #define C_MODEM 1
+
+/* Define to 1 to enable NE2000 ethernet passthrough, requires libpcap */
+#define C_NE2000 0
 
 /* Define to 1 to enable IPX networking support, requires SDL_net */
 #define C_IPX 1

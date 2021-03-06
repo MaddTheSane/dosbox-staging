@@ -459,7 +459,7 @@ void DOS_Shell::CMD_RMDIR(char * args) {
 
 static std::string format_number(size_t num)
 {
-	MAYBE_UNUSED constexpr size_t petabyte_si = 1'000'000'000'000'000;
+	MAYBE_UNUSED constexpr uint64_t petabyte_si = 1'000'000'000'000'000;
 	assert(num <= petabyte_si);
 	const auto b = static_cast<unsigned>(num % 1000);
 	num /= 1000;
@@ -1656,9 +1656,11 @@ void DOS_Shell::CMD_CHOICE(char * args){
 
 	Bit16u n=1;
 	do {
-		DOS_ReadFile (STDIN,&c,&n);
-	} while (!c || !(ptr = strchr(rem,(optS?c:toupper(c)))));
-	c = optS?c:(Bit8u)toupper(c);
+		DOS_ReadFile(STDIN, &c, &n);
+		if (exit_requested)
+			break;
+	} while (!c || !(ptr = strchr(rem, (optS ? c : toupper(c)))));
+	c = optS ? c : (Bit8u)toupper(c);
 	DOS_WriteFile(STDOUT, &c, &n);
 	WriteOut_NoParsing("\n");
 	dos.return_code = (Bit8u)(ptr-rem+1);
@@ -1701,7 +1703,8 @@ void DOS_Shell::CMD_VER(char *args)
 			dos.version.minor = new_version.minor;
 		} else
 			WriteOut(MSG_Get("SHELL_CMD_VER_INVALID"));
-	} else
-		WriteOut(MSG_Get("SHELL_CMD_VER_VER"), VERSION,
+	} else {
+		WriteOut(MSG_Get("SHELL_CMD_VER_VER"), DOSBOX_GetDetailedVersion(),
 		         dos.version.major, dos.version.minor);
+	}
 }

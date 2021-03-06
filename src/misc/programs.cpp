@@ -16,6 +16,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "programs.h"
 
 #include <vector>
 #include <sstream>
@@ -24,7 +25,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include "programs.h"
+
 #include "callback.h"
 #include "regs.h"
 #include "support.h"
@@ -141,7 +142,7 @@ bool Program::SuppressWriteOut(const char *format)
 	static bool encountered_executable = false;
 	if (encountered_executable)
 		return false;
-	if (control->GetStartupVerbosity() > Verbosity::Quiet)
+	if (control->GetStartupVerbosity() <= Verbosity::SplashOnly)
 		return false;
 	if (!control->cmdline->HasExecutableName())
 		return false;
@@ -390,7 +391,8 @@ void CONFIG::Run(void) {
 			Bitu size = control->configfiles.size();
 			std::string config_path;
 			Cross::GetPlatformConfigDir(config_path);
-			WriteOut(MSG_Get("PROGRAM_CONFIG_CONFDIR"), VERSION,config_path.c_str());
+			WriteOut(MSG_Get("PROGRAM_CONFIG_CONFDIR"), VERSION,
+			         config_path.c_str());
 			if (size==0) WriteOut(MSG_Get("PROGRAM_CONFIG_NOCONFIGFILE"));
 			else {
 				WriteOut(MSG_Get("PROGRAM_CONFIG_PRIMARY_CONF"),control->configfiles.front().c_str());
@@ -860,31 +862,38 @@ void PROGRAMS_Init(Section* /*sec*/) {
 	MSG_Add("PROGRAM_CONFIG_NOCONFIGFILE","No config file loaded!\n");
 	MSG_Add("PROGRAM_CONFIG_PRIMARY_CONF","Primary config file: \n%s\n");
 	MSG_Add("PROGRAM_CONFIG_ADDITIONAL_CONF","Additional config files:\n");
-	MSG_Add("PROGRAM_CONFIG_CONFDIR","DOSBox %s configuration directory: \n%s\n\n");
-	
+	MSG_Add("PROGRAM_CONFIG_CONFDIR",
+	        "DOSBox Staging %s configuration directory: \n%s\n\n");
+
 	// writeconf
 	MSG_Add("PROGRAM_CONFIG_FILE_ERROR","\nCan't open file %s\n");
 	MSG_Add("PROGRAM_CONFIG_FILE_WHICH", "Writing config file %s\n");
 	
 	// help
-	MSG_Add("PROGRAM_CONFIG_USAGE", "Config tool:\n"
+	MSG_Add("PROGRAM_CONFIG_USAGE",
+	        "Config tool:\n"
 	        "-writeconf or -wc without parameter: write to primary loaded config file.\n"
 	        "-writeconf or -wc with filename: write file to config directory.\n"
 	        "Use -writelang or -wl filename to write the current language strings.\n"
-	        "-r [parameters]\n Restart DOSBox, either using the previous parameters or any that are appended.\n"
-	        "-wcp [filename]\n Write config file to the program directory, dosbox.conf or the specified \n filename.\n"
-	        "-wcd\n Write to the default config file in the config directory.\n"
+	        "-r [parameters]\n"
+	        " Restart DOSBox, either using the previous parameters or any that are appended.\n"
+	        "-wcp [filename]\n"
+	        " Write config file to the program directory, dosbox.conf or the specified\n"
+	        " filename.\n"
+	        "-wcd\n"
+	        " Write to the default config file in the config directory.\n"
 	        "-l lists configuration parameters.\n"
 	        "-h, -help, -? sections / sectionname / propertyname\n"
-	        " Without parameters, displays this help screen. Add \"sections\" for a list of\n sections."
+	        " Without parameters, displays this help screen. Add \"sections\" for a list of\n"
+	        " sections."
 	        " For info about a specific section or property add its name behind.\n"
 	        "-axclear clears the autoexec section.\n"
 	        "-axadd [line] adds a line to the autoexec section.\n"
 	        "-axtype prints the content of the autoexec section.\n"
 	        "-securemode switches to secure mode.\n"
-		"-avistart starts AVI recording.\n"
-		"-avistop stops AVI recording.\n"
-		"-startmapper starts the keymapper.\n"
+	        "-avistart starts AVI recording.\n"
+	        "-avistop stops AVI recording.\n"
+	        "-startmapper starts the keymapper.\n"
 	        "-get \"section property\" returns the value of the property.\n"
 	        "-set \"section property=value\" sets the value.\n");
 	MSG_Add("PROGRAM_CONFIG_HLP_PROPHLP","Purpose of property \"%s\" (contained in section \"%s\"):\n%s\n\nPossible Values: %s\nDefault value: %s\nCurrent value: %s\n");
