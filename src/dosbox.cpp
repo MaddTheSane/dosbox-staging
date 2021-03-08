@@ -342,17 +342,17 @@ void DOSBOX_SetNormalLoop() {
 }
 
 void DOSBOX_RunMachine(void){
-	Bitu ret;
-	do {
+	Bitu ret = 0;
+	while (ret == 0 && !exit_requested) {
         //--Modified 2011-09-25 by Alun Bestor to bracket iterations of the run loop
         //with our own callbacks. We pass along the contextInfo parameter so that
         //Boxer knows which iteration of the runloop is running (in case of nested runloops).
         void *contextInfo;
         boxer_runLoopWillStartWithContextInfo(&contextInfo);
-		ret=(*loop)() == 0 && !exit_requested;
+		ret=(*loop)();
         boxer_runLoopDidFinishWithContextInfo(contextInfo);
         //--End of modifications.
-	} while (!ret);
+	};
 }
 
 static void DOSBOX_UnlockSpeed( bool pressed ) {
