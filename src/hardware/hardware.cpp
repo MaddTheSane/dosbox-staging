@@ -132,7 +132,7 @@ FILE * OpenCaptureFile(const char * type,const char * ext) {
 	char file_name[CROSS_LEN];
 	sprintf(file_name, "%s%c%s%03d%s",
 	        capturedir.c_str(), CROSS_FILESPLIT, file_start, last, ext);
-	// Open the actual file 
+	/* Open the actual file */
 	FILE * handle=fopen(file_name,"wb");
 	if (handle) {
 		LOG_MSG("Capturing %s to %s",type,file_name);
