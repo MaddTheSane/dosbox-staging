@@ -93,12 +93,14 @@ This means that this file has had too many modifications to be safely replaceabl
 /* Define to 1 to enable heavy debugging, also have to enable C_DEBUG */
 /* #undef C_HEAVY_DEBUG */
 
+/* Define to 1 to enable internal modem support, requires SDL_net */
+#define C_MODEM 1
 
 /* Define to 1 to enable IPX over Internet networking, requires SDL_net */
 #define C_IPX 1
 
-/* Define to 1 to enable internal modem support, requires SDL_net */
-#define C_MODEM 1
+/* Define to 1 to enable NE2000 ethernet passthrough */
+#define C_NE2000 1
 
 /* Define to 1 to use opengl display output support */
 #define C_OPENGL 0
@@ -108,10 +110,6 @@ This means that this file has had too many modifications to be safely replaceabl
 
 /* Set to 1 to enable SDL 2.x support */
 #define C_SDL2 1
-
-
-/* Define to 1 to enable SDL_sound support */
-#define C_SDL_SOUND 1
 
 /* Define to 1 if you have setpriority support */
 #define C_SET_PRIORITY 1
