@@ -1,7 +1,9 @@
 libmidi_sources = [
   'midi.cpp',
+  'midi_alsa.cpp',
   'midi_fluidsynth.cpp',
   'midi_mt32.cpp',
+  'midi_lasynth_model.cpp',
   'midi_oss.cpp',
 ]
 

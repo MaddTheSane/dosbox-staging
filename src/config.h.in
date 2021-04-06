@@ -27,8 +27,8 @@
 // Emulator version
 #define VERSION "@version@"
 
-// TODO make it a suffix, configurable via meson
-#define CONF_BRAND "staging-git"
+// Suffix appended to the default .conf file name
+#define CONF_SUFFIX "@conf_suffix@"
 
 /* Operating System
  */
@@ -138,6 +138,9 @@
 
 // Defined if function mprotect is available
 #mesondefine HAVE_MPROTECT
+
+// Defined if function pthread_setname_np is available
+#mesondefine HAVE_PTHREAD_SETNAME_NP
 
 // Defined if function realpath is available
 #mesondefine HAVE_REALPATH

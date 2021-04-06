@@ -480,7 +480,7 @@ void Mouse_CursorMoved(float xrel,float yrel,float x,float y,bool emulate) {
 	} else {
 		if (CurMode->type == M_TEXT) {
 			mouse.x = x*real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS)*8;
-			mouse.y = y*(real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS)+1)*8;
+			mouse.y = y*(IS_EGAVGA_ARCH?(real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS)+1):25)*8;
 		} else if ((mouse.max_x < 2048) || (mouse.max_y < 2048) || (mouse.max_x != mouse.max_y)) {
 			if ((mouse.max_x > 0) && (mouse.max_y > 0)) {
 				mouse.x = x*mouse.max_x;
@@ -610,7 +610,8 @@ static void Mouse_ResetHardware(void){
 	PIC_SetIRQMask(MOUSE_IRQ,false);
 }
 
-void Mouse_BeforeNewVideoMode(bool setmode) {
+void Mouse_BeforeNewVideoMode()
+{
 	if (CurMode->type!=M_TEXT) RestoreCursorBackground();
 	else RestoreCursorBackgroundText();
 	mouse.hidden = 1;
@@ -634,7 +635,7 @@ void Mouse_AfterNewVideoMode(bool setmode) {
 	case 0x07: {
 		mouse.gran_x = (mode<2)?0xfff0:0xfff8;
 		mouse.gran_y = (Bit16s)0xfff8;
-		Bitu rows = real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS);
+		Bitu rows = IS_EGAVGA_ARCH?real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS):24;
 		if ((rows == 0) || (rows > 250)) rows = 25 - 1;
 		mouse.max_y = 8*(rows+1) - 1;
 		break;
@@ -693,8 +694,9 @@ void Mouse_AfterNewVideoMode(bool setmode) {
 }
 
 //Much too empty, Mouse_NewVideoMode contains stuff that should be in here
-static void Mouse_Reset(void) {
-	Mouse_BeforeNewVideoMode(false);
+static void Mouse_Reset()
+{
+	Mouse_BeforeNewVideoMode();
 	Mouse_AfterNewVideoMode(false);
 	Mouse_SetMickeyPixelRate(8,16);
 

@@ -25,7 +25,7 @@ jobs:
           - name: GCC
             packages: gcc@9
             build_flags: --native-file=.github/meson/native-gcc-9.ini
-            max_warnings: 3
+            max_warnings: 0
 
           - name: Clang, +tests
             run_tests: true
@@ -33,14 +33,35 @@ jobs:
 
           - name: Clang, +debugger
             build_flags: -Denable_debugger=normal
-            max_warnings: 114
+            max_warnings: 110
 
           - name: Clang, warning_level=3
             build_flags: -Dwarning_level=3
-            max_warnings: 139
+            max_warnings: 135
 
     steps:
       - uses: actions/checkout@v2
+
+      - name:  Prepare brew and compiler caches
+        id:    prep-caches
+        shell: bash
+        run: |
+          set -eu
+          BREW_DIR="$(brew --cache)"
+          DISCARD_DIR="${{ github.workspace }}/discard"
+          mkdir -p "$DISCARD_DIR"
+          mv -f "$BREW_DIR"/* "$DISCARD_DIR"
+          mkdir -p "$CCACHE_DIR"
+          echo "::set-output name=brew_dir::$BREW_DIR"
+          echo "::set-output name=ccache_dir::$CCACHE_DIR"
+          echo "::set-output name=today::$(date +%F)"
+          echo "::set-output name=name_hash::$(echo '${{ matrix.conf.name }}' | shasum | cut -b-8)"
+
+      - uses:  actions/cache@v2
+        with:
+          path: ${{ steps.prep-caches.outputs.brew_dir }}
+          key:  brew-cache-${{ steps.prep-caches.outputs.today }}
+          restore-keys: brew-cache-
 
       - name: Install C++ compiler and libraries
         run: |
@@ -48,22 +69,19 @@ jobs:
             ${{ matrix.conf.packages }} \
             $(cat ./.github/packages/macos-latest-brew.txt)
 
-      - name:  Prepare compiler cache
-        id:    prep-ccache
-        shell: bash
-        run: |
-          mkdir -p "${CCACHE_DIR}"
-          echo "::set-output name=dir::$CCACHE_DIR"
-          echo "::set-output name=today::$(gdate -I)"
-          echo "::set-output name=yesterday::$(gdate --date=yesterday -I)"
-
       - uses:  actions/cache@v2
-        id:    cache-ccache
         with:
-          path: ${{ steps.prep-ccache.outputs.dir }}
-          key:  ccache-${{ matrix.conf.os }}-${{ steps.prep-ccache.outputs.today }}
+          path: ${{ steps.prep-caches.outputs.ccache_dir }}
+          key:  ccache-macos-debug-${{ steps.prep-caches.outputs.name_hash }}-${{ steps.prep-caches.outputs.today }}
           restore-keys: |
-            ccache-${{ matrix.conf.os }}-${{ steps.prep-ccache.outputs.yesterday }}
+            ccache-macos-debug-${{ steps.prep-caches.outputs.name_hash }}-
+            ccache-macos-debug-
+
+      - name:  Cache subprojects
+        uses:  actions/cache@v2
+        with:
+          path: subprojects/packagecache
+          key:  subprojects-${{ hashFiles('subprojects/*.wrap') }}
 
       - name: Log environment
         run:  ./scripts/log-env.sh
@@ -93,27 +111,42 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name:  Prepare brew and compiler caches
+        id:    prep-caches
+        shell: bash
+        run: |
+          set -eu
+          BREW_DIR="$(brew --cache)"
+          DISCARD_DIR="${{ github.workspace }}/discard"
+          mkdir -p "$DISCARD_DIR"
+          mv -f "$BREW_DIR"/* "$DISCARD_DIR"
+          mkdir -p "$CCACHE_DIR"
+          echo "::set-output name=brew_dir::$BREW_DIR"
+          echo "::set-output name=ccache_dir::$CCACHE_DIR"
+          echo "::set-output name=today::$(date +%F)"
+
+      - uses:  actions/cache@v2
+        with:
+          path: ${{ steps.prep-caches.outputs.brew_dir }}
+          key:  brew-cache-${{ steps.prep-caches.outputs.today }}
+          restore-keys: brew-cache-
+
       - name: Install C++ compiler and libraries
         run: |
           brew install librsvg tree \
             $(cat ./.github/packages/macos-latest-brew.txt)
 
-      - name:  Prepare compiler cache
-        id:    prep-ccache
-        shell: bash
-        run: |
-          mkdir -p "${CCACHE_DIR}"
-          echo "::set-output name=dir::$CCACHE_DIR"
-          echo "::set-output name=today::$(gdate -I)"
-          echo "::set-output name=yesterday::$(gdate --date=yesterday -I)"
-
       - uses:  actions/cache@v2
-        id:    cache-ccache
         with:
-          path: ${{ steps.prep-ccache.outputs.dir }}
-          key:  ccache-macos-release-${{ steps.prep-ccache.outputs.today }}
-          restore-keys: |
-            ccache-macos-release-${{ steps.prep-ccache.outputs.yesterday }}
+          path: ${{ steps.prep-caches.outputs.ccache_dir }}
+          key:  ccache-macos-release-${{ steps.prep-caches.outputs.today }}
+          restore-keys: ccache-macos-release-
+
+      - name:  Cache subprojects
+        uses:  actions/cache@v2
+        with:
+          path: subprojects/packagecache
+          key:  subprojects-${{ hashFiles('subprojects/*.wrap') }}
 
       - name: Log environment
         run:  ./scripts/log-env.sh
@@ -128,12 +161,14 @@ jobs:
       - name: Setup release build
         run: |
           meson setup \
+            --wrap-mode=forcefallback \
             -Dbuildtype=release \
             -Ddefault_library=static \
             -Db_asneeded=true \
             -Db_lto=true \
             -Dtry_static_libs=opusfile,png,sdl2,sdl2_net \
-            -Duse_fluidsynth=false \
+            -Dfluidsynth:enable-floats=true \
+            -Dfluidsynth:try-static-deps=true \
             build
 
       - name: Build
@@ -188,21 +223,20 @@ jobs:
           mv -f "$clamconf".sample "$clamconf"
           sed -ie 's/^Example/#Example/g' "$clamconf"
           sed -ie 's/30/20000/g' "$clamconf"
-          echo "::set-output name=today::$(gdate -I)"
-          echo "::set-output name=yesterday::$(gdate --date=yesterday -I)"
+          echo "::set-output name=today::$(date +%F)"
       - uses:  actions/cache@v2
         id:    cache-clamdb
         with:
           path: ${{ env.CLAMDB_DIR }}/**/*.cvd
-          key:  clamdb-macos-${{ steps.prep-clamdb.outputs.today }}-2
+          key:  clamdb-macos-${{ steps.prep-clamdb.outputs.today }}
           restore-keys: |
-            clamdb-macos-${{ steps.prep-clamdb.outputs.yesterday }}-2
+            clamdb-macos-
 
       - name: Clam AV scan
         run: |
           set -x
           freshclam --foreground
-          clamscan --heuristic-scan-precedence=yes --recursive --infected .
+          clamscan --heuristic-scan-precedence=yes --recursive --infected dist
 
       - name: Upload disk image
         uses: actions/upload-artifact@v2
@@ -213,11 +247,15 @@ jobs:
           path: dosbox-staging-macOS-${{ env.VERSION }}.dmg
 
 
+  # This job exists only to publish an artifact with version info when building
+  # from master branch, so snapshot build version will be visible on:
+  # https://dosbox-staging.github.io/downloads/devel/
+  #
   publish_additional_artifacts:
     name: Publish additional artifacts
     needs: build_macos_release
     runs-on: macos-latest
-    if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier', github.actor) == false
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v2
       - name: Generate changelog

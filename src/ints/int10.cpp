@@ -52,7 +52,7 @@ static Bitu INT10_Handler(void) {
 
 	switch (reg_ah) {
 	case 0x00:								/* Set VideoMode */
-		Mouse_BeforeNewVideoMode(true);
+		Mouse_BeforeNewVideoMode();
 		INT10_SetVideoMode(reg_al);
 		Mouse_AfterNewVideoMode(true);
 		break;
@@ -206,7 +206,8 @@ static Bitu INT10_Handler(void) {
 	case 0x11:								/* Character generator functions */
 		if (!IS_EGAVGA_ARCH) 
 			break;
-		if ((reg_al&0xf0)==0x10) Mouse_BeforeNewVideoMode(false);
+		if ((reg_al & 0xf0) == 0x10)
+			Mouse_BeforeNewVideoMode();
 		switch (reg_al) {
 /* Textmode calls */
 		case 0x00:			/* Load user font */
@@ -541,7 +542,7 @@ graphics_chars:
 			reg_ah=VESA_GetSVGAModeInformation(reg_cx,SegValue(es),reg_di);
 			break;
 		case 0x02:							/* Set videomode */
-			Mouse_BeforeNewVideoMode(true);
+			Mouse_BeforeNewVideoMode();
 			reg_al=0x4f;
 			reg_ah=VESA_SetSVGAMode(reg_bx);
 			Mouse_AfterNewVideoMode(true);
@@ -704,18 +705,20 @@ graphics_chars:
 }
 
 static void INT10_Seg40Init(void) {
-	// the default char height
-	real_writeb(BIOSMEM_SEG,BIOSMEM_CHAR_HEIGHT,16);
-	// Clear the screen 
-	real_writeb(BIOSMEM_SEG,BIOSMEM_VIDEO_CTL,0x60);
-	// Set the basic screen we have
-	real_writeb(BIOSMEM_SEG,BIOSMEM_SWITCHES,0xF9);
-	// Set the basic modeset options
-	real_writeb(BIOSMEM_SEG,BIOSMEM_MODESET_CTL,0x51);
-	// Set the  default MSR
+	// Set the default MSR
 	real_writeb(BIOSMEM_SEG,BIOSMEM_CURRENT_MSR,0x09);
-	// Set the pointer to video save pointer table
-	real_writed(BIOSMEM_SEG,BIOSMEM_VS_POINTER,int10.rom.video_save_pointers);
+	if (IS_EGAVGA_ARCH) {
+		// Set the default char height
+		real_writeb(BIOSMEM_SEG,BIOSMEM_CHAR_HEIGHT,16);
+		// Clear the screen 
+		real_writeb(BIOSMEM_SEG,BIOSMEM_VIDEO_CTL,0x60);
+		// Set the basic screen we have
+		real_writeb(BIOSMEM_SEG,BIOSMEM_SWITCHES,0xF9);
+		// Set the basic modeset options
+		real_writeb(BIOSMEM_SEG,BIOSMEM_MODESET_CTL,0x51);
+		// Set the pointer to video save pointer table
+		real_writed(BIOSMEM_SEG,BIOSMEM_VS_POINTER,int10.rom.video_save_pointers);
+	}
 }
 
 

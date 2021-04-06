@@ -33,6 +33,10 @@
 #include "cross.h"
 #include "fs_utils.h"
 #include "mixer.h"
+#include "programs.h"
+#include "support.h"
+#include "../ints/int10.h"
+
 
 static constexpr int FRAMES_PER_BUFFER = 512; // synth granularity
 
@@ -176,7 +180,7 @@ static std::string find_sf_file(const std::string &name)
 }
 
 MidiHandlerFluidsynth::MidiHandlerFluidsynth()
-        : soft_limiter("FSYNTH", FRAMES_PER_BUFFER),
+        : soft_limiter("FSYNTH"),
           keep_rendering(false)
 {}
 
@@ -293,11 +297,13 @@ bool MidiHandlerFluidsynth::Open(MAYBE_UNUSED const char *conf)
 	settings = std::move(fluid_settings);
 	synth = std::move(fluid_synth);
 	channel = std::move(mixer_channel);
+	selected_font = soundfont;
 
 	// Start rendering audio
 	keep_rendering = true;
 	const auto render = std::bind(&MidiHandlerFluidsynth::Render, this);
 	renderer = std::thread(render);
+	set_thread_name(renderer, "dosbox:fsynth");
 	play_buffer = playable.Dequeue(); // populate the first play buffer
 
 	// Start playback
@@ -339,6 +345,7 @@ void MidiHandlerFluidsynth::Close()
 	settings.reset();
 	soft_limiter.Reset();
 	last_played_frame = 0;
+	selected_font = "";
 
 	is_open = false;
 }
@@ -442,6 +449,85 @@ void MidiHandlerFluidsynth::Render()
 		// and then move it into the playable queue
 		playable.Enqueue(std::move(playable_buffer));
 	}
+}
+
+std::string format_sf2_line(size_t width, const std::string &name, const std::string &path)
+{
+	assert(width > 0);
+	std::vector<char> line_buf(width);
+	snprintf(line_buf.data(), width, "%-16s - %s", name.c_str(), path.c_str());
+	std::string line = line_buf.data();
+
+	// Formatted line did not fill the whole buffer - no further formatting
+	// is necessary.
+	if (line.size() + 1 < width)
+		return line;
+
+	// The description was too long and got trimmed; place three dots in
+	// the end to make it clear to the user.
+	const std::string cutoff = "...";
+	assert(line.size() > cutoff.size());
+	line.replace(line.end() - cutoff.size(), line.end(), cutoff);
+	return line;
+}
+
+MIDI_RC MidiHandlerFluidsynth::ListAll(Program *caller)
+{
+	auto *section = static_cast<Section_prop *>(control->GetSection("fluidsynth"));
+	const auto sf_spec = parse_sf_pref(section->Get_string("soundfont"), 100);
+	const auto sf_name = std::get<std::string>(sf_spec);
+	const size_t term_width = INT10_GetTextColumns();
+
+	auto write_line = [caller](bool highlight, const std::string &line) {
+		const char color[] = "\033[32;1m";
+		const char nocolor[] = "\033[0m";
+		if (highlight)
+			caller->WriteOut("* %s%s%s\n", color, line.c_str(), nocolor);
+		else
+			caller->WriteOut("  %s\n", line.c_str());
+	};
+
+	// If selected soundfont exists in the current working directory,
+	// then print it.
+	const std::string sf_path = CROSS_ResolveHome(sf_name);
+	if (path_exists(sf_path)) {
+		write_line((sf_path == selected_font), sf_name);
+	}
+
+	// Go through all soundfont directories and list all .sf2 files.
+	char dir_entry_name[CROSS_LEN];
+	for (const auto &dir_path : get_data_dirs()) {
+		dir_information *dir = open_directory(dir_path.c_str());
+		bool is_directory = false;
+		if (!dir)
+			continue;
+		if (!read_directory_first(dir, dir_entry_name, is_directory))
+			continue;
+		do {
+			if (is_directory)
+				continue;
+
+			const size_t name_len = strlen(dir_entry_name);
+			if (name_len < 4)
+				continue;
+			const char *ext = dir_entry_name + name_len - 4;
+			const bool is_sf2 = (strcasecmp(ext, ".sf2") == 0);
+			if (!is_sf2)
+				continue;
+
+			const std::string font_path = dir_path + dir_entry_name;
+
+			const auto line = format_sf2_line(term_width - 2,
+			                                  dir_entry_name, font_path);
+			const bool highlight = is_open &&
+			                       (selected_font == font_path);
+
+			write_line(highlight, line);
+
+		} while (read_directory_next(dir, dir_entry_name, is_directory));
+	}
+
+	return MIDI_RC::OK;
 }
 
 static void fluid_init(MAYBE_UNUSED Section *sec)

@@ -12,10 +12,10 @@ jobs:
         conf:
           - name: MSVC 32-bit
             arch: x86
-            max_warnings: 267
+            max_warnings: 268
           - name: MSVC 64-bit
             arch: x64
-            max_warnings: 1969
+            max_warnings: 1970
     steps:
       - name:  Backup existing vcpkg installation
         shell: pwsh
@@ -108,14 +108,17 @@ jobs:
         shell: pwsh
         run:   .\scripts\log-env.ps1
 
-      - name:  Inject version string
+      - name:  Adjust config.h
         shell: bash
         run: |
           set -x
           git fetch --prune --unshallow
           export VERSION=$(git describe --abbrev=4)
+          # inject version based on vcs
           sed -i "s|DOSBOX_DETAILED_VERSION \"git\"|DOSBOX_DETAILED_VERSION \"$VERSION\"|" src/platform/visualc/config.h
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          # overwrite .conf file branding for release build
+          sed -i "s|CONF_SUFFIX \"-staging-git\"|CONF_SUFFIX \"-staging\"|" src/platform/visualc/config.h
 
       - name:  Build
         shell: pwsh
@@ -159,7 +162,7 @@ jobs:
           ls -l "$VC_REDIST_PATH"
 
           # Include the necessary dlls from one of available versions
-          readonly VC_REDIST_VERSION="14.28.29325"
+          readonly VC_REDIST_VERSION="14.28.29910"
           readonly VC_REDIST_DIR="$VC_REDIST_PATH/$VC_REDIST_VERSION/${{ matrix.conf.arch }}/Microsoft.VC142.CRT"
           cp "$VC_REDIST_DIR/msvcp140.dll"       dest/
           cp "$VC_REDIST_DIR/vcruntime140.dll"   dest/
@@ -191,11 +194,15 @@ jobs:
           path: dosbox-staging-windows-${{ matrix.conf.arch }}-${{ env.VERSION }}
 
 
+  # This job exists only to publish an artifact with version info when building
+  # from master branch, so snapshot build version will be visible on:
+  # https://dosbox-staging.github.io/downloads/devel/
+  #
   publish_additional_artifacts:
     name: Publish additional artifacts
     needs: build_windows_vs_release
     runs-on: windows-latest
-    if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier', github.actor) == false
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v2
       - name: Generate changelog

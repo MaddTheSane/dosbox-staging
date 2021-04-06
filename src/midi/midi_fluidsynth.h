@@ -47,6 +47,7 @@ public:
 	void Close() override;
 	void PlayMsg(const uint8_t *msg) override;
 	void PlaySysex(uint8_t *sysex, size_t len) override;
+	MIDI_RC ListAll(Program *caller) override;
 
 private:
 	void MixerCallBack(uint16_t requested_frames);
@@ -62,6 +63,7 @@ private:
 	fluid_settings_ptr_t settings{nullptr, &delete_fluid_settings};
 	fsynth_ptr_t synth{nullptr, &delete_fluid_synth};
 	channel_t channel{nullptr, MIXER_DelChannel};
+	std::string selected_font = "";
 
 	std::vector<int16_t> play_buffer = {};
 	static constexpr auto num_buffers = 8;

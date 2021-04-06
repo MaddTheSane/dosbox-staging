@@ -35,6 +35,12 @@ endif
 conf_data = configuration_data()
 conf_data.set('version', meson.project_version())
 
+if get_option('buildtype').startswith('debug')
+  conf_data.set('conf_suffix', '-staging-git')
+else
+  conf_data.set('conf_suffix', '-staging')
+endif
+
 os_family_name = {
   'linux'     : 'LINUX',
   'windows'   : 'WIN32',
@@ -77,6 +83,11 @@ endif
 
 if cc.has_function('mprotect', prefix : '#include <sys/mman.h>')
   conf_data.set10('HAVE_MPROTECT', true)
+endif
+
+if cxx.has_function('pthread_setname_np', prefix : '#include <pthread.h>',
+                    dependencies : dependency('threads'))
+  conf_data.set10('HAVE_PTHREAD_SETNAME_NP', true)
 endif
 
 if cc.has_function('realpath', prefix : '#include <stdlib.h>')
@@ -181,12 +192,13 @@ endif
 
 if get_option('use_fluidsynth')
   fluid_dep = dependency('fluidsynth', version : '>= 2.0.0',
+                         static : ('fluidsynth' in static_libs_list),
+                         fallback : ['fluidsynth', 'fluidsynth_dep'],
                          not_found_message : msg.format('use_fluidsynth'))
 endif
 
 if get_option('use_mt32emu')
-  # TODO version 2.5.0 will install mt32emu.pc file; upgrade when released
-  mt32emu_dep = dependency('mt32emu', version : '>= 2.4.2',
+  mt32emu_dep = dependency('mt32emu', version : '>= 2.5.0',
                            fallback : ['mt32emu', 'mt32emu_dep'],
                            not_found_message : msg.format('use_mt32emu'))
 endif
@@ -245,7 +257,6 @@ if host_machine.system() in ['windows', 'cygwin']
   winsock2_dep = cxx.find_library('ws2_32', required : true)
   winmm_dep = cxx.find_library('winmm', required : true)
 endif
-
 
 # include directories
 #

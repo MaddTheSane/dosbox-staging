@@ -34,6 +34,7 @@
 #include "mapper.h"
 #include "midi_handler.h"
 #include "pic.h"
+#include "programs.h"
 #include "setup.h"
 #include "support.h"
 #include "timer.h"
@@ -102,6 +103,10 @@ MidiHandler Midi_none;
 //
 //#include "midi_alsa.h"
 //--End of modifications
+
+#if C_ALSA
+MidiHandler_alsa Midi_alsa;
+#endif
 
 struct DB_Midi {
 	uint8_t status;
@@ -312,10 +317,23 @@ getdefault:
 	}
 };
 
-void MIDI_ListAll(Program *output_handler)
+void MIDI_ListAll(Program *caller)
 {
-	if (midi.handler)
-		midi.handler->ListAll(output_handler);
+	for (auto *handler = handler_list; handler; handler = handler->next) {
+		const std::string name = handler->GetName();
+		if (name == "none")
+			continue;
+
+		caller->WriteOut("%s:\n", name.c_str());
+
+		const auto err = handler->ListAll(caller);
+		if (err == MIDI_RC::ERR_DEVICE_NOT_CONFIGURED)
+			caller->WriteOut("  device not configured\n");
+		if (err == MIDI_RC::ERR_DEVICE_LIST_NOT_SUPPORTED)
+			caller->WriteOut("  listing not supported\n");
+
+		caller->WriteOut("\n"); // additional newline to separate devices
+	}
 }
 
 static MIDI* test;
