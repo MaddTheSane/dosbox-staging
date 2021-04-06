@@ -269,6 +269,11 @@ This means that this file has had too many modifications to be safely replaceabl
 /* #undef socklen_t */
 
 
+//--Modified 2021-04-06 by C.W. Betts: Make DOSBox-staging happy and build.
+#define CONF_SUFFIX "Boxer"
+//--End of modifications
+
+
 //--Modified 2009-02-09 by Alun Bestor: instead of going through this rigmarole, we simply map DOSBox's types to the predefined system types.
 
 typedef		double		Real64;
