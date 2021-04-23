@@ -12,10 +12,10 @@ jobs:
         conf:
           - name: MSVC 32-bit
             arch: x86
-            max_warnings: 268
+            max_warnings: 269
           - name: MSVC 64-bit
             arch: x64
-            max_warnings: 1970
+            max_warnings: 1971
     steps:
       - name:  Backup existing vcpkg installation
         shell: pwsh
@@ -34,7 +34,7 @@ jobs:
         id:   cache-vcpkg
         with:
           path: c:\vcpkg
-          key: vcpkg-${{ matrix.conf.arch }}-${{ steps.prep-vcpkg.outputs.year_and_week }}-1
+          key: vcpkg-${{ matrix.conf.arch }}-${{ steps.prep-vcpkg.outputs.year_and_week }}
 
       - name:  Install new packages using vcpkg
         if:    steps.cache-vcpkg.outputs.cache-hit != 'true'
@@ -42,7 +42,7 @@ jobs:
         run: |
           rm -R c:\vcpkg
           mv c:\vcpkg-bak c:\vcpkg
-          vcpkg install --triplet ${{ matrix.conf.arch }}-windows libpng sdl2 sdl2-net opusfile fluidsynth
+          vcpkg install --triplet ${{ matrix.conf.arch }}-windows libpng sdl2 sdl2-net libmt32emu opusfile fluidsynth
           if (-not $?) { throw "vcpkg failed to install library dependencies" }
 
       - name:  Integrate packages
@@ -146,10 +146,11 @@ jobs:
           cp docs/vc_redist.txt                   dest/doc/vc_redist.txt
           cp README                               dest/doc/manual.txt
           cp vs/$RELEASE_DIR/libfluidsynth-2.dll  dest/
-          cp vs/$RELEASE_DIR/glib-2.dll           dest/ # fluidsynth dependency
+          cp vs/$RELEASE_DIR/glib-2.0.dll         dest/ # fluidsynth dependency
           cp vs/$RELEASE_DIR/intl-8.dll           dest/ # glib dependency
           cp vs/$RELEASE_DIR/pcre.dll             dest/ # glib dependency
           cp vs/$RELEASE_DIR/iconv-2.dll          dest/ # glib dependency
+          cp vs/$RELEASE_DIR/mt32emu-2.dll        dest/
           cp vs/$RELEASE_DIR/ogg.dll              dest/
           cp vs/$RELEASE_DIR/opus.dll             dest/
           cp vs/$RELEASE_DIR/SDL2.dll             dest/
