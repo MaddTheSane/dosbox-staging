@@ -78,7 +78,7 @@ char* AnalyzeInstruction(char* inst, bool saveSelector);
 Bit32u GetHexValue(char* str, char*& hex);
 
 #if 0
-class DebugPageHandler : public PageHandler {
+class DebugPageHandler final : public PageHandler {
 public:
 	Bitu readb(PhysPt /*addr*/) {
 	}
@@ -461,19 +461,19 @@ void CBreakpoint::ActivateBreakpointsExceptAt(PhysPt adr)
 	};
 };
 
-bool CBreakpoint::CheckBreakpoint(Bitu seg, Bitu off)
 // Checks if breakpoint is valid and should stop execution
+bool CBreakpoint::CheckBreakpoint(Bitu seg, Bitu off)
 {
 	// Quick exit if there are no breakpoints
 	if (BPoints.empty()) return false;
 
 	// Search matching breakpoint
-	std::list<CBreakpoint*>::iterator i;
-	CBreakpoint* bp;
-	for(i=BPoints.begin(); i != BPoints.end(); ++i) {
-		bp = (*i);
-		if ((bp->GetType()==BKPNT_PHYSICAL) && bp->IsActive() && (bp->GetSegment()==seg) && (bp->GetOffset()==off)) {
-			// Found, 
+	for (auto i = BPoints.begin(); i != BPoints.end(); ++i) {
+		CBreakpoint *bp = (*i);
+
+		if ((bp->GetType() == BKPNT_PHYSICAL) && bp->IsActive() &&
+		    (bp->GetLocation() == GetAddress(seg, off))) {
+			// Found
 			if (bp->GetOnce()) {
 				// delete it, if it should only be used once
 				(BPoints.erase)(i);
@@ -489,7 +489,7 @@ bool CBreakpoint::CheckBreakpoint(Bitu seg, Bitu off)
 				}
 			}
 			return true;
-		} 
+		}
 #if C_HEAVY_DEBUG
 		// Memory breakpoint support
 		else if (bp->IsActive()) {
@@ -514,13 +514,13 @@ bool CBreakpoint::CheckBreakpoint(Bitu seg, Bitu off)
 					DEBUG_ShowMsg("DEBUG: Memory breakpoint %s: %04X:%04X - %02X -> %02X\n",(bp->GetType()==BKPNT_MEMORY_PROT)?"(Prot)":"",bp->GetSegment(),bp->GetOffset(),bp->GetValue(),value);
 					bp->SetValue(value);
 					return true;
-				};
+				}
 			}
-		};
+		}
 #endif
-	};
+	}
 	return false;
-};
+}
 
 bool CBreakpoint::CheckIntBreakpoint(PhysPt adr, Bit8u intNr, Bit16u ahValue, Bit16u alValue)
 // Checks if interrupt breakpoint is valid and should stop execution
@@ -732,8 +732,15 @@ static void DrawData(void) {
 			mvwprintw (dbg.win_data,y,14+3*x,"%02X",ch);
 			if (showPrintable) {
 				if (ch<32 || !isprint(*reinterpret_cast<unsigned char*>(&ch))) ch='.';
-				mvwprintw (dbg.win_data,y,63+x,"%c",ch);
-			} else mvwaddch(dbg.win_data,y,63+x,ch);
+				mvwaddch (dbg.win_data,y,63+x,ch);
+			} else {
+#ifdef __PDCURSES__
+				mvwaddrawch (dbg.win_data,y,63+x,ch);
+#else
+				if (ch<32) ch='.';
+				mvwaddch (dbg.win_data,y,63+x,ch);
+#endif
+			}
 			add++;
 		};
 	}
@@ -1623,6 +1630,16 @@ Bit32u DEBUG_CheckKeys(void) {
 		case PADSTAR:	key='*';	break;
 		case PADMINUS:	key='-';	break;
 		case PADPLUS:	key='+';	break;
+		case PADSTOP:	key=KEY_DC;		break;
+		case PAD0:		key=KEY_IC;		break;
+		case KEY_A1:	key=KEY_HOME;	break;
+		case KEY_A2:	key=KEY_UP;		break;
+		case KEY_A3:	key=KEY_PPAGE;	break;
+		case KEY_B1:	key=KEY_LEFT;	break;
+		case KEY_B3:	key=KEY_RIGHT;	break;
+		case KEY_C1:	key=KEY_END;	break;
+		case KEY_C2:	key=KEY_DOWN;	break;
+		case KEY_C3:	key=KEY_NPAGE;	break;
 		case ALT_D:
 			if (ungetch('D') != ERR) key=27;
 			break;
@@ -1847,12 +1864,12 @@ Bit32u DEBUG_CheckKeys(void) {
 
 Bitu DEBUG_Loop(void) {
 //TODO Disable sound
-	GFX_Events();
+	GFX_MaybeProcessEvents();
 	// Interrupt started ? - then skip it
 	Bit16u oldCS	= SegValue(cs);
 	Bit32u oldEIP	= reg_eip;
 	PIC_runIRQs();
-	SDL_Delay(1);
+	Delay(1);
 	if ((oldCS!=SegValue(cs)) || (oldEIP!=reg_eip)) {
 		CBreakpoint::AddBreakpoint(oldCS,oldEIP,true);
 		CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
@@ -2132,7 +2149,7 @@ static void LogInstruction(uint16_t segValue, uint32_t eipValue, ofstream &out)
 
 // DEBUG.COM stuff
 
-class DEBUG : public Program {
+class DEBUG final : public Program {
 public:
 	DEBUG() : active(false) { pDebugcom = this; }
 

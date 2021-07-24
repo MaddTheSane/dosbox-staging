@@ -261,7 +261,6 @@ static Bitu cmos_readreg(Bitu /*port*/,Bitu /*iolen*/) {
 	case 0x3a:
 		return 0;
 
-
 	case 0x0b:		/* Status register B */
 	case 0x0d:		/* Status register D */
 	case 0x0f:		/* Shutdown status byte */
@@ -285,7 +284,7 @@ void CMOS_SetRegister(Bitu regNr, Bit8u val) {
 }
 
 
-class CMOS:public Module_base{
+class CMOS final : public Module_base{
 private:
 	IO_ReadHandleObject ReadHandler[2];
 	IO_WriteHandleObject WriteHandler[2];

@@ -1189,7 +1189,7 @@ void boxer_setKeyboardLayoutActive(bool active)
 //--End of modifications
 
 
-class DOS_KeyboardLayout: public Module_base {
+class DOS_KeyboardLayout final : public Module_base {
 public:
 	DOS_KeyboardLayout(Section* configuration):Module_base(configuration){
 		Section_prop * section=static_cast<Section_prop *>(configuration);

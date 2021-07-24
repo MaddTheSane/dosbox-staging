@@ -1,5 +1,5 @@
 project('dosbox-staging', 'c', 'cpp',
-        version : '0.77.0',
+        version : '0.78.0',
         license : 'GPL-2.0-or-later',
         default_options : ['cpp_std=c++14', 'b_ndebug=if-release'],
         meson_version : '>= 0.51.0')
@@ -81,8 +81,28 @@ if cc.has_function('clock_gettime', prefix : '#include <time.h>')
   conf_data.set10('HAVE_CLOCK_GETTIME', true)
 endif
 
+if cc.has_function('__builtin_available')
+  conf_data.set10('HAVE_BUILTIN_AVAILABLE', true)
+endif
+
 if cc.has_function('mprotect', prefix : '#include <sys/mman.h>')
   conf_data.set10('HAVE_MPROTECT', true)
+endif
+
+if cc.has_function('mmap', prefix : '#include <sys/mman.h>')
+  conf_data.set10('HAVE_MMAP', true)
+endif
+
+if cc.has_header_symbol('sys/mman.h', 'MAP_JIT')
+  conf_data.set10('HAVE_MAP_JIT', true)
+endif
+
+if cc.has_function('pthread_jit_write_protect_np', prefix : '#include <pthread.h>')
+  conf_data.set10('HAVE_PTHREAD_WRITE_PROTECT_NP', true)
+endif
+
+if cc.has_function('sys_icache_invalidate', prefix : '#include <libkern/OSCacheControl.h>')
+  conf_data.set10('HAVE_SYS_ICACHE_INVALIDATE', true)
 endif
 
 if cxx.has_function('pthread_setname_np', prefix : '#include <pthread.h>',
@@ -163,7 +183,7 @@ atomic_dep    = cxx.find_library('atomic', required : false)
 opus_dep      = dependency('opusfile',
                            static : ('opusfile' in static_libs_list))
 threads_dep   = dependency('threads')
-sdl2_dep      = dependency('sdl2', version : '>= 2.0.2',
+sdl2_dep      = dependency('sdl2', version : '>= 2.0.5',
                            static : ('sdl2' in static_libs_list))
 sdl2_net_dep  = optional_dep
 opengl_dep    = optional_dep
@@ -199,6 +219,7 @@ endif
 
 if get_option('use_mt32emu')
   mt32emu_dep = dependency('mt32emu', version : '>= 2.5.0',
+                           static : ('mt32emu' in static_libs_list),
                            fallback : ['mt32emu', 'mt32emu_dep'],
                            not_found_message : msg.format('use_mt32emu'))
 endif
@@ -240,6 +261,17 @@ if host_machine.system() == 'darwin'
   else
     warning('''Core MIDI support disabled: compiler can't detect/use Apple Frameworks''')
   endif
+
+  # Apple Silicon has 16k pages
+  pagesize_cmd = run_command('pagesize')
+  if pagesize_cmd.returncode() != 0
+    error('''error executing pagesize''')
+  else 
+    pagesize = pagesize_cmd.stdout().strip().to_int()
+    if pagesize != 4096
+      conf_data.set('PAGESIZE', pagesize)
+    endif
+  endif
 endif
 
 # Linux-only dependencies
@@ -268,10 +300,12 @@ incdir = include_directories('include', '.')
 subdir('src/libs/decoders')
 subdir('src/libs/nuked')
 subdir('src/libs/ppscale')
+subdir('src/libs/residfp')
 
 libdecoders_dep = declare_dependency(link_with : libdecoders)
 libnuked_dep    = declare_dependency(link_with : libnuked)
 libppscale_dep  = declare_dependency(link_with : libppscale)
+libresidfp_dep  = declare_dependency(link_with : libresidfp)
 
 
 # internal libs

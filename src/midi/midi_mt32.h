@@ -54,6 +54,7 @@ public:
 	~MidiHandler_mt32() override;
 	void Close() override;
 	const char *GetName() const override { return "mt32"; }
+	MIDI_RC ListAll(Program *caller) override;
 	bool Open(const char *conf) override;
 	void PlayMsg(const uint8_t *msg) override;
 	void PlaySysex(uint8_t *sysex, size_t len) override;
@@ -61,6 +62,7 @@ public:
 
 private:
 	uint32_t GetMidiEventTimestamp() const;
+	service_t GetService();
 	void MixerCallBack(uint16_t len);
 	void SetMixerLevel(const AudioFrame &desired) noexcept;
 	uint16_t GetRemainingFrames();

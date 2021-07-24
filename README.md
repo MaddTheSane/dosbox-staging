@@ -23,26 +23,27 @@ support today's systems.
 
 ### For developers
 
-|                                | DOSBox Staging              | DOSBox
-|-                               |-                            |-
-| **Version control**            | Git                         | [SVN]
-| **Language**                   | C++14                       | C++03<sup>[1]</sup>
-| **SDL**                        | >= 2.0.2                    | 1.2<sup>＊</sup>
-| **Buildsystem**                | Meson or Visual Studio 2019 | Autotools or Visual Studio 2003
-| **CI**                         | Yes                         | No
-| **Static analysis**            | Yes<sup>[2],[3],[4]</sup>   | No
-| **Dynamic analysis**           | Yes                         | No
-| **clang-format**               | Yes                         | No
-| **[Development builds]**       | Yes                         | No
-| **Unit tests**                 | Yes<sup>[5]</sup>           | No
-| **Automated regression tests** | WIP                         | No
+|                                | DOSBox Staging                | DOSBox
+|-                               |-                              |-
+| **Version control**            | Git                           | [SVN]
+| **Language**                   | C++14                         | C++03<sup>[1]</sup>
+| **SDL**                        | >= 2.0.5                      | 1.2<sup>＊</sup>
+| **Buildsystem**                | Meson or Visual Studio 2019   | Autotools or Visual Studio 2003
+| **CI**                         | Yes                           | No
+| **Static analysis**            | Yes<sup>[2],[3],[4],[5]</sup> | No
+| **Dynamic analysis**           | Yes                           | No
+| **clang-format**               | Yes                           | No
+| **[Development builds]**       | Yes                           | No
+| **Unit tests**                 | Yes<sup>[6]</sup>             | No
+| **Automated regression tests** | WIP                           | No
 
 [SVN]:https://sourceforge.net/projects/dosbox/
 [1]:https://sourceforge.net/p/dosbox/patches/283/
 [2]:https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Code+analysis%22
 [3]:https://lgtm.com/projects/g/dosbox-staging/dosbox-staging/
 [4]:https://scan.coverity.com/projects/dosbox-staging
-[5]:tests/README.md
+[5]:https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22PVS-Studio+analysis%22
+[6]:tests/README.md
 [Development builds]:https://dosbox-staging.github.io/downloads/devel/
 
 ### Feature differences
@@ -72,23 +73,24 @@ Codecs supported for CD-DA emulation:
 [6]:https://www.dosbox.com/wiki/MOUNT#Mounting_a_CUE.2FBIN-Pair_as_volume
 [7]:https://sourceforge.net/p/dosbox/code-0/HEAD/tree/dosbox/trunk/src/dos/cdrom_image.cpp#l536
 
-Other differences:
+Feature differences between release binaries (or unpatched sources):
 
-|                          | DOSBox Staging                               | DOSBox SVN
-|-                         |-                                             |-
-| **Pixel-perfect mode**   | Yes (`output=openglpp` or `output=texturepp`)| N/A
-| **Resizable window**     | Experimental (`windowresolution=resizable`)  | N/A
-| **Relative window size** | N/A                                          | `windowresolution=X%`
-| **[OPL] emulators**      | compat, fast, mame, nuked<sup>[8]</sup>      | compat, fast, mame
-| **[CGA]/mono support**   | Yes (`machine=cga_mono`)<sup>[9]</sup>       | Only CGA with colour
-| **[Wayland] support**    | Experimental (use `SDL_VIDEODRIVER=wayland`) | N/A
-| **Modem phonebook file** | Yes (`phonebookfile=<name>`)                 | N/A
-| **Autotype command**     | Yes<sup>[10]</sup>                           | N/A
-| **Startup verbosity**    | Yes<sup>[11]</sup>                           | N/A
-| **[GUS] enhancements**   | Yes<sup>[12]</sup>                           | N/A
-| **Raw mouse input**      | Yes (`raw_mouse_input=true`)                 | N/A
-| **[FluidSynth][FS] MIDI**| Yes<sup>[13]</sup> (FluidSynth 2.x)          | Only external synths
-| **[MT-32] emulator**     | Yes<sup>＊</sup> (libmt32emu 2.4.2)          | N/A
+| *Feature*                   | *DOSBox Staging*                                     | *DOSBox SVN*
+|-                            |-                                                     |-
+| **Pixel-perfect mode**      | Yes (`output=openglpp` or `output=texturepp`)        | N/A
+| **Resizable window**        | Yes (for all `output=opengl` modes)                  | N/A
+| **Relative window size**    | Yes (`windowresolution=small`, `medium`, or `large`) | `windowresolution=X%`
+| **[OPL] emulators**         | compat, fast, mame, nuked<sup>[8]</sup>              | compat, fast, mame
+| **[CGA]/mono support**      | Yes (`machine=cga_mono`)<sup>[9]</sup>               | Only CGA with colour
+| **PCjr CGA composite mode** | Yes (`machine=pcjr` with composite hotkeys)          | N/A
+| **[Wayland] support**       | Experimental (use `SDL_VIDEODRIVER=wayland`)         | N/A
+| **Modem phonebook file**    | Yes (`phonebookfile=<name>`)                         | N/A
+| **Autotype command**        | Yes<sup>[10]</sup>                                   | N/A
+| **Startup verbosity**       | Yes<sup>[11]</sup>                                   | N/A
+| **[GUS] enhancements**      | Yes<sup>[12]</sup>                                   | N/A
+| **Raw mouse input**         | Yes (`raw_mouse_input=true`)                         | N/A
+| **[FluidSynth][FS] MIDI**   | Yes<sup>[13]</sup> (FluidSynth 2.x)                  | Only external synths
+| **[MT-32] emulator**        | Yes<sup>＊</sup> (libmt32emu 2.4.2)                  | N/A
 
 <sup>＊- Requires original ROM files</sup>
 
@@ -164,6 +166,14 @@ ninja -C build
 ./build/dosbox
 ```
 
+To build and link the MT-32 and FluidSynth subprojects statically,
+add the `-Ddefault_library=static` option during setup.
+
+To see all of Meson's setup options, run:
+``` shell
+meson configure
+```
+
 ### Windows - Visual Studio (2019 or newer)
 
 First, you need to setup [vcpkg] to install build dependencies. Once vcpkg
@@ -171,7 +181,7 @@ is bootstrapped, open PowerShell and run:
 
 ``` powershell
 PS:\> .\vcpkg integrate install
-PS:\> .\vcpkg install --triplet x64-windows libpng sdl2 sdl2-net libmt32emu opusfile fluidsynth
+PS:\> .\vcpkg install --triplet x64-windows libpng sdl2 sdl2-net libmt32emu opusfile fluidsynth gtest
 ```
 
 These two steps will ensure that MSVC finds and links all dependencies.

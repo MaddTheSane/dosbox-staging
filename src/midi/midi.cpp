@@ -117,8 +117,8 @@ struct DB_Midi {
 	struct {
 		uint8_t buf[MIDI_SYSEX_SIZE];
 		size_t used;
-		uint32_t delay; // ms
-		uint32_t start; // ms
+		int delay; // ms
+		int64_t start;  // ms
 	} sysex;
 	bool available;
 	MidiHandler * handler;
@@ -133,19 +133,19 @@ DB_Midi midi;
  * Explanation for this formula can be found in discussion under patch
  * that introduced it: https://sourceforge.net/p/dosbox/patches/241/
  */
-uint32_t delay_in_ms(size_t sysex_bytes_num)
+int delay_in_ms(size_t sysex_bytes_num)
 {
 	constexpr double midi_baud_rate = 3.125; // bytes per ms
 	const auto delay = (sysex_bytes_num * 1.25) / midi_baud_rate;
-	return static_cast<uint32_t>(delay) + 2;
+	return static_cast<int>(delay) + 2;
 }
 
 void MIDI_RawOutByte(uint8_t data)
 {
 	if (midi.sysex.start) {
-		const uint32_t passed_ticks = GetTicks() - midi.sysex.start;
+		const auto passed_ticks = GetTicksSince(midi.sysex.start);
 		if (passed_ticks < midi.sysex.delay)
-			SDL_Delay(midi.sysex.delay - passed_ticks);
+			Delay(midi.sysex.delay - passed_ticks);
 	}
 
 	/* Test for a realtime MIDI message */
@@ -228,7 +228,7 @@ void MIDI_RawOutByte(uint8_t data)
 //}
 //--End of modifications
 
-class MIDI : public Module_base {
+class MIDI final : public Module_base {
 public:
 	MIDI(Section *configuration) : Module_base(configuration)
 	{

@@ -240,8 +240,8 @@ Bit8u CParallel::getPrinterStatus()
 
 void RunIdleTime(Bitu milliseconds)
 {
-	Bitu time=SDL_GetTicks()+milliseconds;
-	while(SDL_GetTicks()<time)
+	Bitu time=GetTicks()+milliseconds;
+	while(GetTicks()<time)
 		CALLBACK_Idle();
 }
 

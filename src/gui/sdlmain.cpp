@@ -24,6 +24,7 @@
 #include <array>
 #include <cassert>
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <string.h>
 #include <stdio.h>
@@ -230,7 +231,18 @@ enum SCREEN_TYPES	{
 
 enum class SCALING_MODE { NONE, NEAREST, PERFECT };
 
+// Size and ratio constants
+// ------------------------
+constexpr int SMALL_WINDOW_PERCENT = 50;
+constexpr int MEDIUM_WINDOW_PERCENT = 70;
+constexpr int LARGE_WINDOW_PERCENT = 90;
+constexpr int DEFAULT_WINDOW_PERCENT = MEDIUM_WINDOW_PERCENT;
+constexpr SDL_Point FALLBACK_WINDOW_DIMENSIONS = {640, 480};
+constexpr SDL_Point RATIOS_FOR_STRETCHED_PIXELS = {4, 3};
+constexpr SDL_Point RATIOS_FOR_SQUARE_PIXELS = {8, 5};
+
 enum PRIORITY_LEVELS {
+	PRIORITY_LEVEL_AUTO,
 	PRIORITY_LEVEL_PAUSE,
 	PRIORITY_LEVEL_LOWEST,
 	PRIORITY_LEVEL_LOWER,
@@ -255,6 +267,7 @@ struct SDL_Block {
 		int height = 0;
 		double scalex = 1.0;
 		double scaley = 1.0;
+		bool has_changed = false;
 		double pixel_aspect = 1.0;
 		GFX_CallBack_t callback = nullptr;
 	} draw = {};
@@ -268,9 +281,13 @@ struct SDL_Block {
 		struct {
 			uint16_t width = 0; // TODO convert to int
 			uint16_t height = 0; // TODO convert to int
-			bool use_original_size = true;
 			bool resizable = false;
 		} window = {};
+		struct {
+			int width = 0;
+			int height = 0;
+		} requested_window_bounds = {};
+
 		Bit8u bpp = 0;
 		bool fullscreen = false;
 		// This flag indicates, that we are in the process of switching
@@ -284,6 +301,7 @@ struct SDL_Block {
 		bool lazy_init_window_size = false;
 		bool vsync = false;
 		bool want_resizable_window = false;
+		SDL_WindowEventID last_size_event = {};
 		SCREEN_TYPES type;
 		SCREEN_TYPES want_type;
 	} desktop = {};
@@ -424,7 +442,6 @@ void GFX_SetTitle(Bit32s cycles, int /*frameskip*/, bool paused)
 	SDL_SetWindowTitle(sdl.window, title);
 }
 
-#if SDL_VERSION_ATLEAST(2, 0, 5)
 /* This function is SDL_EventFilter which is being called when event is
  * pushed into the SDL event queue.
  *
@@ -456,7 +473,6 @@ static int watch_sdl_events(void *userdata, SDL_Event *e)
 	}
 	return 0;
 }
-#endif
 
 /* On macOS, as we use a nicer external icon packaged in App bundle.
  *
@@ -505,7 +521,7 @@ MAYBE_UNUSED static void PauseDOSBox(bool pressed)
 
 	GFX_SetTitle(-1,-1,true);
 	bool paused = true;
-	SDL_Delay(500);
+	Delay(500);
 	SDL_Event event;
 	while (SDL_PollEvent(&event)) {
 		// flush event queue.
@@ -592,14 +608,30 @@ check_surface:
 	return flags;
 }
 
+// The frame-period holds the current duration for which a single host
+// video-frame is displayed. This is kept up-to-date when the video mode is set.
+// A sane starting value is used, which is based on a 60-Hz monitor.
+auto frame_period = std::chrono::nanoseconds(1'000'000'000 / 60);
+static void UpdateFramePeriod()
+{
+	assert(sdl.window);
+	SDL_DisplayMode display_mode;
+	SDL_GetWindowDisplayMode(sdl.window, &display_mode);
+	const int refresh_rate = display_mode.refresh_rate > 0
+	                                 ? display_mode.refresh_rate
+	                                 : 60;
+	frame_period = std::chrono::nanoseconds(1'000'000'000 / refresh_rate);
+}
 
 void GFX_ResetScreen(void) {
 	GFX_Stop();
 	if (sdl.draw.callback)
 		(sdl.draw.callback)( GFX_CallBackReset );
 	GFX_Start();
+	UpdateFramePeriod();
 	CPU_Reset_AutoAdjust();
 }
+
 
 void GFX_ForceFullscreenExit()
 {
@@ -645,6 +677,62 @@ static uint32_t opengl_driver_crash_workaround(SCREEN_TYPES type)
 	return (default_driver_is_opengl ? SDL_WINDOW_OPENGL : 0);
 }
 
+static SDL_Point refine_window_size(const SDL_Point &size,
+                                    const SCALING_MODE scaling_mode,
+                                    const bool wants_stretched_pixels);
+
+// Logs the source and target resolution including describing scaling method
+// and pixel-aspect ratios. Note that this function deliberately doesn't use
+// any global structs to disentangle it from the existing sdl-main design.
+static void log_display_properties(const int in_x,
+                                   const int in_y,
+                                   const double in_par,
+                                   const SCALING_MODE scaling_mode,
+                                   const SDL_Point pp_scale,
+                                   const bool is_fullscreen,
+                                   int out_x,
+                                   int out_y)
+{
+	// Sanity check expectations
+	assert(in_x > 0 && in_y > 0 && in_par > 0);
+	assert(out_x > 0 && out_y > 0);
+
+	if (scaling_mode == SCALING_MODE::PERFECT) {
+		// If we're using pixel perfect, then the incoming'out_x' and
+		// 'height' arguments only represent the total drawing area as
+		// opposed to the internal clipped area, so use this approach to
+		// get the actual scaled dimentions.
+		out_x = pp_scale.x * in_x;
+		out_y = pp_scale.y * in_y;
+	} else if (is_fullscreen) {
+		// If we're fullscreen and using a non-pixel-perfect scaling
+		// mode, then the incoming'out_x' and 'out_y' arguments only
+		// represent the total display resolution as opposed to the 4:3
+		// or 8:5 area, so use this approach to get the actual scaled
+		// dimentions.
+		const auto fs = refine_window_size({out_x, out_y},
+		                                   SCALING_MODE::NONE, in_par > 1);
+		out_x = fs.x;
+		out_y = fs.y;
+	}
+	const auto scale_x = static_cast<double>(out_x) / in_x;
+	const auto scale_y = static_cast<double>(out_y) / in_y;
+	const auto out_par = scale_y / scale_x;
+
+	auto describe_scaling_mode = [scaling_mode]() {
+		switch (scaling_mode) {
+		case SCALING_MODE::NONE: return "Bilinear";
+		case SCALING_MODE::NEAREST: return "Nearest-neighbour";
+		case SCALING_MODE::PERFECT: return "Pixel-perfect";
+		}
+		return "Unknown mode!";
+	};
+
+	LOG_MSG("DISPLAY: %s scaling source %dx%d (PAR %#.3g) by %.1fx%.1f -> %dx%d (PAR %#.3g)",
+	        describe_scaling_mode(), in_x, in_y, in_par, scale_x, scale_y,
+	        out_x, out_y, out_par);
+}
+
 static SDL_Window *SetWindowMode(SCREEN_TYPES screen_type,
                                  int width,
                                  int height,
@@ -685,13 +773,12 @@ static SDL_Window *SetWindowMode(SCREEN_TYPES screen_type,
 			return nullptr;
 		}
 
-#if SDL_VERSION_ATLEAST(2, 0, 5)
 		if (resizable) {
 			SDL_AddEventWatch(watch_sdl_events, sdl.window);
 			SDL_SetWindowResizable(sdl.window, SDL_TRUE);
 		}
 		sdl.desktop.window.resizable = resizable;
-#endif
+
 		GFX_SetTitle(-1, -1, false); // refresh title.
 
 		if (!fullscreen) {
@@ -717,10 +804,8 @@ static SDL_Window *SetWindowMode(SCREEN_TYPES screen_type,
 		// window size is updated AND content is correctly clipped when
 		// emulated program changes resolution with various
 		// windowresolution settings (!).
-		if (sdl.desktop.window.use_original_size &&
-		    !sdl.desktop.window.resizable && !sdl.desktop.switching_fullscreen)
+		if (!sdl.desktop.window.resizable && !sdl.desktop.switching_fullscreen)
 			SDL_SetWindowSize(sdl.window, width, height);
-
 		SDL_SetWindowFullscreen(sdl.window, 0);
 	}
 	// Maybe some requested fullscreen resolution is unsupported?
@@ -731,6 +816,11 @@ finish:
 		const int h = iround(sdl.draw.height * sdl.draw.scaley);
 		SDL_SetWindowMinimumSize(sdl.window, w, h);
 	}
+
+	if (sdl.draw.has_changed)
+		log_display_properties(sdl.draw.width, sdl.draw.height,
+		                       sdl.draw.pixel_aspect, sdl.scaling_mode,
+		                       sdl.pp_scale, fullscreen, width, height);
 
 	sdl.update_display_contents = true;
 	return sdl.window;
@@ -762,18 +852,19 @@ static SDL_Window *setup_window_pp(SCREEN_TYPES screen_type, bool resizable)
 	int w = 0;
 	int h = 0;
 
-	SDL_GetWindowSize(sdl.window, &w, &h);
+	if (sdl.desktop.fullscreen) {
+		SDL_GetWindowSize(sdl.window, &w, &h);
+	} else {
+		w = sdl.desktop.requested_window_bounds.width;
+		h = sdl.desktop.requested_window_bounds.height;
+	}
+	assert(w > 0 && h > 0);
 
 	sdl.pp_scale = calc_pp_scale(w, h);
 
-	LOG_MSG("MAIN: Pixel-perfect scaling (%dx%d): %dx%d (PAR %#.3g) -> %dx%d (PAR %#.3g)",
-	        sdl.pp_scale.x, sdl.pp_scale.y, sdl.draw.width, sdl.draw.height,
-	        sdl.draw.pixel_aspect, sdl.pp_scale.x * sdl.draw.width,
-	        sdl.pp_scale.y * sdl.draw.height,
-	        static_cast<double>(sdl.pp_scale.y) / sdl.pp_scale.x);
-
 	const int imgw = sdl.pp_scale.x * sdl.draw.width;
 	const int imgh = sdl.pp_scale.y * sdl.draw.height;
+
 	const int wndw = (sdl.desktop.fullscreen ? w : imgw);
 	const int wndh = (sdl.desktop.fullscreen ? h : imgh);
 
@@ -948,21 +1039,18 @@ Bitu GFX_SetSize(Bitu width, Bitu height, Bitu flags,
 	if (sdl.updating)
 		GFX_EndUpdate( 0 );
 
+	sdl.draw.has_changed = (sdl.draw.width != static_cast<int>(width) ||
+	                        sdl.draw.height != static_cast<int>(height) ||
+	                        sdl.draw.scalex != scalex ||
+	                        sdl.draw.scaley != scaley ||
+	                        sdl.draw.pixel_aspect != pixel_aspect);
+
 	sdl.draw.width = static_cast<int>(width);
 	sdl.draw.height = static_cast<int>(height);
 	sdl.draw.scalex = scalex;
 	sdl.draw.scaley = scaley;
 	sdl.draw.pixel_aspect = pixel_aspect;
 	sdl.draw.callback = callback;
-
-	const bool double_h = (flags & GFX_DBL_H) > 0;
-	const bool double_w = (flags & GFX_DBL_W) > 0;
-
-	LOG_MSG("MAIN: Draw resolution: %dx%d,%s%s pixel aspect ratio: %#.2f",
-	        sdl.draw.width, sdl.draw.height,
-	        (double_w ? " double-width," : ""),
-	        (double_h ? " double-height," : ""),
-	        pixel_aspect);
 
 	switch (sdl.desktop.want_type) {
 dosurface:
@@ -1043,7 +1131,7 @@ dosurface:
 
 	case SCREEN_TEXTURE: {
 		if (!SetupWindowScaled(SCREEN_TEXTURE, false)) {
-			LOG_MSG("MAIN: Can't initialise 'texture' window");
+			LOG_MSG("DISPLAY: Can't initialise 'texture' window");
 			E_Exit("Creating window failed");
 		}
 
@@ -1057,36 +1145,31 @@ dosurface:
 			LOG_MSG("SDL:Can't create renderer, falling back to surface");
 			goto dosurface;
 		}
-		/* SDL_PIXELFORMAT_ARGB8888 is possible with most
-		rendering drivers, "opengles" being a notable exception */
-		sdl.texture.texture = SDL_CreateTexture(sdl.renderer, SDL_PIXELFORMAT_ARGB8888,
+		/* Use renderer's default format */
+		SDL_RendererInfo rinfo;
+		SDL_GetRendererInfo(sdl.renderer, &rinfo);
+		const auto texture_format = rinfo.texture_formats[0];
+		sdl.texture.texture = SDL_CreateTexture(sdl.renderer, texture_format,
 		                                        SDL_TEXTUREACCESS_STREAMING, width, height);
 
-		/* SDL_PIXELFORMAT_ABGR8888 (not RGB) is the
-		only supported format for the "opengles" driver */
-		if (!sdl.texture.texture) {
-			if (flags & GFX_RGBONLY) goto dosurface;
-			sdl.texture.texture = SDL_CreateTexture(sdl.renderer, SDL_PIXELFORMAT_ABGR8888,
-			                                        SDL_TEXTUREACCESS_STREAMING, width, height);
-		}
 		if (!sdl.texture.texture) {
 			SDL_DestroyRenderer(sdl.renderer);
-			sdl.renderer = NULL;
+			sdl.renderer = nullptr;
 			LOG_MSG("SDL:Can't create texture, falling back to surface");
 			goto dosurface;
 		}
 
-		sdl.texture.input_surface = SDL_CreateRGBSurface(0, width, height, 32, 0, 0, 0, 0);
+		sdl.texture.input_surface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, texture_format);
 		if (!sdl.texture.input_surface) {
 			LOG_MSG("SDL: Error while preparing texture input");
 			goto dosurface;
 		}
 
 		SDL_SetRenderDrawColor(sdl.renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-		Uint32 pixelFormat;
-		SDL_QueryTexture(sdl.texture.texture, &pixelFormat, NULL, NULL, NULL);
-		sdl.texture.pixelFormat = SDL_AllocFormat(pixelFormat);
-		switch (SDL_BITSPERPIXEL(pixelFormat)) {
+		uint32_t pixel_format;
+		SDL_QueryTexture(sdl.texture.texture, &pixel_format, NULL, NULL, NULL);
+		sdl.texture.pixelFormat = SDL_AllocFormat(pixel_format);
+		switch (SDL_BITSPERPIXEL(pixel_format)) {
 			case 8:  retFlags = GFX_CAN_8;  break;
 			case 15: retFlags = GFX_CAN_15; break;
 			case 16: retFlags = GFX_CAN_16; break;
@@ -1094,9 +1177,14 @@ dosurface:
 			case 32: retFlags = GFX_CAN_32; break;
 		}
 		retFlags |= GFX_SCALING;
-		SDL_RendererInfo rinfo;
-		SDL_GetRendererInfo(sdl.renderer, &rinfo);
-		LOG_MSG("SDL: Using driver \"%s\" for texture renderer", rinfo.name);
+
+		// Log changes to the rendering driver
+		static std::string render_driver = {};
+		if (render_driver != rinfo.name) {
+			LOG_MSG("SDL: Using driver \"%s\" for texture renderer", rinfo.name);
+			render_driver = rinfo.name;
+		}
+		
 		if (rinfo.flags & SDL_RENDERER_ACCELERATED)
 			retFlags |= GFX_HARDWARE;
 
@@ -1246,8 +1334,7 @@ dosurface:
 		    (sdl.clip.w != windowWidth || sdl.clip.h != windowHeight)) {
 			// LOG_MSG("attempting to fix the centering to %d %d %d %d",(windowWidth-sdl.clip.w)/2,(windowHeight-sdl.clip.h)/2,sdl.clip.w,sdl.clip.h);
 			glViewport((windowWidth - sdl.clip.w) / 2,
-			           (windowHeight - sdl.clip.h) / 2,
-			           sdl.clip.w,
+			           (windowHeight - sdl.clip.h) / 2, sdl.clip.w,
 			           sdl.clip.h);
 		} else if (sdl.desktop.window.resizable) {
 			sdl.clip = calc_viewport(windowWidth, windowHeight);
@@ -1390,6 +1477,24 @@ static void ToggleMouseCapture(bool pressed) {
 	GFX_ToggleMouseCapture();
 }
 
+static void FocusInput()
+{
+	// Ensure auto-cycles are enabled
+	CPU_Disable_SkipAutoAdjust();
+
+	// Ensure we have input focus when in fullscreen
+	if (!sdl.desktop.fullscreen)
+		return;
+
+	// Do we already have focus?
+	if (SDL_GetWindowFlags(sdl.window) & SDL_WINDOW_INPUT_FOCUS)
+		return;
+
+	// If not, raise-and-focus to prevent stranding the window
+	SDL_RaiseWindow(sdl.window);
+	SDL_SetWindowInputFocus(sdl.window);
+}
+
 /*
  *  Assesses the following:
  *   - current window size (full or not),
@@ -1479,6 +1584,7 @@ void GFX_SwitchFullScreen()
 #endif
 	sdl.desktop.fullscreen = !sdl.desktop.fullscreen;
 	GFX_ResetScreen();
+	FocusInput();
 	sdl.desktop.switching_fullscreen = false;
 }
 
@@ -1734,10 +1840,15 @@ static void GUI_ShutDown(Section *)
 
 static void SetPriority(PRIORITY_LEVELS level)
 {
-	// TODO replace platform-specific API with SDL_SetThreadPriority
+	// Just let the OS scheduler manage priority
+	if (level == PRIORITY_LEVEL_AUTO)
+		return;
+
+		// TODO replace platform-specific API with SDL_SetThreadPriority
 #if defined(HAVE_SETPRIORITY)
-// Do nothing if priorties are not the same and not root, else the highest
-// priority can not be set as users can only lower priority (not restore it)
+	// If the priorities are different, do nothing unless the user is root,
+	// since priority can always be lowered but requires elevated rights
+	// to increase
 
 	if((sdl.priority.focus != sdl.priority.nofocus ) &&
 		(getuid()!=0) ) return;
@@ -1823,14 +1934,6 @@ static SDL_Window *SetDefaultWindowMode()
 		                     sdl.desktop.full.height, sdl.desktop.fullscreen,
 		                     sdl.desktop.want_resizable_window);
 	}
-
-	if (sdl.desktop.window.use_original_size) {
-		sdl.desktop.lazy_init_window_size = false;
-		return SetWindowMode(sdl.desktop.want_type, sdl.draw.width,
-		                     sdl.draw.height, sdl.desktop.fullscreen,
-		                     sdl.desktop.want_resizable_window);
-	}
-
 	sdl.desktop.lazy_init_window_size = false;
 	return SetWindowMode(sdl.desktop.want_type, sdl.desktop.window.width,
 	                     sdl.desktop.window.height, sdl.desktop.fullscreen,
@@ -1841,7 +1944,7 @@ static SDL_Window *SetDefaultWindowMode()
  * Please leave the Splash screen stuff in working order.
  * We spend a lot of time making DOSBox.
  */
-static void DisplaySplash(uint32_t time_ms)
+static void DisplaySplash(int time_ms)
 {
 	assert(sdl.window);
 
@@ -1889,7 +1992,7 @@ static void DisplaySplash(uint32_t time_ms)
 
 	const uint16_t lines[2] = {0, src_h}; // output=surface won't work otherwise
 	GFX_EndUpdate(lines);
-	SDL_Delay(time_ms);
+	Delay(time_ms);
 }
 
 /* For some preference values, we can safely remove comment after # character
@@ -1923,17 +2026,14 @@ static bool detect_resizable_window()
 {
 #if C_OPENGL
 	if (sdl.desktop.want_type != SCREEN_OPENGL) {
-		LOG_MSG("MAIN: Disabling resizable window, because it's not "
-		        "compatible with selected sdl.output");
+		LOG_MSG("DISPLAY: Disabled resizable window, only compatible with OpenGL output");
 		return false;
 	}
 
 	const std::string sname = get_glshader_value();
 
 	if (sname != "sharp" && sname != "none" && sname != "default") {
-		LOG_MSG("MAIN: Disabling resizable window, because it's not "
-		        "compatible with selected render.glshader\n"
-		        "MAIN: Use 'sharp' or 'none' to keep resizable window.");
+		LOG_MSG("DISPLAY: Disabled resizable window, only compatible with 'sharp' and 'none' glshaders");
 		return false;
 	}
 
@@ -1943,107 +2043,211 @@ static bool detect_resizable_window()
 #endif // C_OPENGL
 }
 
-static bool detect_shader_fixed_size()
+static SDL_Point remove_stretched_aspect(const SDL_Point &size)
 {
-#if C_OPENGL
-	if (sdl.desktop.want_type != SCREEN_OPENGL)
-		return false;
-
-	const std::string sname = get_glshader_value();
-	return (sname == "crt-fakelottes-flat" || sname == "crt-easymode-flat");
-#else
-	return false;
-#endif // C_OPENGL
+	return {size.x, ceil_sdivide(size.y * 5, 6)};
 }
 
-static SDL_Point detect_window_size()
+static SDL_Point refine_window_size(const SDL_Point &size,
+                                    const SCALING_MODE scaling_mode,
+                                    const bool wants_stretched_pixels)
 {
-	SDL_Rect bounds;
-	SDL_GetDisplayBounds(sdl.display_number, &bounds);
-	constexpr SDL_Point resolutions[] = {
-	        // TODO: these resolutions are disabled for now due to
-	        // compatibility with users using pixel-doubling on high-density
-	        // displays. For example: if we pick 1600x1200 window resolution
-	        // and OS scales it 2x it might end up being larger than really
-	        // available screen area. To fix this we need to avoid currently
-	        // used hacks for OS-level window scaling.
-	        //
-	        // {2560, 1920},
-	        // {2400, 1800},
-	        // {2048, 1536},
-	        // {1920, 1440},
-	        // {1600, 1200},
-	        {1280, 960},
-	        {1024, 768},
-	        {800, 600},
-	};
-	// Pick the biggest window size, that neatly fits in user's available
-	// screen area.
-	for (const auto &size : resolutions) {
-		if (bounds.w > size.x && bounds.h > size.y)
-			return size;
-	}
-	return {640, 480};
-}
+	switch (scaling_mode) {
+	case (SCALING_MODE::NONE): {
+		const auto game_ratios = wants_stretched_pixels
+		                                 ? RATIOS_FOR_STRETCHED_PIXELS
+		                                 : RATIOS_FOR_SQUARE_PIXELS;
 
-static void SetupWindowResolution(const char *val)
-{
-	assert(sdl.display_number >= 0);
-	std::string pref = NormalizeConfValue(val);
+		const auto window_aspect = static_cast<double>(size.x) / size.y;
+		const auto game_aspect = static_cast<double>(game_ratios.x) / game_ratios.y;
 
-	if (pref == "default" || pref.empty()) {
-#if defined(LINUX)
-		sdl.desktop.want_resizable_window = detect_resizable_window();
-#else
-		sdl.desktop.want_resizable_window = false;
-#endif
-		sdl.desktop.window.use_original_size = true;
-
-		if (!sdl.desktop.want_resizable_window &&
-		    detect_shader_fixed_size()) {
-			const auto ws = detect_window_size();
-			sdl.desktop.window.use_original_size = false;
-			sdl.desktop.window.width = ws.x;
-			sdl.desktop.window.height = ws.y;
+		// screen is wider than the game, so constrain horizonal
+		if (window_aspect > game_aspect) {
+			const int x = ceil_sdivide(size.y * game_ratios.x, game_ratios.y);
+			return {x, size.y};
 		}
-		return;
+		// screen is narrower than the game, so constrain vertical
+		const int y = ceil_sdivide(size.x * game_ratios.y, game_ratios.x);
+		return {size.x, y};
 	}
-
-	if (pref == "resizable") {
-		sdl.desktop.want_resizable_window = detect_resizable_window();
-		sdl.desktop.window.use_original_size = true;
-		return;
+	case (SCALING_MODE::NEAREST): {
+		constexpr SDL_Point resolutions[] = {
+		        {7680, 5760}, // 8K  at 4:3 aspect
+		        {7360, 5520}, //
+		        {7040, 5280}, //
+		        {6720, 5040}, //
+		        {6400, 4800}, // HUXGA
+		        {6080, 4560}, //
+		        {5760, 4320}, // 8K "Full Format" at 4:3 aspect
+		        {5440, 4080}, //
+		        {5120, 3840}, // HSXGA at 4:3 aspect
+		        {4800, 3600}, //
+		        {4480, 3360}, //
+		        {4160, 3120}, //
+		        {3840, 2880}, // 4K UHD at 4:3 aspect
+		        {3520, 2640}, //
+		        {3200, 2400}, // QUXGA
+		        {2880, 2160}, // 3K UHD at 4:3 aspect
+		        {2560, 1920}, // 4.92M3 (Max CRT, Viewsonic P225f)
+		        {2400, 1800}, //
+		        {1920, 1440}, // 1080p in 4:3
+		        {1600, 1200}, // UXGA
+		        {1280, 960},  // 720p in 4:3
+		        {1024, 768},  // XGA
+		        {800, 600},   // SVGA
+		};
+		// Pick the biggest window size that fits inside the bounds.
+		for (const auto &candidate : resolutions)
+			if (candidate.x <= size.x && candidate.y <= size.y)
+				return (wants_stretched_pixels
+				                ? candidate
+				                : remove_stretched_aspect(candidate));
+		break;
 	}
+	case (SCALING_MODE::PERFECT): {
+		constexpr double aspect_weight = 1.14;
+		constexpr SDL_Point pre_draw_size = {320, 200};
+		const double pixel_aspect_ratio = wants_stretched_pixels ? 1.2 : 1;
 
-	if (pref == "original") {
-		sdl.desktop.want_resizable_window = false;
-		sdl.desktop.window.use_original_size = true;
-		return;
+		int scale_x = 0;
+		int scale_y = 0;
+		const int err = pp_getscale(pre_draw_size.x, pre_draw_size.y,
+		                            pixel_aspect_ratio, size.x, size.y,
+		                            aspect_weight, &scale_x, &scale_y);
+		if (err == 0)
+			return {pre_draw_size.x * scale_x, pre_draw_size.y * scale_y};
+		// else use the fallback below
+		break;
 	}
+	}; // end-switch
 
+	// Fallback
+	return (wants_stretched_pixels
+	                ? FALLBACK_WINDOW_DIMENSIONS
+	                : remove_stretched_aspect(FALLBACK_WINDOW_DIMENSIONS));
+}
+
+static SDL_Point window_bounds_from_resolution(const std::string &pref,
+                                               const SDL_Rect &desktop)
+{
 	int w = 0;
 	int h = 0;
-	// sscanf won't parse suffix after second integer
-	if (sscanf(pref.c_str(), "%dx%d", &w, &h) == 2) {
-		SDL_Rect bounds;
-		SDL_GetDisplayBounds(sdl.display_number, &bounds);
-		if (w > 0 && h > 0 && w <= bounds.w && h <= bounds.h) {
-			sdl.desktop.want_resizable_window = false;
-			sdl.desktop.window.use_original_size = false;
-			sdl.desktop.window.width = w;
-			sdl.desktop.window.height = h;
-			return;
-		} else {
-			LOG_MSG("MAIN: dimensions %dx%d are out of display "
-			        "bounds (%dx%d)",
-			        w, h, bounds.w, bounds.h);
+	const bool was_parsed = sscanf(pref.c_str(), "%dx%d", &w, &h) == 2;
+
+	const bool is_out_of_bounds = (w > desktop.w || h > desktop.h);
+	if (was_parsed && is_out_of_bounds)
+		LOG_MSG("DISPLAY: Requested windowresolution '%dx%d' is larger than the desktop '%dx%d'",
+		        w, h, desktop.w, desktop.h);
+
+	const bool is_valid = (w > 0 && h > 0);
+	if (was_parsed && is_valid)
+		return {w, h};
+
+	LOG_MSG("DISPLAY: Requested windowresolution '%s' is not valid, falling back to '%dx%d' instead",
+	        pref.c_str(), FALLBACK_WINDOW_DIMENSIONS.x,
+	        FALLBACK_WINDOW_DIMENSIONS.y);
+
+	return FALLBACK_WINDOW_DIMENSIONS;
+}
+
+static SDL_Point window_bounds_from_label(const std::string &pref,
+                                          const SDL_Rect &desktop)
+{
+	int percent = DEFAULT_WINDOW_PERCENT;
+	if (starts_with("s", pref))
+		percent = SMALL_WINDOW_PERCENT;
+	else if (starts_with("m", pref) || pref == "default" || pref.empty())
+		percent = MEDIUM_WINDOW_PERCENT;
+	else if (starts_with("l", pref))
+		percent = LARGE_WINDOW_PERCENT;
+	else if (pref == "desktop")
+		percent = 100;
+	else
+		LOG_MSG("DISPLAY: Requested windowresolution '%s' is invalid, using 'default' instead",
+		        pref.c_str());
+
+	const int w = ceil_sdivide(desktop.w * percent, 100);
+	const int h = ceil_sdivide(desktop.h * percent, 100);
+	return {w, h};
+}
+
+// Takes in:
+//  - The user's windowresolution: default, WxH, small, medium, large,
+//    desktop, or an invalid setting.
+//  - The previously configured scaling mode: NONE, NEAREST, or PERFECT.
+//  - If aspect correction (stretched pixels) is requested.
+
+// Except for SURFACE rendering, this function returns a refined size and
+// additionally populates the following struct members:
+//  - 'sdl.desktop.requested_window_bounds', with the coarse bounds, which do
+//     not take into account scaling or aspect correction.
+//  - 'sdl.desktop.window', with the refined size.
+//  - 'sdl.desktop.want_resizable_window', if the window can be resized.
+
+// Refined sizes:
+//  - If the user requested an exact resolution or 'desktop' size, then the
+//    requested resolution is only trimed for aspect (4:3 or 8:5), unless
+//    pixel-perfect is requested, in which case the resolution is adjusted down
+//    toward to nearest exact integer multiple.
+
+//  - If the user requested a relative size: small, medium, or large, then either
+//    the closest fixed resolution is picked from a list or a pixel-perfect
+//    resolution is calculated. In both cases, aspect correction is factored in.
+
+static void setup_window_sizes_from_conf(const char *windowresolution_val,
+                                         const SCALING_MODE scaling_mode,
+                                         const bool wants_stretched_pixels)
+{
+	// TODO: Deprecate SURFACE output and remove this.
+	// For now, let the DOS-side determine the window's resolution.
+	if (sdl.desktop.want_type == SCREEN_SURFACE)
+		return;
+
+	// Can the window be resized?
+	sdl.desktop.want_resizable_window = detect_resizable_window();
+
+	// Get the total desktop resolution
+	SDL_Rect desktop;
+	assert(sdl.display_number >= 0);
+	SDL_GetDisplayBounds(sdl.display_number, &desktop);
+	assert(desktop.w >= FALLBACK_WINDOW_DIMENSIONS.x);
+	assert(desktop.h >= FALLBACK_WINDOW_DIMENSIONS.y);
+
+	// The refined scaling mode tell the refiner how it should adjust
+	// the coarse-resolution.
+	SCALING_MODE refined_scaling_mode = scaling_mode;
+	auto drop_nearest = [scaling_mode]() {
+		return (scaling_mode == SCALING_MODE::NEAREST) ? SCALING_MODE::NONE
+		                                               : scaling_mode;
+	};
+
+	// Get the coarse resolution from the users setting, and adjust
+	// refined scaling mode if an exact resolution is desired.
+	const std::string pref = NormalizeConfValue(windowresolution_val);
+	SDL_Point coarse_size = FALLBACK_WINDOW_DIMENSIONS;
+	if (pref.find('x') != std::string::npos) {
+		coarse_size = window_bounds_from_resolution(pref, desktop);
+		refined_scaling_mode = drop_nearest();
+	} else {
+		coarse_size = window_bounds_from_label(pref, desktop);
+		if (pref == "desktop") {
+			refined_scaling_mode = drop_nearest();
 		}
 	}
+	// Save the coarse bounds in the SDL struct for future sizing events
+	sdl.desktop.requested_window_bounds = {coarse_size.x, coarse_size.y};
 
-	LOG_MSG("MAIN: 'windowresolution = %s' is not a valid setting, using "
-	        "'original' instead", pref.c_str());
-	sdl.desktop.want_resizable_window = false;
-	sdl.desktop.window.use_original_size = true;
+	// Refine the coarse resolution and save it in the SDL struct
+	const auto refined_size = refine_window_size(coarse_size, refined_scaling_mode,
+	                                             wants_stretched_pixels);
+	assert(refined_size.x <= UINT16_MAX && refined_size.y <= UINT16_MAX);
+	sdl.desktop.window.width = static_cast<uint16_t>(refined_size.x);
+	sdl.desktop.window.height = static_cast<uint16_t>(refined_size.y);
+
+	// Let the user know the resulting window properties
+	LOG_MSG("DISPLAY: Initialized %dx%d window-mode on %dx%d display-%d",
+	        refined_size.x, refined_size.y, desktop.w, desktop.h,
+	        sdl.display_number);
 }
 
 static SDL_Rect calc_viewport_fit(int win_width, int win_height)
@@ -2116,22 +2320,38 @@ static void GUI_StartUp(Section *sec)
 	std::string focus = p->GetSection()->Get_string("active");
 	std::string notfocus = p->GetSection()->Get_string("inactive");
 
-	if      (focus == "lowest")  { sdl.priority.focus = PRIORITY_LEVEL_LOWEST;  }
-	else if (focus == "lower")   { sdl.priority.focus = PRIORITY_LEVEL_LOWER;   }
-	else if (focus == "normal")  { sdl.priority.focus = PRIORITY_LEVEL_NORMAL;  }
-	else if (focus == "higher")  { sdl.priority.focus = PRIORITY_LEVEL_HIGHER;  }
-	else if (focus == "highest") { sdl.priority.focus = PRIORITY_LEVEL_HIGHEST; }
+	if (focus == "auto" || notfocus == "auto") {
+		sdl.priority.focus = PRIORITY_LEVEL_AUTO;
+		sdl.priority.nofocus = PRIORITY_LEVEL_AUTO;
+		if (focus != "auto" || notfocus != "auto")
+			LOG_MSG("MAIN: \"priority\" can't be \"auto\" for just one value, overriding");
+	} else {
+		if (focus == "lowest")
+			sdl.priority.focus = PRIORITY_LEVEL_LOWEST;
+		else if (focus == "lower")
+			sdl.priority.focus = PRIORITY_LEVEL_LOWER;
+		else if (focus == "normal")
+			sdl.priority.focus = PRIORITY_LEVEL_NORMAL;
+		else if (focus == "higher")
+			sdl.priority.focus = PRIORITY_LEVEL_HIGHER;
+		else if (focus == "highest")
+			sdl.priority.focus = PRIORITY_LEVEL_HIGHEST;
 
-	if      (notfocus == "lowest")  { sdl.priority.nofocus=PRIORITY_LEVEL_LOWEST;  }
-	else if (notfocus == "lower")   { sdl.priority.nofocus=PRIORITY_LEVEL_LOWER;   }
-	else if (notfocus == "normal")  { sdl.priority.nofocus=PRIORITY_LEVEL_NORMAL;  }
-	else if (notfocus == "higher")  { sdl.priority.nofocus=PRIORITY_LEVEL_HIGHER;  }
-	else if (notfocus == "highest") { sdl.priority.nofocus=PRIORITY_LEVEL_HIGHEST; }
-	else if (notfocus == "pause")   {
-		/* we only check for pause here, because it makes no sense
-		 * for DOSBox to be paused while it has focus
-		 */
-		sdl.priority.nofocus=PRIORITY_LEVEL_PAUSE;
+		if (notfocus == "lowest")
+			sdl.priority.nofocus = PRIORITY_LEVEL_LOWEST;
+		else if (notfocus == "lower")
+			sdl.priority.nofocus = PRIORITY_LEVEL_LOWER;
+		else if (notfocus == "normal")
+			sdl.priority.nofocus = PRIORITY_LEVEL_NORMAL;
+		else if (notfocus == "higher")
+			sdl.priority.nofocus = PRIORITY_LEVEL_HIGHER;
+		else if (notfocus == "highest")
+			sdl.priority.nofocus = PRIORITY_LEVEL_HIGHEST;
+		else if (notfocus == "pause")
+			/* we only check for pause here, because it makes no
+			 * sense for DOSBox to be paused while it has focus
+			 */
+			sdl.priority.nofocus = PRIORITY_LEVEL_PAUSE;
 	}
 
 	SetPriority(sdl.priority.focus); //Assume focus on startup
@@ -2220,7 +2440,13 @@ static void GUI_StartUp(Section *sec)
 	sdl.render_driver = section->Get_string("texture_renderer");
 	lowcase(sdl.render_driver);
 
-	SetupWindowResolution(section->Get_string("windowresolution"));
+	const auto render_section = static_cast<Section_prop *>(
+	        control->GetSection("render"));
+	assert(render_section);
+
+	setup_window_sizes_from_conf(section->Get_string("windowresolution"),
+	                             sdl.scaling_mode,
+	                             render_section->Get_bool("aspect"));
 
 #if C_OPENGL
 	if (sdl.desktop.want_type == SCREEN_OPENGL) { /* OPENGL is requested */
@@ -2346,10 +2572,10 @@ static void GUI_StartUp(Section *sec)
 	}
 	LOG_MSG("SDL: Mouse %s%s.", mouse_control_msg.c_str(), middle_control_msg.c_str());
 
-	// Only setup the Ctrl+F10 handler if the mouse is capturable
+	// Only setup the Ctrl/Cmd+F10 handler if the mouse is capturable
 	if (sdl.mouse.control_choice & (CaptureOnStart | CaptureOnClick)) {
-		MAPPER_AddHandler(ToggleMouseCapture, SDL_SCANCODE_F10, MMOD1,
-		                  "capmouse", "Cap Mouse");
+		MAPPER_AddHandler(ToggleMouseCapture, SDL_SCANCODE_F10,
+		                  PRIMARY_MOD, "capmouse", "Cap Mouse");
 	}
 
 	// Apply the user's mouse sensitivity settings
@@ -2363,7 +2589,8 @@ static void GUI_StartUp(Section *sec)
 	                        SDL_HINT_OVERRIDE);
 
 	/* Get some Event handlers */
-	MAPPER_AddHandler(RequestExit, SDL_SCANCODE_F9, MMOD1, "shutdown", "Shutdown");
+	MAPPER_AddHandler(RequestExit, SDL_SCANCODE_F9, PRIMARY_MOD, "shutdown",
+	                  "Shutdown");
 	MAPPER_AddHandler(SwitchFullScreen, SDL_SCANCODE_RETURN, MMOD2,
 	                  "fullscr", "Fullscreen");
 	MAPPER_AddHandler(Restart, SDL_SCANCODE_HOME, MMOD1 | MMOD2,
@@ -2439,13 +2666,6 @@ bool GFX_IsFullscreen(void) {
 	return sdl.desktop.fullscreen;
 }
 
-#if defined(MACOSX)
-#define DB_POLLSKIP 3
-#else
-//Not used yet, see comment below
-#define DB_POLLSKIP 1
-#endif
-
 static void HandleVideoResize(int width, int height)
 {
 	/* Maybe a screen rotation has just occurred, so we simply resize.
@@ -2506,15 +2726,8 @@ static void FinalizeWindowState()
 	// on future expose events.
 	sdl.desktop.lazy_init_window_size = false;
 
-	int w, h;
-	if (sdl.desktop.window.use_original_size || sdl.desktop.window.resizable) {
-		w = sdl.draw.width * sdl.draw.scalex;
-		h = sdl.draw.height * sdl.draw.scaley;
-	} else {
-		w = sdl.desktop.window.width;
-		h = sdl.desktop.window.height;
-	}
-	SDL_SetWindowSize(sdl.window, w, h);
+	SDL_SetWindowSize(sdl.window, sdl.desktop.window.width,
+	                  sdl.desktop.window.height);
 
 	// Force window position when dosbox is configured to start in
 	// fullscreen.  Otherwise SDL will reset window position to 0,0 when
@@ -2533,33 +2746,14 @@ static void FinalizeWindowState()
 	GFX_ResetScreen();
 }
 
-bool GFX_Events()
+static bool ProcessEvents()
 {
-#if defined(MACOSX)
-	// Don't poll too often. This can be heavy on the OS, especially Macs.
-	// In idle mode 3000-4000 polls are done per second without this check.
-	// Macs, with this code,  max 250 polls per second. (non-macs unused
-	// default max 500). Currently not implemented for all platforms, given
-	// the ALT-TAB stuff for WIN32.
-	static int last_check = 0;
-	int current_check = GetTicks();
-	if (current_check - last_check <= DB_POLLSKIP)
-		return true;
-	last_check = current_check;
-#endif
-
 	SDL_Event event;
-#if defined (REDUCE_JOYSTICK_POLLING)
 	if (MAPPER_IsUsingJoysticks()) {
-		static int poll_delay = 0;
-		int time = GetTicks();
-		if (time - poll_delay > 20) {
-			poll_delay = time;
-			SDL_JoystickUpdate();
-			MAPPER_UpdateJoysticks();
-		}
+		SDL_JoystickUpdate();
+		MAPPER_UpdateJoysticks();
 	}
-#endif
+
 	while (SDL_PollEvent(&event)) {
 		switch (event.type) {
 		case SDL_WINDOWEVENT:
@@ -2579,8 +2773,10 @@ bool GFX_Events()
 				//               event.window.data2);
 				HandleVideoResize(event.window.data1,
 				                  event.window.data2);
+				sdl.desktop.last_size_event = SDL_WINDOWEVENT_RESIZED;
 				continue;
 
+			case SDL_WINDOWEVENT_FOCUS_GAINED:
 			case SDL_WINDOWEVENT_EXPOSED:
 				// DEBUG_LOG_MSG("SDL: Window has been exposed "
 				//               "and should be redrawn");
@@ -2596,16 +2792,26 @@ bool GFX_Events()
 				 * FOCUS_GAINED event to catch window startup
 				 * and size toggles.
 				 */
+				// DEBUG_LOG_MSG("SDL: Window has gained keyboard focus");
+				SetPriority(sdl.priority.focus);
 				if (sdl.draw.callback)
 					sdl.draw.callback(GFX_CallBackRedraw);
 				GFX_UpdateMouseState();
-				continue;
+				FocusInput();
 
-			case SDL_WINDOWEVENT_FOCUS_GAINED:
-				DEBUG_LOG_MSG("SDL: Window has gained keyboard focus");
-				SetPriority(sdl.priority.focus);
-				CPU_Disable_SkipAutoAdjust();
-				GFX_UpdateMouseState();
+				// When we're fullscreen, the DOS program might
+				// change underlying draw resolutions, which can
+				// pose a problem when switching back to
+				// window-mode (beacuse the prior window-size
+				// may not longer accomodate the new draw-size).
+				// So in this case, we want to reset the screen
+				// size - but only if we're not in the middle of
+				// resizing the window (which also fires EXPOSED
+				// events).
+				if (!sdl.desktop.fullscreen &&
+					sdl.desktop.last_size_event != SDL_WINDOWEVENT_RESIZED)
+					GFX_ResetScreen();
+
 				continue;
 
 			case SDL_WINDOWEVENT_FOCUS_LOST:
@@ -2649,6 +2855,9 @@ bool GFX_Events()
 			case SDL_WINDOWEVENT_SIZE_CHANGED:
 				// DEBUG_LOG_MSG("SDL: The window size has changed");
 
+				// differentiate this size change versus resizing.
+				sdl.desktop.last_size_event = SDL_WINDOWEVENT_SIZE_CHANGED;
+
 				// The window size has changed either as a
 				// result of an API call or through the system
 				// or user changing the window size.
@@ -2670,7 +2879,6 @@ bool GFX_Events()
 				RequestExit(true);
 				break;
 
-#if SDL_VERSION_ATLEAST(2, 0, 5)
 			case SDL_WINDOWEVENT_TAKE_FOCUS:
 				// DEBUG_LOG_MSG("SDL: Window is being offered a focus");
 				// should SetWindowInputFocus() on itself or a
@@ -2681,7 +2889,7 @@ bool GFX_Events()
 				DEBUG_LOG_MSG("SDL: Window had a hit test that "
 				              "wasn't SDL_HITTEST_NORMAL");
 				continue;
-#endif
+
 			default: break;
 			}
 
@@ -2700,7 +2908,7 @@ bool GFX_Events()
 
 					GFX_SetTitle(-1,-1,true);
 					KEYBOARD_ClrBuffer();
-//					SDL_Delay(500);
+//					Delay(500);
 //					while (SDL_PollEvent(&ev)) {
 						// flush event queue.
 //					}
@@ -2741,9 +2949,7 @@ bool GFX_Events()
 			}
 			break; // end of SDL_WINDOWEVENT
 
-		case SDL_MOUSEMOTION:
-			HandleMouseMotion(&event.motion);
-			break;
+		case SDL_MOUSEMOTION: HandleMouseMotion(&event.motion); break;
 		case SDL_MOUSEBUTTONDOWN:
 		case SDL_MOUSEBUTTONUP:
 			if (sdl.mouse.control_choice != NoMouse)
@@ -2764,7 +2970,9 @@ bool GFX_Events()
 			if (((event.key.keysym.sym == SDLK_TAB )) && (event.key.keysym.mod & KMOD_ALT)) break;
 			// Ignore tab events that arrive just after regaining
 			// focus. Likely the result of Alt+Tab.
-			if ((event.key.keysym.sym == SDLK_TAB) && (GetTicks() - sdl.focus_ticks < 2)) break;
+			if ((event.key.keysym.sym == SDLK_TAB) &&
+			    (GetTicksSince(sdl.focus_ticks) < 2))
+				break;
 #endif
 #if defined (MACOSX)
 		case SDL_KEYDOWN:
@@ -2782,8 +2990,54 @@ bool GFX_Events()
 	return !exit_requested;
 }
 
-#if defined (WIN32)
-static BOOL WINAPI ConsoleEventHandler(DWORD event) {
+// Some modern systems experience excessive lag caused by host-event polling, so
+// we want to avoid excessively querying SDL's event queue every tick through
+// the emulator.
+
+// This function ensure SDL's event queue is processed at least at 200 Hz, which
+// is the maximum PS/2 mouse polling rate on original PC hardware.
+
+// To debug host lag, comment-in the following REPORT_EVENT_LAG define.
+// Normally polling should be well under 1 millisecond, however some hosts
+// can report very high lag (leading to stuttering, dropped frames, etc).
+
+// #define REPORT_EVENT_LAG
+
+bool GFX_MaybeProcessEvents()
+{
+	// Process SDL's event queue at 200 Hz
+	constexpr auto ps2_poll_period = std::chrono::nanoseconds(1'000'000'000 / 200);
+
+	// SDL maintainers recommend processing the SDL's event queue before
+	// each frame. For now, simply ensure that the PS/2 polling period is
+	// quicker than the video frame period. If a time comes when common
+	// displays update faster than 200 Hz, then update this code to pick the
+	// quicker of the two.
+	assert(ps2_poll_period <= frame_period);
+
+	static auto next_process_at = std::chrono::steady_clock::now() + ps2_poll_period;
+	const auto checked_at = std::chrono::steady_clock::now();
+	if (checked_at < next_process_at)
+		return true;
+
+	const bool process_result = ProcessEvents();
+
+#if defined(REPORT_EVENT_LAG)
+	const auto host_lag = std::chrono::steady_clock::now() - checked_at;
+	if (host_lag > std::chrono::milliseconds(3)) {
+		const std::chrono::duration<double, std::milli> lag_ms = host_lag;
+		LOG_MSG("SDL: Processing SDL's event queue took %5.2f ms",
+		        lag_ms.count());
+	}
+#endif
+
+	next_process_at = checked_at + ps2_poll_period;
+	return process_result;
+}
+
+#if defined(WIN32)
+static BOOL WINAPI ConsoleEventHandler(DWORD event)
+{
 	switch (event) {
 	case CTRL_SHUTDOWN_EVENT:
 	case CTRL_LOGOFF_EVENT:
@@ -2797,7 +3051,6 @@ static BOOL WINAPI ConsoleEventHandler(DWORD event) {
 	}
 }
 #endif
-
 
 /* static variable to show wether there is not a valid stdout.
  * Fixes some bugs when -noconsole is used in a read only directory */
@@ -2847,8 +3100,8 @@ void Config_Add_SDL() {
 	constexpr auto on_start = Property::Changeable::OnlyAtStart;
 
 	Pbool = sdl_sec->Add_bool("fullscreen", always, false);
-	Pbool->Set_help("Start DOSBox directly in fullscreen.\n"
-	                "Press Alt+Enter to switch back to window.");
+	Pbool->Set_help("Start directly in fullscreen.\n"
+	                "Run INTRO and see Special Keys for window control hotkeys.");
 
 	pint = sdl_sec->Add_int("display", on_start, 0);
 	pint->Set_help("Number of display to use; values depend on OS and user "
@@ -2863,18 +3116,13 @@ void Config_Add_SDL() {
 
 	pstring = sdl_sec->Add_string("windowresolution", on_start, "default");
 	pstring->Set_help(
-	        "Set window size to be used when running in windowed mode:\n"
+	        "Set window size when running in windowed mode:\n"
 	        "  default:   Select the best option based on your\n"
 	        "             environment and other settings.\n"
-	        "  original:  Resize window to the resolution picked by\n"
-	        "             the emulated program.\n"
-#if SDL_VERSION_ATLEAST(2, 0, 5)
-	        "  resizable: Make the emulator window resizable.\n"
-	        "             This is an experimental option, works only with\n"
-	        "             output=opengl and glshader=sharp (or none)\n"
-#endif
-	        "  <custom>:  Scale the window content to the indicated\n"
-	        "             dimensions, in WxH format. For example: 1024x768.\n"
+	        "  small, medium, or large (or s, m, l):\n"
+	        "             Size the window relative to the desktop.\n"
+	        "  <custom>:  Scale the window to the given dimensions in\n"
+	        "             WxH format. For example: 1024x768.\n"
 	        "             Scaling is not performed for output=surface.");
 
 	const char *outputs[] = {
@@ -2932,24 +3180,15 @@ void Config_Add_SDL() {
 
 	// Construct and set the help block using defaults set above
 	std::string mouse_control_help(
-		"Choose a mouse control method:\n"
-		"   onclick:        The mouse will be captured after the first\n"
-		"                   click inside the window.\n"
-		"   onstart:        The mouse is captured immediately on start\n"
-		"                   (similar to real DOS).\n"
-		"   seamless:       The mouse can move seamlessly in and out of DOSBox\n"
-		"                   window and cannot be captured.\n"
-		"   nomouse:        The mouse is disabled and hidden without any\n"
-		"                   input sent to the game.\n"
-		"Choose how middle-clicks are handled (second parameter):\n"
-		"   middlegame:     Middle-clicks are sent to the game\n"
-		"                   (Ctrl+F10 uncaptures the mouse).\n"
-		"   middlerelease:  Middle-clicks are used to uncapture the mouse\n"
-		"                   (not sent to the game). However, middle-clicks\n"
-		"                   will be sent to the game in fullscreen or when\n"
-		"                   seamless control is set.\n"
-		"                   Ctrl+F10 will also uncapture the mouse.\n"
-		"Defaults (if not present or incorrect): ");
+	        "Choose a mouse control method:\n"
+	        "   onclick:        Capture the mouse when clicking inside the window.\n"
+	        "   onstart:        Capture the mouse immediately on start.\n"
+	        "   seamless:       Never cature the mouse; let it move seamlessly.\n"
+	        "   nomouse:        Hide the mouse and don't send input to the game.\n"
+	        "Choose how middle-clicks are handled (second parameter):\n"
+	        "   middlegame:     Middle-clicks are sent to the game.\n"
+	        "   middlerelease:  Middle-click will release the captured mouse.\n"
+	        "Defaults (if not present or incorrect): ");
 	mouse_control_help += mouse_control_defaults;
 	Pmulti->Set_help(mouse_control_help);
 
@@ -2971,16 +3210,23 @@ void Config_Add_SDL() {
 	Pbool->Set_help("Wait before closing the console if dosbox has an error.");
 
 	Pmulti = sdl_sec->Add_multi("priority", Property::Changeable::Always, ",");
-	Pmulti->SetValue("higher,normal");
-	Pmulti->Set_help("Priority levels for dosbox. Second entry behind the comma is for when dosbox is not focused/minimized.\n"
-	                 "pause is only valid for the second entry.");
+	Pmulti->SetValue("auto,auto");
+	Pmulti->Set_help(
+	        "Priority levels for dosbox. Second entry behind the comma is for when dosbox is not focused/minimized.\n"
+	        "pause is only valid for the second entry. auto disables priority levels and uses OS defaults");
 
-	const char* actt[] = { "lowest", "lower", "normal", "higher", "highest", "pause", 0};
-	Pstring = Pmulti->GetSection()->Add_string("active",Property::Changeable::Always,"higher");
+	const char *actt[] = {"auto",   "lowest",  "lower", "normal",
+	                      "higher", "highest", "pause", 0};
+	Pstring = Pmulti->GetSection()->Add_string("active",
+	                                           Property::Changeable::Always,
+	                                           "higher");
 	Pstring->Set_values(actt);
 
-	const char* inactt[] = { "lowest", "lower", "normal", "higher", "highest", "pause", 0};
-	Pstring = Pmulti->GetSection()->Add_string("inactive",Property::Changeable::Always,"normal");
+	const char *inactt[] = {"auto",   "lowest",  "lower", "normal",
+	                        "higher", "highest", "pause", 0};
+	Pstring = Pmulti->GetSection()->Add_string("inactive",
+	                                           Property::Changeable::Always,
+	                                           "normal");
 	Pstring->Set_values(inactt);
 
 	pstring = sdl_sec->Add_path("mapperfile", always, MAPPERFILE);
@@ -3034,7 +3280,7 @@ static void show_warning(char const * const message) {
 
 	SDL_BlitSurface(splash_surf, NULL, sdl.surface, NULL);
 	SDL_UpdateWindowSurface(sdl.window);
-	SDL_Delay(12000);
+	Delay(12000);
 #endif // WIN32
 }
 
@@ -3096,7 +3342,7 @@ void restart_program(std::vector<std::string> & parameters) {
 	for(Bitu i = 0; i < parameters.size(); i++) newargs[i] = (char*)parameters[i].c_str();
 	newargs[parameters.size()] = NULL;
 	MIXER_CloseAudioDevice();
-	SDL_Delay(50);
+	Delay(50);
 	QuitSDL();
 #if C_DEBUG
 	// shutdown curses

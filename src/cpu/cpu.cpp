@@ -2165,8 +2165,8 @@ void CPU_Disable_SkipAutoAdjust(void) {
 }
 
 
-extern Bit32s ticksDone;
-extern Bit32u ticksScheduled;
+extern int ticksDone;
+extern int ticksScheduled;
 
 void CPU_Reset_AutoAdjust(void) {
 	CPU_IODelayRemoved = 0;
@@ -2174,7 +2174,7 @@ void CPU_Reset_AutoAdjust(void) {
 	ticksScheduled = 0;
 }
 
-class CPU: public Module_base {
+class CPU final : public Module_base {
 private:
 	static bool inited;
 public:
@@ -2232,11 +2232,11 @@ public:
 #elif (C_DYNREC)
 		CPU_Core_Dynrec_Init();
 #endif
-		MAPPER_AddHandler(CPU_CycleDecrease, SDL_SCANCODE_F11, MMOD1,
-		                  "cycledown", "Dec Cycles");
-		MAPPER_AddHandler(CPU_CycleIncrease, SDL_SCANCODE_F12, MMOD1,
-		                  "cycleup", "Inc Cycles");
-		Change_Config(configuration);	
+		MAPPER_AddHandler(CPU_CycleDecrease, SDL_SCANCODE_F11,
+		                  PRIMARY_MOD, "cycledown", "Dec Cycles");
+		MAPPER_AddHandler(CPU_CycleIncrease, SDL_SCANCODE_F12,
+		                  PRIMARY_MOD, "cycleup", "Inc Cycles");
+		Change_Config(configuration);
 		CPU_JMP(false,0,0,0);					//Setup the first cpu core
 	}
 

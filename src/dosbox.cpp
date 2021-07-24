@@ -21,11 +21,13 @@
 
 #include "dosbox.h"
 
-#include <stdlib.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <unistd.h>
+
+#include <functional>
 
 #include "debug.h"
 #include "cpu.h"
@@ -105,6 +107,8 @@ void MPU401_Init(Section*);
 void PCSPEAKER_Init(Section*);
 void TANDYSOUND_Init(Section*);
 void DISNEY_Init(Section*);
+void PS1AUDIO_Init(Section *);
+void INNOVA_Init(Section*);
 void SERIAL_Init(Section*);
 
 
@@ -139,17 +143,18 @@ static LoopHandler * loop;
 
 bool SDLNetInited;
 
-static Bit32u ticksRemain;
-static Bit32u ticksLast;
-static Bit32u ticksAdded;
-Bit32s ticksDone;
-Bit32u ticksScheduled;
+static std::function<void(int)> delay_fn = Delay;
+static int ticksRemain;
+static int64_t ticksLast;
+static int ticksAdded;
+int ticksDone;
+int ticksScheduled;
 bool ticksLocked;
 void increaseticks();
-
 bool mono_cga=false;
 
-static Bitu Normal_Loop(void) {
+static Bitu Normal_Loop()
+{
 	Bits ret;
 	while (1) {
 		//--Added 2009-12-27 by Alun Bestor to short-circuit the emulation loop when we need to
@@ -168,21 +173,22 @@ static Bitu Normal_Loop(void) {
 			if (DEBUG_ExitLoop()) return 0;
 #endif
 		} else {
-			if (!GFX_Events())
+			if (!GFX_MaybeProcessEvents()) {
 				return 0;
+			}
 			//--Check again at this point in case our own events have cancelled the emulation.
 			if (!boxer_runLoopShouldContinue()) return 1;
 			//--End of modifications
 			if (ticksRemain > 0) {
 				TIMER_AddTick();
 				ticksRemain--;
-			} else {increaseticks();return 0;}
+			} else {
+				increaseticks();
+				return 0;
+			}
 		}
 	}
 }
-
-//For trying other delays
-#define wrap_delay(a) SDL_Delay(a)
 
 void increaseticks() { //Make it return ticksRemain and set it in the function above to remove the global variable.
 	if (GCC_UNLIKELY(ticksLocked)) { // For Fast Forward Mode
@@ -198,26 +204,25 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
 	static Bit32s lastsleepDone = -1;
 	static Bitu sleep1count = 0;
 
-	Bit32u ticksNew;
-	ticksNew = GetTicks();
+	const auto ticksNew = GetTicks();
 	ticksScheduled += ticksAdded;
 	if (ticksNew <= ticksLast) { //lower should not be possible, only equal.
 		ticksAdded = 0;
 
 		if (!CPU_CycleAutoAdjust || CPU_SkipCycleAutoAdjust || sleep1count < 3) {
-			wrap_delay(1);
+			delay_fn(1);
 		} else {
 			/* Certain configurations always give an exact sleepingtime of 1, this causes problems due to the fact that
 			   dosbox keeps track of full blocks.
 			   This code introduces some randomness to the time slept, which improves stability on those configurations
 			 */
-			static const Bit32u sleeppattern[] = { 2, 2, 3, 2, 2, 4, 2};
+			static const Bit32u sleeppattern[] = { 2, 2, 3, 2, 2, 4, 2 };
 			static Bit32u sleepindex = 0;
 			if (ticksDone != lastsleepDone) sleepindex = 0;
-			wrap_delay(sleeppattern[sleepindex++]);
+			delay_fn(sleeppattern[sleepindex++]);
 			sleepindex %= sizeof(sleeppattern) / sizeof(sleeppattern[0]);
 		}
-		Bit32s timeslept = GetTicks() - ticksNew;
+		auto timeslept = GetTicksSince(ticksNew);
 		// Count how many times in the current block (of 250 ms) the time slept was 1 ms
 		if (CPU_CycleAutoAdjust && !CPU_SkipCycleAutoAdjust && timeslept == 1) sleep1count++;
 		lastsleepDone = ticksDone;
@@ -238,7 +243,7 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
 	}
 
 	//TicksNew > ticksLast
-	ticksRemain = ticksNew-ticksLast;
+	ticksRemain = GetTicksDiff(ticksNew, ticksLast);
 	ticksLast = ticksNew;
 	ticksDone += ticksRemain;
 	if ( ticksRemain > 20 ) {
@@ -380,6 +385,8 @@ static void DOSBOX_UnlockSpeed( bool pressed ) {
 static void DOSBOX_RealInit(Section * sec) {
 	Section_prop * section=static_cast<Section_prop *>(sec);
 	/* Initialize some dosbox internals */
+
+	delay_fn = CanDelayPrecise() ? DelayPrecise : Delay;
 
 	ticksRemain=0;
 	ticksLast=GetTicks();
@@ -573,12 +580,12 @@ void DOSBOX_Init(void) {
 
 	Pmulti_remain = secprop->Add_multiremain("cycles",Property::Changeable::Always," ");
 	Pmulti_remain->Set_help(
-		"Amount of instructions DOSBox tries to emulate each millisecond.\n"
+		"Number of instructions DOSBox tries to emulate each millisecond.\n"
 		"Setting this value too high results in sound dropouts and lags.\n"
 		"Cycles can be set in 3 ways:\n"
 		"  'auto'          tries to guess what a game needs.\n"
 		"                  It usually works, but can fail for certain games.\n"
-		"  'fixed #number' will set a fixed amount of cycles. This is what you usually\n"
+		"  'fixed #number' will set a fixed number of cycles. This is what you usually\n"
 		"                  need if 'auto' fails (Example: fixed 4000).\n"
 		"  'max'           will allocate as much cycles as your computer is able to\n"
 		"                  handle.");
@@ -592,7 +599,8 @@ void DOSBOX_Init(void) {
 
 	Pint = secprop->Add_int("cycleup",Property::Changeable::Always,10);
 	Pint->SetMinMax(1,1000000);
-	Pint->Set_help("Number of cycles to decrease/increase with keycombos. (Ctrl+F11/Ctrl+F12)");
+	Pint->Set_help("Number of cycles added or subtracted with speed control hotkeys.\n"
+	               "Run INTRO and see Special Keys for list of hotkeys.");
 
 	Pint = secprop->Add_int("cycledown",Property::Changeable::Always,20);
 	Pint->SetMinMax(1,1000000);
@@ -776,6 +784,9 @@ void DOSBOX_Init(void) {
 	// Configure Gravis UltraSound emulation
 	GUS_AddConfigSection(control);
 
+	// Configure Innovation SSI-2001 emulation
+	INNOVATION_AddConfigSection(control);
+
 	secprop = control->AddSection_prop("speaker",&PCSPEAKER_Init,true);//done
 	Pbool = secprop->Add_bool("pcspeaker",Property::Changeable::WhenIdle,true);
 	Pbool->Set_help("Enable PC-Speaker emulation.");
@@ -817,6 +828,11 @@ void DOSBOX_Init(void) {
 
 	Pbool = secprop->Add_bool("disney",Property::Changeable::WhenIdle,true);
 	Pbool->Set_help("Enable Disney Sound Source emulation. (Covox Voice Master and Speech Thing compatible).");
+
+	// IBM PS/1 Audio emulation
+	secprop->AddInitFunction(&PS1AUDIO_Init, true);
+	Pbool = secprop->Add_bool("ps1audio", when_idle, false);
+	Pbool->Set_help("Enable IBM PS/1 Audio emulation.");
 
 	secprop=control->AddSection_prop("joystick",&BIOS_Init,false);//done
 	secprop->AddInitFunction(&INT10_Init);

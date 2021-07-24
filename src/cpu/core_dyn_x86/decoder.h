@@ -58,10 +58,7 @@ static bool MakeCodePage(Bitu lin_addr,CodePageHandler * &cph) {
 	PageHandler * handler=get_tlb_readhandler(lin_addr);
 	if (handler->flags & PFLAG_HASCODE) {
 		cph=( CodePageHandler *)handler;
-		if (handler->flags & cflag) return false;
-		cph->ClearRelease();
-		cph=0;
-		handler=get_tlb_readhandler(lin_addr);
+		return false;
 	}
 	if (handler->flags & PFLAG_NOCODE) {
 		if (PAGING_ForcePageInit(lin_addr)) {
@@ -146,7 +143,7 @@ static Bit16u decode_fetchw(void) {
 		val|=decode_fetchb() << 8;
 		return val;
 	}
-	*(Bit16u *)&decode.page.wmap[decode.page.index]+=0x0101;
+	add_to_unaligned_uint16(&decode.page.wmap[decode.page.index], 0x0101);
 	decode.code+=2;decode.page.index+=2;
 	return mem_readw(decode.code-2);
 }
@@ -159,7 +156,7 @@ static Bit32u decode_fetchd(void) {
 		return val;
         /* Advance to the next page */
 	}
-	*(Bit32u *)&decode.page.wmap[decode.page.index]+=0x01010101;
+	add_to_unaligned_uint32(&decode.page.wmap[decode.page.index], 0x01010101);
 	decode.code+=4;decode.page.index+=4;
 	return mem_readd(decode.code-4);
 }
@@ -194,8 +191,8 @@ static INLINE void decode_increase_wmapmask(Bitu size) {
 	}
 	switch (size) {
 		case 1 : activecb->cache.wmapmask[mapidx]+=0x01; break;
-		case 2 : (*(Bit16u*)&activecb->cache.wmapmask[mapidx])+=0x0101; break;
-		case 4 : (*(Bit32u*)&activecb->cache.wmapmask[mapidx])+=0x01010101; break;
+		case 2 : add_to_unaligned_uint16(&activecb->cache.wmapmask[mapidx], 0x0101); break;
+		case 4 : add_to_unaligned_uint32(&activecb->cache.wmapmask[mapidx], 0x01010101); break;
 	}
 }
 
@@ -2183,7 +2180,11 @@ static CacheBlock * CreateCacheBlock(CodePageHandler * codepage,PhysPt start,Bit
 	decode.block->page.start=decode.page.index;
 	codepage->AddCacheBlock(decode.block);
 
-	for (i=0;i<G_MAX;i++) {
+	auto cache_addr = static_cast<void *>(const_cast<uint8_t *>(decode.block->cache.start));
+	constexpr size_t cache_bytes = CACHE_MAXSIZE;
+
+	dyn_mem_write(cache_addr, cache_bytes);
+	for (i = 0; i < G_MAX; i++) {
 		DynRegs[i].flags&=~(DYNFLG_ACTIVE|DYNFLG_CHANGED);
 		DynRegs[i].genreg=0;
 	}
@@ -2888,6 +2889,7 @@ illegalopcode:
 	dyn_save_critical_regs();
 	gen_return(BR_Opcode);
 	dyn_closeblock();
+
 	goto finish_block;
 #if (C_DEBUG)
 	dyn_set_eip_last();
@@ -2900,6 +2902,9 @@ illegalopcode:
 finish_block:
 	/* Setup the correct end-address */
 	decode.active_block->page.end=--decode.page.index;
-//	LOG_MSG("Created block size %d start %d end %d",decode.block->cache.size,decode.block->page.start,decode.block->page.end);
+	dyn_mem_execute(cache_addr, cache_bytes);
+	dyn_cache_invalidate(cache_addr, cache_bytes);
+	//	LOG_MSG("Created block size %d start %d end
+	//%d",decode.block->cache.size,decode.block->page.start,decode.block->page.end);
 	return decode.block;
 }

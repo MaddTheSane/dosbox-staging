@@ -14,10 +14,8 @@ jobs:
     runs-on: ${{ matrix.conf.os }}
     if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier', github.actor) == false
     strategy:
-      max-parallel: 3
       matrix:
         conf:
-
           - name: Clang, Ubuntu 20.04
             os: ubuntu-20.04
             packages: clang
@@ -67,7 +65,7 @@ jobs:
           - name: GCC, warning_level=3
             os: ubuntu-20.04
             build_flags: -Dwarning_level=3
-            max_warnings: 66
+            max_warnings: 64
 
           - name: GCC, minimum build
             os: ubuntu-20.04
@@ -105,14 +103,15 @@ jobs:
           echo "::set-output name=dir::$CCACHE_DIR"
           echo "::set-output name=today::$(date -I)"
           echo "::set-output name=yesterday::$(date --date=yesterday -I)"
+          echo "::set-output name=name_hash::$(echo '${{ matrix.conf.name }}' | shasum | cut -b-8)"
 
       - uses:  actions/cache@v2
         id:    cache-ccache
         with:
           path: ${{ steps.prep-ccache.outputs.dir }}
-          key:  ccache-${{ matrix.conf.os }}-${{ steps.prep-ccache.outputs.today }}
+          key:  ccache-${{ matrix.conf.os }}-${{ steps.prep-ccache.outputs.name_hash }}-${{ steps.prep-ccache.outputs.today }}
           restore-keys: |
-            ccache-${{ matrix.conf.os }}-${{ steps.prep-ccache.outputs.yesterday }}
+            ccache-${{ matrix.conf.os }}-${{ steps.prep-ccache.outputs.name_hash }}-${{ steps.prep-ccache.outputs.yesterday }}
 
       - name:  Cache subprojects
         uses:  actions/cache@v2
@@ -129,6 +128,7 @@ jobs:
         run: |
           set -xo pipefail
           ninja -C build |& tee build.log
+          ccache -s
 
       - name: Run tests
         if:   matrix.conf.run_tests
@@ -231,6 +231,25 @@ jobs:
           sed -i "s|%GIT_COMMIT%|$GITHUB_SHA|"               dest/README
           sed -i "s|%GIT_BRANCH%|${GITHUB_REF#refs/heads/}|" dest/README
           sed -i "s|%GITHUB_REPO%|$GITHUB_REPOSITORY|"       dest/README
+
+          # Prepare translation files
+          #
+          # Note:
+          #   We conciously drop the dialect postfix because no dialects are available.
+          #   (US was the default DOS dialect and therefore is the default for 'en').
+          #   There users get the generic translation and benefit from simpler filenames.
+          #   Dialect translations will be added if/when they're available.
+          #
+          install -DT -m 644 contrib/translations/de/de_DE.lng       dest/translations/de.lng
+          install -DT -m 644 contrib/translations/en/en_US.lng       dest/translations/en.lng
+          install -DT -m 644 contrib/translations/es/es_ES.lng       dest/translations/es.lng
+          install -DT -m 644 contrib/translations/fr/fr_FR.lng       dest/translations/fr.lng
+          install -DT -m 644 contrib/translations/it/it_IT.lng       dest/translations/it.lng
+          install -DT -m 644 contrib/translations/pl/pl_PL.CP437.lng dest/translations/pl.cp437.lng
+          install -DT -m 644 contrib/translations/pl/pl_PL.lng       dest/translations/pl.lng
+          install -DT -m 644 contrib/translations/ru/ru_RU.lng       dest/translations/ru.lng
+
+          # Finalize directory for tar'ing
           mv dest "dosbox-staging-linux-$VERSION"
           tree --si -p "dosbox-staging-linux-$VERSION"
 

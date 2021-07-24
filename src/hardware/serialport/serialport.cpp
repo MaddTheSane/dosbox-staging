@@ -185,7 +185,7 @@ void CSerial::log_ser(bool active, char const* format,...) {
 		// copied from DEBUG_SHOWMSG
 		char buf[512];
 		buf[0]=0;
-		sprintf(buf,"%12.3f [% 7u] ",PIC_FullIndex(), SDL_GetTicks());
+		sprintf(buf, "%12.3f [% 7lld] ", PIC_FullIndex(), GetTicks());
 		va_list msg;
 		va_start(msg,format);
 		vsprintf(buf+strlen(buf),format,msg);
@@ -1282,7 +1282,7 @@ bool CSerial::Putchar(uint8_t data, bool wait_dsr, bool wait_cts, uint32_t timeo
 	return true;
 }
 
-class SERIALPORTS:public Module_base {
+class SERIALPORTS final : public Module_base {
 public:
 	SERIALPORTS (Section * configuration):Module_base (configuration) {
 		uint16_t biosParameter[SERIAL_MAX_PORTS] = {0};

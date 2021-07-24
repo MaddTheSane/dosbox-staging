@@ -23,6 +23,7 @@
 
 #include "mixer.h"
 
+#include <cstdint>
 #include <string.h>
 #include <sys/types.h>
 #include <math.h>
@@ -359,7 +360,30 @@ void MixerChannel::AddSilence()
 	offset[0] = offset[1] = 0;
 }
 
-//4 seems to work . Disabled for now
+// Floating-point conversion from unsigned 8-bit to signed 16-bit.
+// This is only used to populate a lookup table that's 20-fold faster.
+constexpr int16_t u8to16(const int u_val)
+{
+	assert(u_val >= 0 && u_val <= UINT8_MAX);
+	const auto s_val = u_val - 128;
+	if (s_val > 0) {
+		constexpr auto scalar = INT16_MAX / 127.0;
+		return static_cast<int16_t>(round(s_val * scalar));
+	}
+	return static_cast<int16_t>(s_val * 256);
+}
+
+// 8-bit to 16-bit lookup tables
+static int16_t lut_u8to16[UINT8_MAX + 1] = {};
+constexpr int16_t *lut_s8to16 = lut_u8to16 + 128;
+
+constexpr void fill_8to16_lut()
+{
+	for (int i = 0; i <= UINT8_MAX; ++i)
+		lut_u8to16[i] = u8to16(i);
+}
+
+// 4 seems to work . Disabled for now
 #define MIXER_UPRAMP_STEPS 0
 #define MIXER_UPRAMP_SAVE 512
 
@@ -397,19 +421,22 @@ inline void MixerChannel::AddSamples(Bitu len, const Type* data) {
 			}
 
 			if ( sizeof( Type) == 1) {
+				// unsigned 8-bit
 				if (!signeddata) {
 					if (stereo) {
-						next_sample[0]=(((Bit8s)(data[pos*2+0] ^ 0x80)) << 8);
-						next_sample[1]=(((Bit8s)(data[pos*2+1] ^ 0x80)) << 8);
+						next_sample[0] = lut_u8to16[data[pos * 2 + 0]];
+						next_sample[1] = lut_u8to16[data[pos * 2 + 1]];
 					} else {
-						next_sample[0]=(((Bit8s)(data[pos] ^ 0x80)) << 8);
+						next_sample[0] = lut_u8to16[data[pos]];
 					}
-				} else {
+				}
+				// signed 8-bit
+				else {
 					if (stereo) {
-						next_sample[0]=(data[pos*2+0] << 8);
-						next_sample[1]=(data[pos*2+1] << 8);
+						next_sample[0] = lut_s8to16[data[pos * 2 + 0]];
+						next_sample[1] = lut_s8to16[data[pos * 2 + 1]];
 					} else {
-						next_sample[0]=(data[pos] << 8);
+						next_sample[0] = lut_s8to16[data[pos]];
 					}
 				}
 			//16bit and 32bit both contain 16bit data internally
@@ -805,7 +832,7 @@ static void SDLCALL MIXER_CallBack(MAYBE_UNUSED void *userdata, Uint8 *stream, i
 static void MIXER_Stop(MAYBE_UNUSED Section *sec)
 {}
 
-class MIXER : public Program {
+class MIXER final : public Program {
 public:
 	void MakeVolume(char * scan,float & vol0,float & vol1) {
 		Bitu w=0;
@@ -966,6 +993,7 @@ void MIXER_Init(Section* sec) {
 		LOG_MSG("MIXER: Negotiated %u-channel %u-Hz audio in %u-frame blocks",
 		        obtained.channels, mixer.freq, mixer.blocksize);
 	}
+
 	//1000 = 8 *125
 	mixer.tick_counter = (mixer.freq%125)?TICK_NEXT:0;
 	const auto requested_prebuffer = section->Get_int("prebuffer");
@@ -973,6 +1001,10 @@ void MIXER_Init(Section* sec) {
 	mixer.min_needed = (mixer.freq * mixer.min_needed) / 1000;
 	mixer.max_needed = mixer.blocksize * 2 + 2 * mixer.min_needed;
 	mixer.needed = mixer.min_needed + 1;
+
+	// Initialize the 8-bit to 16-bit lookup table
+	fill_8to16_lut();
+
 	PROGRAMS_MakeFile("MIXER.COM",MIXER_ProgramStart);
 }
 

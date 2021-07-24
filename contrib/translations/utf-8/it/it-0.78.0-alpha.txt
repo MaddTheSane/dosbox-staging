@@ -1,6 +1,5 @@
 :CONFIG_FULLSCREEN
 Avvia DOSBox direttamente a schermo intero.
-Premi Alt+Enter per tornare in modalità finestra.
 .
 :CONFIG_DISPLAY
 Numero dello schermo da utilizzare; Il valore dipende dall'OS e dalle
@@ -47,12 +46,10 @@ Metodo di controllo del mouse:
                    segnale inviato al gioco.
 Gestione del clic centrale (secondo parametro):
    middlegame:     I clic centrali vengono inviati al gioco
-                   (Ctrl+F10 rilascia il mouse).
    middlerelease:  I clic centrali rilasciano il mouse
                    (non inviati al gioco). Tuttavia, i clic centrali
                    verranno inviati al gioco in modalità schermo intero
                    o quando è impostato il controllo continuo.
-                   Ctrl+F10 rilascerà anche il mouse.
 Defaults (se non è presente o incorretto): seamless middlerelease
 .
 :CONFIG_SENSITIVITY
@@ -159,10 +156,10 @@ I cicli possono essere impostati in 3 modi:
                   gestire.
 .
 :CONFIG_CYCLEUP
-Quantità di cicli di cui aumentare usando gli appositi tasti. (Ctrl+F12)
+Quantità di cicli di cui aumentare usando gli appositi tasti.
 .
 :CONFIG_CYCLEDOWN
-Quantità di cicli di cui diminuire usando gli appositi tasti. (Ctrl+F11)
+Quantità di cicli di cui diminuire usando gli appositi tasti.
 Un valore più basso di 100 indica una percentuale.
 .
 :CONFIG_NOSOUND
@@ -710,6 +707,27 @@ https://github.com/dosbox-staging/dosbox-staging/wiki[0m
 [31;1mIn caso di errori, DOSBox si interromperà e terminerà senza preavvisi![0m
 
 .
+:PROGRAM_INTRO_CDROM_WINDOWS
+[2J[32;1mCome montare un'unità CD-ROM virtuale in DOSBox:[0m
+DOSBox fornisce un'emulazione CD-ROM a vari livelli.
+
+Funziona su tutte le cartelle normali, viene installato MSCDEX e impostati
+tutti i file in sola lettura. Di solito questo va bene per la maggior parte
+dei giochi:
+
+[34;1mmount D C:\esempio -t cdrom[0m
+
+Se non funziona, potresti dover specificare l'etichetta del CD-ROM:
+
+[34;1mmount D C:\esempio -t cdrom -label ETICHETTA[0m
+
+Inoltre, puoi usare imgmount per montare immagini iso o cue/bin:
+
+[34;1mimgmount D C:\cd.iso -t cdrom[0m
+
+[34;1mimgmount D C:\cd.cue -t cdrom[0m
+
+.
 :PROGRAM_INTRO_MOUNT_START
 [2J[32;1mEcco alcuni comandi utili per iniziare:[0m
 Prima di poter usare i file nel tuo filesystem,
@@ -766,20 +784,20 @@ Inoltre, puoi usare imgmount per montare immagini iso o cue/bin:
 Questi sono i tasti predefiniti.
 Possono essere modificati nel [33mkeymapper[0m.
 
-[33;1mAlt+Enter[0m  Passa dalla modalità a schermo intero a quella a finestra
+[33;1m%s+Enter[0m  Passa dalla modalità a schermo intero a quella a finestra
            e viceversa.
-[33;1mAlt+Pause[0m  Mette in pausa/riavvia l'emulatore.
-[33;1mCtrl+F1[0m    Avvia il [33mkeymapper[0m.
-[33;1mCtrl+F4[0m    Passa tra le immagini disco montate, aggiorna la cache della
+[33;1m%s+Pause[0m  Mette in pausa/riavvia l'emulatore.
+[33;1m%s+F1[0m   %s Avvia il [33mkeymapper[0m.
+[33;1m%s+F4[0m   %s Passa tra le immagini disco montate, aggiorna la cache della
            cartella per tutte le unità.
-[33;1mCtrl+F5[0m    Scatta un'istantanea dello schermo (screenshot).
-[33;1mCtrl+F6[0m    Avvia/ferma la registrazione dell'output audio su un file wave.
-[33;1mCtrl+F7[0m    Avvia/ferma la registrazione dell'output video su un file zmbv.
-[33;1mCtrl+F9[0m    Chiudi emulatore.
-[33;1mCtrl+F10[0m   Cattura/Rilascia il mouse.
-[33;1mCtrl+F11[0m   Rallenta l'emulazione (Decrementa i Cicli DOSBox).
-[33;1mCtrl+F12[0m   Accelera l'emulazione (Incrementa i Cicli DOSBox).
-[33;1mAlt+F12[0m    Sblocca la velocità (pulsante turbo/avanzamento rapido).
+[33;1m%s+F5[0m   %s Scatta un'istantanea dello schermo (screenshot).
+[33;1m%s+F6[0m   %s Avvia/ferma la registrazione dell'output audio su un file wave.
+[33;1m%s+F7[0m   %s Avvia/ferma la registrazione dell'output video su un file zmbv.
+[33;1m%s+F9[0m   %s Chiudi l'emulatore.
+[33;1m%s+F10[0m  %s Cattura/Rilascia il mouse.
+[33;1m%s+F11[0m  %s Rallenta l'emulazione (Decrementa i Cicli DOSBox).
+[33;1m%s+F12[0m  %s Accelera l'emulazione (Incrementa i Cicli DOSBox).
+[33;1m%sF12[0m     Sblocca la velocità (pulsante turbo/avanzamento rapido).
 
 .
 :PROGRAM_BOOT_NOT_EXIST
@@ -798,11 +816,11 @@ Il file immagine è di sola lettura! Potrebbe creare dei problemi.
 Questo comando avvia DOSBox da un'immagine floppy o disco rigido.
 
 Per questo comando, si può specificare una successione di floppy disk
-selezionabili premendo Ctrl+F4, e -l specifica l'unità montata da cui eseguire
+selezionabili premendo %s+F4, e -l specifica l'unità montata da cui eseguire
 l'avvio. Se non viene specificata alcuna lettera di unità, l'impostazione
 predefinita prevede l'avvio dall'unità A. 
 Le uniche lettere di unità avviabili sono A, C, e D. Per l'avvio da un disco
-rigido (C or D), l'immagine dovrebbe essere già stata montata utilizzando il
+rigido (C o D), l'immagine dovrebbe essere già stata montata utilizzando il
 comando [34;1mIMGMOUNT[0m.
 
 La sintassi di questo comando è:
@@ -877,7 +895,7 @@ Dove:
   [36;1mAVVIABILE[0m    è un'immagine disco avviabile con GEOMETRIA -size specificata:
             bytes-per-sector,sectors-per-head,heads,cylinders
 Note:
-  - Ctrl+F4 scambia e monta il CDROM-SET o FILEIMMAGINE successivo se fornito.
+  - %s+F4 scambia e monta il CDROM-SET o FILEIMMAGINE successivo se fornito.
 
 Esempi:
   [32;1mimgmount[0m [37;1mD[0m [36;1m/home/USERNAME/giochi/doom.iso[0m -t cdrom
@@ -1040,10 +1058,6 @@ ECHO attivato.
 ECHO disattivato.
 
 .
-:SHELL_ILLEGAL_CONTROL_CHARACTER
-Carattere di controllo inaspettato: Dec %03u e Hex %#04x.
-
-.
 :SHELL_ILLEGAL_SWITCH
 Opzione non valida: %s.
 
@@ -1093,7 +1107,7 @@ M/G/A
 :SHELL_CMD_DATE_HELP_LONG
 DATE [[/T] [/H] [/S] | MM-GG-AAAA]
   MM-GG-AAAA: nuova data da impostare
-  /S:         Usa permanentemente l'ora e la data dell'host come ora del DOS
+  /S:         Usa l'ora e la data dell'host
   /F:         Torna all'ora interna di DOSBox (contrario di /S)
   /T:         Visualizza solo la data
   /H:         Sincronizza con l'host
@@ -1219,8 +1233,8 @@ destinazione è già in uso. È possibile utilizzare SUBST solo su unità locali
 ║ Per una breve introduzione per i nuovi utenti, digita: [33mINTRO[37m         ║
 ║ Per la lista dei comandi della shell supportati, digita: [33mHELP[37m        ║
 ║                                                                      ║
-║ Per regolare la velocità della CPU emulata, usa [31mCtrl+F11[37m e [31mCtrl+F12[37m. ║
-║ Per attivare il keymapper, usa [31mCtrl+F1[37m.                              ║
+║ Per regolare la velocità della CPU emulata, usa [31m%s+F11[37m e [31m%s+F12[37m.%s%s ║
+║ Per attivare il keymapper, usa [31m%s+F1[37m.%s                              ║
 ║ Ulteriori informazioni nel file [36mREADME[37m nella cartella di DOSBox.     ║
 ║                                                                      ║
 
@@ -1229,13 +1243,13 @@ destinazione è già in uso. È possibile utilizzare SUBST solo su unità locali
 ║ DOSBox supporta la modalità CGA Composita.                           ║
 ║ Usa [31mF12[37m per impostare l'uscita composita su ON, OFF o AUTO           ║
 ║ (impostazione predefinita).                                          ║
-║ [31mAlt+F11[37m cambia tonalità; [31mCtrl+Alt+F11[37m seleziona il modello CGA.      ║
+║ [31m%s+F11[37m cambia tonalità; [31m%s+%s+F11[37m seleziona il modello CGA.%s      ║
 ║                                                                      ║
 
 .
 :SHELL_STARTUP_CGA_MONO
 ║ Usa [31mF11[37m per scorrere le modalità verde, ambra, bianco e bianco-carta,║
-║ e [31mAlt+F11[37m per modificare le impostazioni di contrasto/luminosità.    ║
+║ e [31m%s+F11[37m per modificare le impostazioni di contrasto/luminosità.    ║
 
 .
 :SHELL_STARTUP_HERC
@@ -1244,7 +1258,7 @@ destinazione è già in uso. È possibile utilizzare SUBST solo su unità locali
 
 .
 :SHELL_STARTUP_DEBUG
-║ Premi [31mAlt+Pause[37m per avviare il debugger o avvia l'exe con [33mDEBUG[37m.     ║
+║ Premi [31m%s+Pause[37m per avviare il debugger o avvia l'exe con [33mDEBUG[37m.     ║
 ║                                                                      ║
 
 .
@@ -1306,8 +1320,8 @@ Visualizza messaggi e attiva/disattiva la ripetizione dei comandi.
 Esci dalla shell.
 
 .
-:SHELL_CMD_HELP_HELP
-Visualizza la guida.
+:SHELL_CMD_HELP_HELP_LONG
+HELP [comando]
 
 .
 :SHELL_CMD_MKDIR_HELP
@@ -1377,6 +1391,28 @@ Non puoi specificare una nuova unità o percorso per il file di destinazione.
 .
 :SHELL_CMD_DELETE_HELP
 Elimina uno o più file.
+
+.
+:SHELL_CMD_DELETE_HELP_LONG
+Utilizzo:
+  [32;1mdel[0m [36;1mNOMEFILE[0m
+  [32;1merase[0m [36;1mNOMEFILE[0m
+
+Dove:
+  [36;1mNOMEFILE[0m può essere un nome di uno file specifico (come [36;1mfile.txt[0m) oppure
+           un nome file contenente uno o più caratteri jolly, cioè:
+           asterisco (*), che rappresenta una qualsiasi sequenza di uno o più
+           caratteri, o punto di domanda (?) che rappresenta un singolo
+           carattere, ad esempio [36;1m*.bat[0m e [36;1mc?.txt[0m.
+
+Avvertimento:
+  Fai attenzione quando usi un nome file con caratteri jolly, in particolare
+  [36;1m*.*[0m, in quanto tutti i file corrispondenti verranno eliminati.
+
+Esempi:
+  [32;1mdel[0m [36;1mtest.bat[0m
+  [32;1mdel[0m [36;1mc*.*[0m
+  [32;1mdel[0m [36;1ma?b.c*[0m
 
 .
 :SHELL_CMD_COPY_HELP

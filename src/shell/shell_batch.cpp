@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "logging.h"
 #include "support.h"
 
 //--Added 2013-09-22 by Alun Bestor to let Boxer track batch files
@@ -64,9 +65,10 @@ BatchFile::BatchFile(DOS_Shell *host,
 
 BatchFile::~BatchFile() {
 	delete cmd;
-	shell->bf=prev;
-	shell->echo=echo;
-    
+	assert(shell);
+	shell->bf = prev;
+	shell->echo = echo;
+
     //--Added 2013-09-22 by Alun Bestor to let Boxer track the lifecycle of the batch file
     boxer_shellDidEndBatchFile(shell, filename.c_str());
     //--End of modifications
@@ -77,8 +79,7 @@ bool BatchFile::ReadLine(char * line) {
 	//Open the batchfile and seek to stored postion
 	if (!DOS_OpenFile(filename.c_str(),(DOS_NOT_INHERIT|OPEN_READ),&file_handle)) {
 		LOG(LOG_MISC,LOG_ERROR)("ReadLine Can't open BatchFile %s",filename.c_str());
-		delete this;
-		return false;
+		return false; // Parent deletes this BatchFile on negative return
 	}
 	DOS_SeekFile(file_handle,&(this->location),DOS_SEEK_SET);
 
@@ -112,17 +113,16 @@ emptyline:
 					*cmd_write++ = val;
 				}
 			} else if (val != LINE_FEED && val != CARRIAGE_RETURN) {
-				shell->WriteOut(MSG_Get("SHELL_ILLEGAL_CONTROL_CHARACTER"),
-				                val, val);
+				DEBUG_LOG_MSG("Encountered non-standard character: Dec %03u and Hex %#04x",
+				              val, val);
 			}
 		}
 	} while (val != LINE_FEED && bytes_read);
 	*cmd_write=0;
 	if (!bytes_read && cmd_write == temp) {
-		//Close file and delete bat file
+		// Close the file and delete this BatchFile on return
 		DOS_CloseFile(file_handle);
-		delete this;
-		return false;
+		return false; // Parent deletes this BatchFile on negative return
 	}
 	if (!strlen(temp)) goto emptyline;
 	if (temp[0]==':') goto emptyline;
@@ -249,8 +249,8 @@ again:
 				}
 			} else if (val != BACKSPACE && val != CARRIAGE_RETURN &&
 			           val != ESC && val != LINE_FEED && val != TAB) {
-				shell->WriteOut(MSG_Get("SHELL_ILLEGAL_CONTROL_CHARACTER"),
-				                val, val);
+				DEBUG_LOG_MSG("Encountered non-standard character: Dec %03u and Hex %#04x",
+				              val, val);
 			}
 		}
 	} while (val != LINE_FEED && bytes_read);

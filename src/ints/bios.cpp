@@ -742,39 +742,79 @@ static Bitu INT14_Handler(void) {
 static Bitu INT15_Handler(void) {
 	static Bit16u biosConfigSeg=0;
 	switch (reg_ah) {
-	case 0xC0:	/* Get Configuration*/
-		{
-			if (biosConfigSeg==0) biosConfigSeg = DOS_GetMemory(1); //We have 16 bytes
-			PhysPt data	= PhysMake(biosConfigSeg,0);
-			mem_writew(data,8);						// 8 Bytes following
-			if (IS_TANDY_ARCH) {
-				if (machine==MCH_TANDY) {
-					// Model ID (Tandy)
-					mem_writeb(data+2,0xFF);
-				} else {
-					// Model ID (PCJR)
-					mem_writeb(data+2,0xFD);
-				}
-				mem_writeb(data+3,0x0A);					// Submodel ID
-				mem_writeb(data+4,0x10);					// Bios Revision
-				/* Tandy doesn't have a 2nd PIC, left as is for now */
-				mem_writeb(data+5,(1<<6)|(1<<5)|(1<<4));	// Feature Byte 1
-			} else {
-				mem_writeb(data+2,0xFC);					// Model ID (PC)
-				mem_writeb(data+3,0x00);					// Submodel ID
-				mem_writeb(data+4,0x01);					// Bios Revision
-				mem_writeb(data+5,(1<<6)|(1<<5)|(1<<4));	// Feature Byte 1
-			}
-			mem_writeb(data+6,(1<<6));				// Feature Byte 2
-			mem_writeb(data+7,0);					// Feature Byte 3
-			mem_writeb(data+8,0);					// Feature Byte 4
-			mem_writeb(data+9,0);					// Feature Byte 5
-			CPU_SetSegGeneral(es,biosConfigSeg);
-			reg_bx = 0;
-			reg_ah = 0;
+	case 0x24:		//A20 stuff
+		switch (reg_al) {
+		case 0:	//Disable a20
+			MEM_A20_Enable(false);
+			reg_ah = 0;                   //call successful
+			CALLBACK_SCF(false);             //clear on success
+			break;
+		case 1:	//Enable a20
+			MEM_A20_Enable( true );
+			reg_ah = 0;                   //call successful
+			CALLBACK_SCF(false);             //clear on success
+			break;
+		case 2:	//Query a20
+			reg_al = MEM_A20_Enabled() ? 0x1 : 0x0;
+			reg_ah = 0;                   //call successful
 			CALLBACK_SCF(false);
-		}; break;
-	case 0x4f:	/* BIOS - Keyboard intercept */
+			break;
+		case 3:	//Get a20 support
+			reg_bx = 0x3;		//Bitmask, keyboard and 0x92
+			reg_ah = 0;         //call successful
+			CALLBACK_SCF(false);
+			break;
+		default:
+			goto unhandled;
+		}
+		break;
+	case 0xC0: /* Get Configuration*/ {
+		if (biosConfigSeg == 0)
+			biosConfigSeg = DOS_GetMemory(1); // We have 16 bytes
+
+		PhysPt data = PhysMake(biosConfigSeg, 0);
+		mem_writew(data, 8); // 8 Bytes following
+
+		// Tandy and IBM PCjr
+		if (IS_TANDY_ARCH) {
+			if (machine == MCH_TANDY) {
+				mem_writeb(data + 2, 0xFF); // Model ID (Tandy)
+			} else {
+				mem_writeb(data + 2, 0xFD); // Model ID (PCjr)
+			}
+			mem_writeb(data + 3, 0x0A); // Submodel ID
+			mem_writeb(data + 4, 0x10); // Bios Revision
+			                            // Feature Bytes 1 and 2
+			// Tandy doesn't have a 2nd PIC, left as-is
+			mem_writeb(data + 5, (1 << 6) | (1 << 5) | (1 << 4));
+			mem_writeb(data + 6, (1 << 6));
+		}
+		// IBM PS/1 2011
+		else if (PS1AUDIO_IsEnabled()) {
+			mem_writeb(data + 2, 0xFC); // Model ID
+			mem_writeb(data + 3, 0x0B); // Submodel ID
+			mem_writeb(data + 4, 0x00); // Bios Revision
+			mem_writeb(data + 5, 0b1111'0100); // Feature Byte 1 (0xF4)
+			mem_writeb(data + 6, 0b0100'0000); // Feature Byte 2 (0x40)
+		}
+		// General PCs
+		else {
+			mem_writeb(data + 2, 0xFC); // Model ID
+			mem_writeb(data + 3, 0x00); // Submodel ID
+			mem_writeb(data + 4, 0x01); // Bios Revision
+			                            // Feature Bytes 1 and 2
+			mem_writeb(data + 5, (1 << 6) | (1 << 5) | (1 << 4));
+			mem_writeb(data + 6, (1 << 6));
+		}
+		mem_writeb(data + 7, 0); // Feature Byte 3
+		mem_writeb(data + 8, 0); // Feature Byte 4
+		mem_writeb(data + 9, 0); // Feature Byte 5
+		CPU_SetSegGeneral(es, biosConfigSeg);
+		reg_bx = 0;
+		reg_ah = 0;
+		CALLBACK_SCF(false);
+	}; break;
+	case 0x4f: /* BIOS - Keyboard intercept */
 		/* Carry should be set but let's just set it just in case */
 		CALLBACK_SCF(true);
 		break;
@@ -987,6 +1027,7 @@ static Bitu INT15_Handler(void) {
 		CALLBACK_SCF(true);
 		break;
 	default:
+	unhandled:
 		LOG(LOG_BIOS,LOG_ERROR)("INT15:Unknown call %4X",reg_ax);
 		reg_ah=0x86;
 		CALLBACK_SCF(true);
@@ -998,25 +1039,37 @@ static Bitu INT15_Handler(void) {
 	return CBRET_NONE;
 }
 
-static Bitu Default_IRQ_Handler(void) {
+//  BIOS ISRs
+// ~~~~~~~~~~
+// Similar to identifying the PICs controllers as primary and secondary (see
+// discussion in pic.cpp), the two BIOS Interrupt Service Routines (ISRs) are
+// given similar identifiers for the same reasons.
+
+static Bitu Default_IRQ_Handler()
+{
 	IO_WriteB(0x20,0x0b);
-	Bit8u master_isr=IO_ReadB(0x20);
-	if (master_isr) {
-		IO_WriteB(0xa0,0x0b);
-		Bit8u slave_isr=IO_ReadB(0xa0);
-		if (slave_isr) {
-			IO_WriteB(0xa1,IO_ReadB(0xa1)|slave_isr);
-			IO_WriteB(0xa0,0x20);
-		} else IO_WriteB(0x21,IO_ReadB(0x21)|(master_isr&~4));
-		IO_WriteB(0x20,0x20);
+	auto primary_isr = static_cast<uint8_t>(IO_ReadB(0x20));
+	if (primary_isr) {
+		IO_WriteB(0xa0, 0x0b);
+		const auto secondary_isr = static_cast<uint8_t>(IO_ReadB(0xa0));
+		if (secondary_isr) {
+			IO_WriteB(0xa1, IO_ReadB(0xa1) | secondary_isr);
+			IO_WriteB(0xa0, 0x20);
+		} else {
+			IO_WriteB(0x21, IO_ReadB(0x21) | (primary_isr & ~4));
+		}
+		IO_WriteB(0x20, 0x20);
 #if C_DEBUG
-		Bit16u irq=0,isr=master_isr;
-		if (slave_isr) isr=slave_isr<<8;
-		while (isr>>=1) irq++;
-		LOG(LOG_BIOS,LOG_WARN)("Unexpected IRQ %u",irq);
+		uint16_t irq = 0;
+		uint16_t isr = secondary_isr ? secondary_isr << 8 : primary_isr;
+		while (isr >>= 1)
+			irq++;
+		LOG(LOG_BIOS, LOG_WARN)("Unexpected IRQ %u", irq);
 #endif
-	} else master_isr=0xff;
-	mem_writeb(BIOS_LAST_UNEXPECTED_IRQ,master_isr);
+	} else {
+		primary_isr = 0xff;
+	}
+	mem_writeb(BIOS_LAST_UNEXPECTED_IRQ, primary_isr);
 	return CBRET_NONE;
 }
 
@@ -1038,6 +1091,12 @@ static Bitu Reboot_Handler(void) {
 	return CBRET_NONE;
 }
 
+void BIOS_SetEquipment(Bit16u equipment) {
+	mem_writew(BIOS_CONFIGURATION,equipment);
+	if (IS_EGAVGA_ARCH) equipment &= ~0x30; //EGA/VGA startup display mode differs in CMOS
+	CMOS_SetRegister(0x14,(Bit8u)(equipment&0xff)); //Should be updated on changes
+}
+
 void BIOS_ZeroExtendedSize(bool in) {
 	if(in) other_memsystems++; 
 	else other_memsystems--;
@@ -1047,7 +1106,7 @@ void BIOS_ZeroExtendedSize(bool in) {
 void BIOS_SetupKeyboard(void);
 void BIOS_SetupDisks(void);
 
-class BIOS:public Module_base{
+class BIOS final : public Module_base{
 private:
 	CALLBACK_HandlerObject callback[11];
 public:
@@ -1329,9 +1388,7 @@ public:
 		if (machine==MCH_PCJR) config |= 0x100;
 		// Gameport
 		config |= 0x1000;
-		mem_writew(BIOS_CONFIGURATION,config);
-		if (IS_EGAVGA_ARCH) config &= ~0x30; //EGA/VGA startup display mode differs in CMOS
-		CMOS_SetRegister(0x14,(Bit8u)(config&0xff)); //Should be updated on changes
+		BIOS_SetEquipment(config);
 		/* Setup extended memory size */
 		IO_Write(0x70,0x30);
 		size_extended=IO_Read(0x71);
@@ -1384,9 +1441,7 @@ void BIOS_SetComPorts(Bit16u baseaddr[]) {
 	equipmentword = mem_readw(BIOS_CONFIGURATION);
 	equipmentword &= (~0x0E00);
 	equipmentword |= (portcount << 9);
-	mem_writew(BIOS_CONFIGURATION,equipmentword);
-	if (IS_EGAVGA_ARCH) equipmentword &= ~0x30; //EGA/VGA startup display mode differs in CMOS
-	CMOS_SetRegister(0x14,(Bit8u)(equipmentword&0xff)); //Should be updated on changes
+	BIOS_SetEquipment(equipmentword);
 }
 
 //--Added 2012-10-19 by Alun Bestor as part of parallel port emulation

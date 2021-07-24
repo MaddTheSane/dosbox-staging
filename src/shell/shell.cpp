@@ -27,6 +27,7 @@
 #include "control.h"
 #include "dosbox.h"
 #include "fs_utils.h"
+#include "mapper.h"
 #include "regs.h"
 #include "string_utils.h"
 
@@ -216,23 +217,29 @@ Bitu DOS_Shell::GetRedirection(char *s, char **ifn, char **ofn, bool *append)
 			safe_strncpy(temp, *ofn, temp_len);
 			*ofn = temp;
 			continue;
+
 		case '<':
 			if (*ifn) {
 				delete[] * ifn;
 				*ifn = nullptr;
 			}
 			lr = ltrim(lr);
-			*ifn=lr;
-			while (*lr && *lr!=' ' && *lr!='>' && *lr != '|') lr++;
-			if((*ifn != lr) && (lr[-1] == ':')) lr[-1] = 0;
-			temp_len = static_cast<size_t>(lr - *ofn + 1u);
+			*ifn = lr;
+
+			while (*lr && *lr != ' ' && *lr != '>' && *lr != '|')
+				lr++;
+
+			if ((*ifn != lr) && (lr[-1] == ':'))
+				lr[-1] = 0;
+
+			assert(lr >= *ifn);
+			temp_len = static_cast<size_t>(lr - *ifn + 1u);
 			temp = new char[temp_len];
 			safe_strncpy(temp, *ifn, temp_len);
 			*ifn = temp;
 			continue;
-		case '|':
-			ch=0;
-			num++;
+
+		case '|': ch = 0; num++;
 		}
 		*lw++=ch;
 	}
@@ -363,15 +370,20 @@ void DOS_Shell::Run()
 		//--End of modifications
 		if (wants_welcome_banner) {
 			WriteOut(MSG_Get("SHELL_STARTUP_BEGIN"),
-			         DOSBOX_GetDetailedVersion());
+			         DOSBOX_GetDetailedVersion(), PRIMARY_MOD_NAME,
+			         PRIMARY_MOD_NAME, PRIMARY_MOD_PAD, PRIMARY_MOD_PAD,
+			         PRIMARY_MOD_NAME, PRIMARY_MOD_PAD);
 #if C_DEBUG
-			WriteOut(MSG_Get("SHELL_STARTUP_DEBUG"));
+			WriteOut(MSG_Get("SHELL_STARTUP_DEBUG"), MMOD2_NAME);
 #endif
 			if (machine == MCH_CGA) {
 				if (mono_cga)
-					WriteOut(MSG_Get("SHELL_STARTUP_CGA_MONO"));
+					WriteOut(MSG_Get("SHELL_STARTUP_CGA_MONO"),
+					         MMOD2_NAME);
 				else
-					WriteOut(MSG_Get("SHELL_STARTUP_CGA"));
+					WriteOut(MSG_Get("SHELL_STARTUP_CGA"),
+					         MMOD2_NAME, MMOD1_NAME,
+					         MMOD2_NAME, PRIMARY_MOD_PAD);
 			}
 			if (machine == MCH_HERC)
 				WriteOut(MSG_Get("SHELL_STARTUP_HERC"));
@@ -400,6 +412,8 @@ void DOS_Shell::Run()
 					}
 				}
 				ParseLine(input_line);
+			} else {
+				bf.reset();
 			}
 		} else {
 			//--Added 2009-11-29 by Alun Bestor as a hook for detecting when control has returned to the DOS prompt.
@@ -428,7 +442,7 @@ void DOS_Shell::SyntaxError()
 	WriteOut(MSG_Get("SHELL_SYNTAXERROR"));
 }
 
-class AUTOEXEC:public Module_base {
+class AUTOEXEC final : public Module_base {
 private:
 	AutoexecObject autoexec[17];
 	AutoexecObject autoexec_echo;
@@ -613,9 +627,7 @@ void SHELL_Init() {
 	MSG_Add("SHELL_ILLEGAL_PATH","Illegal Path.\n");
 	MSG_Add("SHELL_CMD_HELP","If you want a list of all supported commands type \033[33;1mhelp /all\033[0m .\nA short list of the most often used commands:\n");
 	MSG_Add("SHELL_CMD_ECHO_ON","ECHO is on.\n");
-	MSG_Add("SHELL_CMD_ECHO_OFF","ECHO is off.\n");
-	MSG_Add("SHELL_ILLEGAL_CONTROL_CHARACTER",
-	        "Unexpected control character: Dec %03u and Hex %#04x.\n");
+	MSG_Add("SHELL_CMD_ECHO_OFF", "ECHO is off.\n");
 	MSG_Add("SHELL_ILLEGAL_SWITCH","Illegal switch: %s.\n");
 	MSG_Add("SHELL_MISSING_PARAMETER","Required parameter missing.\n");
 	MSG_Add("SHELL_CMD_CHDIR_ERROR","Unable to change to: %s.\n");
@@ -674,23 +686,23 @@ void SHELL_Init() {
 	        "\xBA For a short introduction for new users type: \033[33mINTRO\033[37m                 \xBA\n"
 	        "\xBA For supported shell commands type: \033[33mHELP\033[37m                            \xBA\n"
 	        "\xBA                                                                    \xBA\n"
-	        "\xBA To adjust the emulated CPU speed, use \033[31mCtrl+F11\033[37m and \033[31mCtrl+F12\033[37m.       \xBA\n"
-	        "\xBA To activate the keymapper \033[31mCtrl+F1\033[37m.                                 \xBA\n"
+	        "\xBA To adjust the emulated CPU speed, use \033[31m%s+F11\033[37m and \033[31m%s+F12\033[37m.%s%s       \xBA\n"
+	        "\xBA To activate the keymapper \033[31m%s+F1\033[37m.%s                                 \xBA\n"
 	        "\xBA For more information read the \033[36mREADME\033[37m file in the DOSBox directory. \xBA\n"
 	        "\xBA                                                                    \xBA\n");
 	MSG_Add("SHELL_STARTUP_CGA",
 	        "\xBA DOSBox supports Composite CGA mode.                                \xBA\n"
 	        "\xBA Use \033[31mF12\033[37m to set composite output ON, OFF, or AUTO (default).        \xBA\n"
-	        "\xBA \033[31m(Alt+)F11\033[37m changes hue; \033[31mCtrl+Alt+F11\033[37m selects early/late CGA model.  \xBA\n"
+	        "\xBA \033[31m(%s+)F11\033[37m changes hue; \033[31m%s+%s+F11\033[37m selects early/late CGA model.%s  \xBA\n"
 	        "\xBA                                                                    \xBA\n");
 	MSG_Add("SHELL_STARTUP_CGA_MONO",
 	        "\xBA Use \033[31mF11\033[37m to cycle through green, amber, white and paper-white mode, \xBA\n"
-	        "\xBA and \033[31mAlt+F11\033[37m to change contrast/brightness settings.                \xBA\n");
+	        "\xBA and \033[31m%s+F11\033[37m to change contrast/brightness settings.                \xBA\n");
 	MSG_Add("SHELL_STARTUP_HERC",
 	        "\xBA Use \033[31mF11\033[37m to cycle through white, amber, and green monochrome color. \xBA\n"
 	        "\xBA                                                                    \xBA\n");
 	MSG_Add("SHELL_STARTUP_DEBUG",
-	        "\xBA Press \033[31mAlt+Pause\033[37m to enter the debugger or start the exe with \033[33mDEBUG\033[37m. \xBA\n"
+	        "\xBA Press \033[31m%s+Pause\033[37m to enter the debugger or start the exe with \033[33mDEBUG\033[37m. \xBA\n"
 	        "\xBA                                                                    \xBA\n");
 	MSG_Add("SHELL_STARTUP_END",
 	        "\xBA \033[33mhttps://dosbox-staging.github.io\033[37m                                   \xBA\n"
@@ -730,6 +742,7 @@ void SHELL_Init() {
 	MSG_Add("SHELL_CMD_ECHO_HELP","Display messages and enable/disable command echoing.\n");
 	MSG_Add("SHELL_CMD_EXIT_HELP","Exit from the shell.\n");
 	MSG_Add("SHELL_CMD_HELP_HELP","Show help.\n");
+	MSG_Add("SHELL_CMD_HELP_HELP_LONG","HELP [command]\n");
 	MSG_Add("SHELL_CMD_MKDIR_HELP","Make Directory.\n");
 	MSG_Add("SHELL_CMD_MKDIR_HELP_LONG","MKDIR [drive:][path]\n"
 	        "MD [drive:][path]\n");
@@ -750,6 +763,24 @@ void SHELL_Init() {
 	        "REN [drive:][path]filename1 filename2.\n\n"
 	        "Note that you can not specify a new drive or path for your destination file.\n");
 	MSG_Add("SHELL_CMD_DELETE_HELP","Removes one or more files.\n");
+	MSG_Add("SHELL_CMD_DELETE_HELP_LONG", "Usage:\n"
+	        "  \033[32;1mdel\033[0m \033[36;1mPATTERN\033[0m\n"
+	        "  \033[32;1merase\033[0m \033[36;1mPATTERN\033[0m\n"
+	        "\n"
+	        "Where:\n"
+	        "  \033[36;1mPATTERN\033[0m can be either an exact filename (such as \033[36;1mfile.txt\033[0m) or an inexact\n"
+	        "          filename using one or more wildcards, which are the asterisk (*)\n"
+	        "          representing any sequence of one or more characters, and the question\n"
+	        "          mark (?) representing any single character, such as \033[36;1m*.bat\033[0m and \033[36;1mc?.txt\033[0m.\n"
+	        "\n"
+	        "Warning:\n"
+	        "  Be careful when using a pattern with wildcards, especially \033[36;1m*.*\033[0m, as all files\n"
+	        "  matching the pattern will be deleted.\n"
+	        "\n"
+	        "Examples:\n"
+	        "  \033[32;1mdel\033[0m \033[36;1mtest.bat\033[0m\n"
+	        "  \033[32;1mdel\033[0m \033[36;1mc*.*\033[0m\n"
+	        "  \033[32;1mdel\033[0m \033[36;1ma?b.c*\033[0m\n");
 	MSG_Add("SHELL_CMD_COPY_HELP","Copy files.\n");
 	MSG_Add("SHELL_CMD_CALL_HELP","Start a batch file from within another batch file.\n");
 	MSG_Add("SHELL_CMD_SUBST_HELP","Assign an internal directory to a drive.\n");
