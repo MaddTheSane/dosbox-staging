@@ -195,7 +195,8 @@ Bitu PS2_Handler(void) {
 #define MOUSE_MIDDLE_RELEASED 64
 #define MOUSE_DELAY 5.0
 
-void MOUSE_Limit_Events(Bitu /*val*/) {
+void MOUSE_Limit_Events(uint32_t /*val*/)
+{
 	mouse.timer_in_progress = false;
 	if (mouse.events) {
 		mouse.timer_in_progress = true;
@@ -841,6 +842,10 @@ static Bitu INT33_Handler(void) {
 		}
 		DrawCursor();
 		break;
+	case 0x27:	/* Get Screen/Cursor Masks and Mickey Counts */
+		reg_ax=mouse.textAndMask;
+		reg_bx=mouse.textXorMask;
+		FALLTHROUGH;
 	case 0x0b:	/* Read Motion Data */
 		reg_cx=static_cast<Bit16s>(mouse.mickey_x);
 		reg_dx=static_cast<Bit16s>(mouse.mickey_y);

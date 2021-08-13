@@ -10,39 +10,82 @@ env:
 
 jobs:
   build_macos:
-    name: ${{ matrix.conf.name }}
-    runs-on: macos-latest
-    if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier', github.actor) == false
+    name: ${{ matrix.conf.name }} (${{ matrix.conf.arch }})
+    runs-on: ${{ matrix.conf.host }}
+    if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier,kklobe', github.actor) == false
     strategy:
-      max-parallel: 3
+      fail-fast: false
       matrix:
         conf:
-
           - name: Clang
+            host: macos-latest
+            arch: x86_64
+            needs_deps: true
             packages: meson
             max_warnings: 0
 
-          - name: GCC
-            packages: gcc@9
-            build_flags: --native-file=.github/meson/native-gcc-9.ini
+          - name: GCC 11
+            host: macos-latest
+            arch: x86_64
+            needs_deps: true
+            packages: gcc@11
+            build_flags: --native-file=.github/meson/native-gcc-11.ini
             max_warnings: 0
 
           - name: Clang, +tests
+            host: macos-latest
+            arch: x86_64
+            needs_deps: true
             run_tests: true
             max_warnings: -1
 
           - name: Clang, +debugger
+            host: macos-latest
+            arch: x86_64
+            needs_deps: true
             build_flags: -Denable_debugger=normal
             max_warnings: 108
 
           - name: Clang, warning_level=3
+            host: macos-latest
+            arch: x86_64
+            needs_deps: true
             build_flags: -Dwarning_level=3
-            max_warnings: 179
+            max_warnings: 180
+
+          - name: Clang
+            host: [self-hosted, macOS, arm64, debug-builds]
+            arch: arm64
+            needs_deps: false
+            packages: meson
+            max_warnings: 0
+
+          - name: Clang, +tests
+            host: [self-hosted, macOS, arm64, debug-builds]
+            arch: arm64
+            needs_deps: false
+            run_tests: true
+            max_warnings: -1
+
+          - name: Clang, +debugger
+            host: [self-hosted, macOS, arm64, debug-builds]
+            arch: arm64
+            needs_deps: false
+            build_flags: -Denable_debugger=normal
+            max_warnings: -142
+
+          - name: Clang, warning_level=3
+            host: [self-hosted, macOS, arm64, debug-builds]
+            arch: arm64
+            needs_deps: false
+            build_flags: -Dwarning_level=3
+            max_warnings: 194
 
     steps:
       - uses: actions/checkout@v2
 
       - name:  Prepare brew and compiler caches
+        if:    matrix.conf.needs_deps
         id:    prep-caches
         shell: bash
         run: |
@@ -55,21 +98,24 @@ jobs:
           echo "::set-output name=brew_dir::$BREW_DIR"
           echo "::set-output name=ccache_dir::$CCACHE_DIR"
           echo "::set-output name=today::$(date +%F)"
-          echo "::set-output name=name_hash::$(echo '${{ matrix.conf.name }}' | shasum | cut -b-8)"
+          echo "::set-output name=name_hash::$(echo '${{ matrix.conf.name }} ${{ matrix.conf.arch }}' | shasum | cut -b-8)"
 
       - uses:  actions/cache@v2
+        if:    matrix.conf.needs_deps
         with:
           path: ${{ steps.prep-caches.outputs.brew_dir }}
-          key:  brew-cache-${{ steps.prep-caches.outputs.today }}
-          restore-keys: brew-cache-
+          key:  brew-cache-${{ matrix.conf.arch }}-${{ steps.prep-caches.outputs.today }}
+          restore-keys: brew-cache-${{ matrix.conf.arch }}-
 
       - name: Install C++ compiler and libraries
+        if:   matrix.conf.needs_deps
         run: |
-          brew install \
+          arch -arch=${{ matrix.conf.arch }} brew install \
             ${{ matrix.conf.packages }} \
             $(cat ./.github/packages/macos-latest-brew.txt)
 
       - uses:  actions/cache@v2
+        if:    matrix.conf.needs_deps
         with:
           path: ${{ steps.prep-caches.outputs.ccache_dir }}
           key:  ccache-macos-debug-${{ steps.prep-caches.outputs.name_hash }}-${{ steps.prep-caches.outputs.today }}
@@ -84,34 +130,46 @@ jobs:
           key:  subprojects-${{ hashFiles('subprojects/*.wrap') }}
 
       - name: Log environment
-        run:  ./scripts/log-env.sh
+        run:  arch -arch=${{ matrix.conf.arch }} ./scripts/log-env.sh
 
-      - run:  meson setup ${{ matrix.conf.build_flags }} build
+      - run:  arch -arch=${{ matrix.conf.arch }} meson setup ${{ matrix.conf.build_flags }} build
 
       - name: Build
         run: |
           set -xo pipefail
-          meson compile -C build 2>&1 | tee build.log
+          arch -arch=${{ matrix.conf.arch }} meson compile -C build 2>&1 | tee build.log
 
       - name: Run tests
         if:   matrix.conf.run_tests
-        run:  meson test -C build --print-errorlogs
+        run:  arch -arch=${{ matrix.conf.arch }} meson test -C build --print-errorlogs
 
       - name: Summarize warnings
         if:   matrix.conf.run_tests != true
         env:
           MAX_WARNINGS: ${{ matrix.conf.max_warnings }}
-        run:  python3 ./scripts/count-warnings.py -lf build.log
-
+        run:  arch -arch=${{ matrix.conf.arch }} python3 ./scripts/count-warnings.py -lf build.log
 
   build_macos_release:
-    name: Release build
-    runs-on: macos-latest
-    if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier', github.actor) == false
+    name: Release build (${{ matrix.runner.arch }})
+    runs-on: ${{ matrix.runner.host }}
+    if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier,kklobe', github.actor) == false
+
+    strategy:
+      matrix:
+        runner:
+          - host: macos-latest
+            arch: x86_64
+            needs_deps: true
+
+          - host: [self-hosted, macOS, arm64, release-builds]
+            arch: arm64
+            needs_deps: false
+
     steps:
       - uses: actions/checkout@v2
 
       - name:  Prepare brew and compiler caches
+        if:    matrix.runner.needs_deps
         id:    prep-caches
         shell: bash
         run: |
@@ -126,21 +184,24 @@ jobs:
           echo "::set-output name=today::$(date +%F)"
 
       - uses:  actions/cache@v2
+        if:    matrix.runner.needs_deps
         with:
           path: ${{ steps.prep-caches.outputs.brew_dir }}
-          key:  brew-cache-${{ steps.prep-caches.outputs.today }}
-          restore-keys: brew-cache-
+          key:  brew-cache-${{ matrix.runner.arch }}-${{ steps.prep-caches.outputs.today }}
+          restore-keys: brew-cache-${{ matrix.runner.arch }}-
 
       - name: Install C++ compiler and libraries
+        if:   matrix.runner.needs_deps
         run: |
-          brew install librsvg tree \
+          arch -arch=${{ matrix.runner.arch }} brew install librsvg tree \
             $(cat ./.github/packages/macos-latest-brew.txt)
 
       - uses:  actions/cache@v2
+        if:    matrix.runner.needs_deps
         with:
           path: ${{ steps.prep-caches.outputs.ccache_dir }}
-          key:  ccache-macos-release-${{ steps.prep-caches.outputs.today }}
-          restore-keys: ccache-macos-release-
+          key:  ccache-macos-release-${{ matrix.runner.arch }}-${{ steps.prep-caches.outputs.today }}
+          restore-keys: ccache-macos-release-${{ matrix.runner.arch }}-
 
       - name:  Cache subprojects
         uses:  actions/cache@v2
@@ -149,7 +210,7 @@ jobs:
           key:  subprojects-${{ hashFiles('subprojects/*.wrap') }}
 
       - name: Log environment
-        run:  ./scripts/log-env.sh
+        run:  arch -arch=${{ matrix.runner.arch }} ./scripts/log-env.sh
 
       - name: Inject version string
         run: |
@@ -160,7 +221,7 @@ jobs:
 
       - name: Setup release build
         run: |
-          meson setup \
+          arch -arch=${{ matrix.runner.arch }} meson setup \
             --wrap-mode=forcefallback \
             -Dbuildtype=release \
             -Ddefault_library=static \
@@ -172,7 +233,7 @@ jobs:
             build
 
       - name: Build
-        run:  ninja -C build
+        run:  arch -arch=${{ matrix.runner.arch }} ninja -C build
 
       - name: Package
         run: |
@@ -225,15 +286,17 @@ jobs:
           install -m 644 contrib/translations/pl/pl_PL.CP437.lng "$dst_lng/pl.cp437.lng"
           install -m 644 contrib/translations/pl/pl_PL.lng       "$dst_lng/pl.lng"
           install -m 644 contrib/translations/ru/ru_RU.lng       "$dst_lng/ru.lng"
-
           ln -s /Applications dist/
 
+          codesign -s "-" dist/dosbox-staging.app --force --deep -v
+          
           hdiutil create \
               -volname "dosbox-staging" \
               -srcfolder dist \
               -ov -format UDZO "dosbox-staging-macOS-${{ env.VERSION }}.dmg"
 
       - name:  Install Clam AV
+        if:    matrix.runner.needs_deps
         id:    prep-clamdb
         shell: bash
         run: |
@@ -243,7 +306,9 @@ jobs:
           sed -ie 's/^Example/#Example/g' "$clamconf"
           sed -ie 's/30/20000/g' "$clamconf"
           echo "::set-output name=today::$(date +%F)"
+
       - uses:  actions/cache@v2
+        if:    matrix.runner.needs_deps
         id:    cache-clamdb
         with:
           path: ${{ env.CLAMDB_DIR }}/**/*.cvd
@@ -262,9 +327,8 @@ jobs:
         # GitHub automatically zips the artifacts, and there's no option
         # to skip it or upload a file only.
         with:
-          name: dosbox-staging-macOS-x86_64
+          name: dosbox-staging-macOS-${{ matrix.runner.arch }}
           path: dosbox-staging-macOS-${{ env.VERSION }}.dmg
-
 
   # This job exists only to publish an artifact with version info when building
   # from master branch, so snapshot build version will be visible on:
@@ -273,7 +337,7 @@ jobs:
   publish_additional_artifacts:
     name: Publish additional artifacts
     needs: build_macos_release
-    runs-on: macos-latest
+    runs-on: [macos-latest, self-hosted]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v2

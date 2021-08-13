@@ -21,6 +21,8 @@
 
 #include "types.h"
 
+#define REDUCE_JOYSTICK_POLLING
+
 typedef enum {
 	GFX_CallBackReset,
 	GFX_CallBackStop,
@@ -52,7 +54,7 @@ typedef void (*GFX_CallBack_t)( GFX_CallBackFunctions_t function );
 // return code of:
 // - true means event loop can keep running.
 // - false means event loop wants to quit.
-bool GFX_MaybeProcessEvents();
+bool GFX_Events();
 
 Bitu GFX_GetBestMode(Bitu flags);
 Bitu GFX_GetRGB(Bit8u red,Bit8u green,Bit8u blue);
@@ -71,6 +73,8 @@ void GFX_EndUpdate( const Bit16u *changedLines );
 void GFX_GetSize(int &width, int &height, bool &fullscreen);
 void GFX_LosingFocus(void);
 
+#if defined (REDUCE_JOYSTICK_POLLING)
 void MAPPER_UpdateJoysticks(void);
+#endif
 
 #endif

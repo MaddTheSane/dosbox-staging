@@ -74,7 +74,7 @@ device_LPT::~device_LPT() {
 	//LOG_MSG("del");
 }
 
-static void Parallel_EventHandler(Bitu val) {
+static void Parallel_EventHandler(uint32_t val) {
 	Bitu serclassid=val&0x3;
 	if(parallelPortObjects[serclassid]!=0)
 		parallelPortObjects[serclassid]->handleEvent(val>>2);

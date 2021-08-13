@@ -136,7 +136,7 @@ static bool Tandy_TransferInProgress(void) {
 }
 
 static void Tandy_SetupTransfer(PhysPt bufpt,bool isplayback) {
-	Bitu length=real_readw(0x40,0xd0);
+	const auto length=real_readw(0x40,0xd0);
 	if (length==0) return;	/* nothing to do... */
 
 	if ((tandy_sb.port==0) && (tandy_dac.port==0)) return;
@@ -177,10 +177,10 @@ static void Tandy_SetupTransfer(PhysPt bufpt,bool isplayback) {
 	IO_Write(tandy_dma*2,(Bit8u)(bufpt&0xff));
 	IO_Write(tandy_dma*2,(Bit8u)((bufpt>>8)&0xff));
 	switch (tandy_dma) {
-		case 0: IO_Write(0x87,bufpage); break;
-		case 1: IO_Write(0x83,bufpage); break;
-		case 2: IO_Write(0x81,bufpage); break;
-		case 3: IO_Write(0x82,bufpage); break;
+	case 0: IO_Write(0x87, bufpage); break;
+	case 1: IO_Write(0x83, bufpage); break;
+	case 2: IO_Write(0x81, bufpage); break;
+	case 3: IO_Write(0x82, bufpage); break;
 	}
 	real_writeb(0x40,0xd4,bufpage);
 
@@ -273,7 +273,7 @@ static Bitu IRQ_TandyDAC(void) {
 static void TandyDAC_Handler(Bit8u tfunction) {
 	if ((!tandy_sb.port) && (!tandy_dac.port)) return;
 	switch (tfunction) {
-	case 0x81:	/* Tandy sound system check */
+	case 0x81: /* Tandy sound system check */
 		if (tandy_dac.port) {
 			reg_ax=tandy_dac.port;
 		} else {
@@ -318,15 +318,15 @@ static void TandyDAC_Handler(Bit8u tfunction) {
 
 static Bitu INT1A_Handler(void) {
 	switch (reg_ah) {
-	case 0x00:	/* Get System time */
-		{
-			Bit32u ticks=mem_readd(BIOS_TIMER);
-			reg_al=mem_readb(BIOS_24_HOURS_FLAG);
-			mem_writeb(BIOS_24_HOURS_FLAG,0); // reset the "flag"
-			reg_cx=(Bit16u)(ticks >> 16);
-			reg_dx=(Bit16u)(ticks & 0xffff);
-			break;
-		}
+	case 0x00: /* Get System time */
+	{
+		Bit32u ticks = mem_readd(BIOS_TIMER);
+		reg_al = mem_readb(BIOS_24_HOURS_FLAG);
+		mem_writeb(BIOS_24_HOURS_FLAG, 0); // reset the "flag"
+		reg_cx = (Bit16u)(ticks >> 16);
+		reg_dx = (Bit16u)(ticks & 0xffff);
+		break;
+	}
 	case 0x01:	/* Set System time */
 		mem_writed(BIOS_TIMER,(reg_cx<<16)|reg_dx);
 		break;
@@ -365,45 +365,49 @@ static Bitu INT1A_Handler(void) {
 		LOG(LOG_BIOS,LOG_WARN)("INT1A:PCI bios call %2X",reg_al);
 #if defined(PCI_FUNCTIONALITY_ENABLED)
 		switch (reg_al) {
-			case 0x01:	// installation check
-				if (PCI_IsInitialized()) {
-					reg_ah=0x00;
-					reg_al=0x01;	// cfg space mechanism 1 supported
-					reg_bx=0x0210;	// ver 2.10
-					reg_cx=0x0000;	// only one PCI bus
-					reg_edx=0x20494350;
-					reg_edi=PCI_GetPModeInterface();
-					CALLBACK_SCF(false);
-				} else {
-					CALLBACK_SCF(true);
-				}
-				break;
-			case 0x02: {	// find device
-				Bitu devnr=0;
-				Bitu count=0x100;
-				Bit32u devicetag=(reg_cx<<16)|reg_dx;
-				Bits found=-1;
-				for (Bitu i=0; i<=count; i++) {
-					IO_WriteD(0xcf8,0x80000000|(i<<8));	// query unique device/subdevice entries
-					if (IO_ReadD(0xcfc)==devicetag) {
-						if (devnr==reg_si) {
-							found=i;
-							break;
-						} else {
-							// device found, but not the SIth device
-							devnr++;
-						}
+		case 0x01: // installation check
+			if (PCI_IsInitialized()) {
+				reg_ah = 0x00;
+				reg_al = 0x01; // cfg space mechanism 1 supported
+				reg_bx = 0x0210; // ver 2.10
+				reg_cx = 0x0000; // only one PCI bus
+				reg_edx = 0x20494350;
+				reg_edi = PCI_GetPModeInterface();
+				CALLBACK_SCF(false);
+			} else {
+				CALLBACK_SCF(true);
+			}
+			break;
+		case 0x02: { // find device
+			Bitu devnr = 0;
+			Bitu count = 0x100;
+			Bit32u devicetag = (reg_cx << 16) | reg_dx;
+			Bits found = -1;
+			for (Bitu i = 0; i <= count; i++) {
+				IO_WriteD(0xcf8, 0x80000000 | (i << 8)); // query
+				                                         // unique
+				                                         // device/subdevice
+				                                         // entries
+				if (IO_ReadD(0xcfc) == devicetag) {
+					if (devnr == reg_si) {
+						found = i;
+						break;
+					} else {
+						// device found, but not the
+						// SIth device
+						devnr++;
 					}
 				}
-				if (found>=0) {
-					reg_ah=0x00;
-					reg_bh=0x00;	// bus 0
-					reg_bl=(Bit8u)(found&0xff);
-					CALLBACK_SCF(false);
-				} else {
-					reg_ah=0x86;	// device not found
-					CALLBACK_SCF(true);
-				}
+			}
+			if (found >= 0) {
+				reg_ah = 0x00;
+				reg_bh = 0x00; // bus 0
+				reg_bl = (Bit8u)(found & 0xff);
+				CALLBACK_SCF(false);
+			} else {
+				reg_ah = 0x86; // device not found
+				CALLBACK_SCF(true);
+			}
 				}
 				break;
 			case 0x03: {	// find device by class code
@@ -472,7 +476,7 @@ static Bitu INT1A_Handler(void) {
 					reg_ax,reg_bx,reg_cx,reg_dx);
 				CALLBACK_SCF(true);
 				break;
-		}
+		        }
 #else
 		CALLBACK_SCF(true);
 #endif
@@ -552,7 +556,9 @@ static Bitu INT8_Handler(void) {
 			check = false;
 			time_t curtime;struct tm *loctime;
 			curtime = time (NULL);loctime = localtime (&curtime);
-			Bit32u ticksnu = (Bit32u)((loctime->tm_hour*3600+loctime->tm_min*60+loctime->tm_sec)*(float)PIT_TICK_RATE/65536.0);
+			Bit32u ticksnu = (Bit32u)((loctime->tm_hour * 3600 +
+			                           loctime->tm_min * 60 + loctime->tm_sec) *
+			                          (double)PIT_TICK_RATE / 65536.0);
 			Bit32s bios = value;Bit32s tn = ticksnu;
 			Bit32s diff = tn - bios;
 			if(diff>0) {
@@ -618,8 +624,8 @@ static Bitu INT17_Handler(void) {
 //--End of modifications
 
 static bool INT14_Wait(Bit16u port, Bit8u mask, Bit8u timeout, Bit8u* retval) {
-	double starttime = PIC_FullIndex();
-	double timeout_f = timeout * 1000.0;
+	const auto starttime = PIC_FullIndex();
+	const auto timeout_f = timeout * 1000.0;
 	while (((*retval = IO_ReadB(port)) & mask) != mask) {
 		if (starttime < (PIC_FullIndex() - timeout_f)) {
 			return false;
@@ -642,8 +648,8 @@ static Bitu INT14_Handler(void) {
 		LOG(LOG_BIOS,LOG_NORMAL)("BIOS INT14: port %d does not exist.",reg_dx);
 		return CBRET_NONE;
 	}
-	switch (reg_ah)	{
-	case 0x00:	{
+	switch (reg_ah) {
+	case 0x00: {
 		// Initialize port
 		// Parameters:				Return:
 		// AL: port parameters		AL: modem status
@@ -734,7 +740,6 @@ static Bitu INT14_Handler(void) {
 		reg_al=(Bit8u)(IO_ReadB(port+6)&0xff);
 		CALLBACK_SCF(false);
 		break;
-
 	}
 	return CBRET_NONE;
 }
@@ -742,7 +747,7 @@ static Bitu INT14_Handler(void) {
 static Bitu INT15_Handler(void) {
 	static Bit16u biosConfigSeg=0;
 	switch (reg_ah) {
-	case 0x24:		//A20 stuff
+	case 0x24: // A20 stuff
 		switch (reg_al) {
 		case 0:	//Disable a20
 			MEM_A20_Enable(false);
@@ -886,14 +891,16 @@ static Bitu INT15_Handler(void) {
 				break;
 			}
 			Bit32u count=(reg_cx<<16)|reg_dx;
-			double timeout=PIC_FullIndex()+((double)count/1000.0)+1.0;
-			mem_writed(BIOS_WAIT_FLAG_POINTER,RealMake(0,BIOS_WAIT_FLAG_TEMP));
-			mem_writed(BIOS_WAIT_FLAG_COUNT,count);
-			mem_writeb(BIOS_WAIT_FLAG_ACTIVE,1);
-			/* Unmask IRQ 8 if masked */
-			Bit8u mask=IO_Read(0xa1);
-			if (mask&1) IO_Write(0xa1,mask&~1);
-			/* Reprogram RTC to start */
+		        const auto timeout = PIC_FullIndex() +
+		                             static_cast<double>(count) / 1000.0 + 1.0;
+		        mem_writed(BIOS_WAIT_FLAG_POINTER, RealMake(0, BIOS_WAIT_FLAG_TEMP));
+		        mem_writed(BIOS_WAIT_FLAG_COUNT, count);
+		        mem_writeb(BIOS_WAIT_FLAG_ACTIVE, 1);
+		        /* Unmask IRQ 8 if masked */
+		        Bit8u mask = IO_Read(0xa1);
+		        if (mask & 1)
+			        IO_Write(0xa1, mask & ~1);
+		        /* Reprogram RTC to start */
 			IO_Write(0x70,0xb);
 			IO_Write(0x71,IO_Read(0x71)|0x40);
 			while (mem_readd(BIOS_WAIT_FLAG_COUNT)) {
@@ -956,7 +963,7 @@ static Bitu INT15_Handler(void) {
 		break;
 	case 0xc2:	/* BIOS PS2 Pointing Device Support */
 		switch (reg_al) {
-		case 0x00:		// enable/disable
+		case 0x00:                      // enable/disable
 			if (reg_bh==0) {	// disable
 				Mouse_SetPS2State(false);
 				reg_ah=0;
@@ -1075,18 +1082,20 @@ static Bitu Default_IRQ_Handler()
 
 static Bitu Reboot_Handler(void) {
 	// switch to text mode, notify user (let's hope INT10 still works)
-	const char* const text = "\n\n   Reboot requested, quitting now.";
 	reg_ax = 0;
 	CALLBACK_RunRealInt(0x10);
 	reg_ah = 0xe;
 	reg_bx = 0;
-	for(Bitu i = 0; i < strlen(text);i++) {
-		reg_al = text[i];
+
+	constexpr char text[] = "\n\n   Reboot requested, quitting now.";
+	for (const auto c : text) {
+		reg_al = static_cast<uint8_t>(c);
 		CALLBACK_RunRealInt(0x10);
 	}
 	LOG_MSG(text);
-	double start = PIC_FullIndex();
-	while((PIC_FullIndex()-start)<3000) CALLBACK_Idle();
+	const auto start = PIC_FullIndex();
+	while ((PIC_FullIndex() - start) < 3000.0)
+		CALLBACK_Idle();
 	throw 1;
 	return CBRET_NONE;
 }
@@ -1239,19 +1248,21 @@ public:
 		else phys_writeb(0xffffe,0xfc);	/* PC */
 
 		// System BIOS identification
-		const char* const b_type =
-			"IBM COMPATIBLE 486 BIOS COPYRIGHT The DOSBox Team.";
-		for(Bitu i = 0; i < strlen(b_type); i++) phys_writeb(0xfe00e + i,b_type[i]);
-		
+		uint16_t i = 0;
+		for (const auto c : "IBM COMPATIBLE 486 BIOS COPYRIGHT The DOSBox Team.")
+			phys_writeb(0xfe00e + i++, static_cast<uint8_t>(c));
+
 		// System BIOS version
-		const char* const b_vers =
-			"DOSBox FakeBIOS v1.0";
-		for(Bitu i = 0; i < strlen(b_vers); i++) phys_writeb(0xfe061+i,b_vers[i]);
+		i = 0;
+		for (const auto c : "DOSBox FakeBIOS v1.0")
+			phys_writeb(0xfe061 + i++, static_cast<uint8_t>(c));
 
 		// write system BIOS date
-		const char* const b_date = "01/01/92";
-		for(Bitu i = 0; i < strlen(b_date); i++) phys_writeb(0xffff5+i,b_date[i]);
-		phys_writeb(0xfffff,0x55); // signature
+		i = 0;
+		for (const auto c : "01/01/92")
+			phys_writeb(0xffff5 + i++, static_cast<uint8_t>(c));
+
+		phys_writeb(0xfffff, 0x55); // signature
 
 		tandy_sb.port=0;
 		tandy_dac.port=0;
@@ -1292,7 +1303,9 @@ public:
 
 				RealPt current_irq=RealGetVec(tandy_irq_vector);
 				real_writed(0x40,0xd6,current_irq);
-				for (Bit16u i=0; i<0x10; i++) phys_writeb(PhysMake(0xf000,0xa084+i),0x80);
+				for (i = 0; i < 0x10; i++)
+					phys_writeb(PhysMake(0xf000, 0xa084 + i),
+					            0x80);
 			} else real_writeb(0x40,0xd4,0x00);
 		}
 	

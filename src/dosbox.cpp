@@ -151,10 +151,10 @@ int ticksDone;
 int ticksScheduled;
 bool ticksLocked;
 void increaseticks();
+
 bool mono_cga=false;
 
-static Bitu Normal_Loop()
-{
+static Bitu Normal_Loop(void) {
 	Bits ret;
 	while (1) {
 		//--Added 2009-12-27 by Alun Bestor to short-circuit the emulation loop when we need to
@@ -173,7 +173,7 @@ static Bitu Normal_Loop()
 			if (DEBUG_ExitLoop()) return 0;
 #endif
 		} else {
-			if (!GFX_MaybeProcessEvents()) {
+			if (!GFX_Events()) {
 				return 0;
 			}
 			//--Check again at this point in case our own events have cancelled the emulation.
@@ -182,10 +182,7 @@ static Bitu Normal_Loop()
 			if (ticksRemain > 0) {
 				TIMER_AddTick();
 				ticksRemain--;
-			} else {
-				increaseticks();
-				return 0;
-			}
+			} else {increaseticks();return 0;}
 		}
 	}
 }
@@ -623,19 +620,23 @@ void DOSBOX_Init(void) {
 	Pbool = secprop->Add_bool("nosound",Property::Changeable::OnlyAtStart,false);
 	Pbool->Set_help("Enable silent mode, sound is still emulated though.");
 
-	Pint = secprop->Add_int("rate",Property::Changeable::OnlyAtStart,44100);
+	Pint = secprop->Add_int("rate", only_at_start, 48000);
 	Pint->Set_values(rates);
 	Pint->Set_help("Mixer sample rate, setting any device's rate higher than this will probably lower their sound quality.");
 
-	const char *blocksizes[] = {
-		 "1024", "2048", "4096", "8192", "512", "256", 0};
-	Pint = secprop->Add_int("blocksize",Property::Changeable::OnlyAtStart,1024);
-	Pint->Set_values(blocksizes);
-	Pint->Set_help("Mixer block size, larger blocks might help sound stuttering but sound will also be more lagged.");
+	Pint = secprop->Add_int("blocksize", deprecated, 1024);
+	Pint->Set_help("This property is deprecated, use latency instead.");
 
-	Pint = secprop->Add_int("prebuffer",Property::Changeable::OnlyAtStart,25);
-	Pint->SetMinMax(0,100);
-	Pint->Set_help("How many milliseconds of data to keep on top of the blocksize.");
+	Pint = secprop->Add_int("prebuffer", deprecated, 25);
+	Pint->Set_help("This property is deprecated, use latency instead.");
+
+	Pint = secprop->Add_int("latency", only_at_start, 15);
+	Pint->SetMinMax(1, 100);
+	Pint->Set_help("Desired audio latency in milliseconds. Range is 1-100.");
+
+	Pbool = secprop->Add_bool("negotiate", only_at_start, true);
+	Pbool->Set_help("Allow system audio driver to negotiate optimal rate and latency\n"
+	                "as close to the specified values as possible.");
 
 	secprop = control->AddSection_prop("midi", &MIDI_Init, true);
 	secprop->AddInitFunction(&MPU401_Init, true);
@@ -820,7 +821,7 @@ void DOSBOX_Init(void) {
 	Pstring->Set_values(tandys);
 	Pstring->Set_help("Enable Tandy Sound System emulation. For 'auto', emulation is present only if machine is set to 'tandy'.");
 
-	Pint = secprop->Add_int("tandyrate",Property::Changeable::WhenIdle,44100);
+	Pint = secprop->Add_int("tandyrate", Property::Changeable::WhenIdle, 44100);
 	Pint->Set_values(rates);
 	Pint->Set_help("Sample rate of the Tandy 3-Voice generation.");
 
@@ -838,18 +839,22 @@ void DOSBOX_Init(void) {
 	secprop->AddInitFunction(&INT10_Init);
 	secprop->AddInitFunction(&MOUSE_Init); //Must be after int10 as it uses CurMode
 	secprop->AddInitFunction(&JOYSTICK_Init,true);
-	const char* joytypes[] = { "auto", "2axis", "4axis", "4axis_2", "fcs", "ch", "none",0};
-	Pstring = secprop->Add_string("joysticktype",Property::Changeable::WhenIdle,"auto");
+	const char *joytypes[] = {"auto", "2axis", "4axis",    "4axis_2", "fcs",
+	                          "ch",   "none",  "disabled", 0};
+	Pstring = secprop->Add_string("joysticktype",
+	                              Property::Changeable::WhenIdle, "auto");
 	Pstring->Set_values(joytypes);
 	Pstring->Set_help(
-		"Type of joystick to emulate: auto (default),\n"
-		"none (disables joystick emulation),\n"
-		"2axis (supports two joysticks),\n"
-		"4axis (supports one joystick, first joystick used),\n"
-		"4axis_2 (supports one joystick, second joystick used),\n"
-		"fcs (Thrustmaster), ch (CH Flightstick).\n"
-		"auto chooses emulation depending on real joystick(s).\n"
-		"(Remember to reset DOSBox's mapperfile if you saved it earlier)");
+	        "Type of joystick to emulate: auto (default),\n"
+	        "auto    : Detect and use any joystick(s), if possible.,\n"
+	        "2axis   : Support up to two joysticks.\n"
+	        "4axis   : Support the first joystick only.\n"
+	        "4axis_2 : support the second joystick only.\n"
+	        "fcs     : support a Thrustmaster-type joystick.\n"
+	        "ch      : support a CH Flightstick-type joystick.\n"
+	        "none    : Prevent DOS from seeing the joystick(s), but enable them for mapping.\n"
+	        "disabled: Fully disable joysticks: won't be polled, mapped, or visible in DOS.\n"
+	        "(Remember to reset DOSBox's mapperfile if you saved it earlier)");
 
 	Pbool = secprop->Add_bool("timed",Property::Changeable::WhenIdle,true);
 	Pbool->Set_help("enable timed intervals for axis. Experiment with this option, if your joystick drifts (away).");

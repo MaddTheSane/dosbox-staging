@@ -29,7 +29,7 @@
 //--End of modifications
 
 #define KEYBUFSIZE 32
-#define KEYDELAY 0.300f			//Considering 20-30 khz serial clock and 11 bits/char
+#define KEYDELAY   0.300 // Considering 20-30 khz serial clock and 11 bits/char
 
 enum KeyCommands {
 	CMD_NONE,
@@ -62,7 +62,8 @@ static void KEYBOARD_SetPort60(Bit8u val) {
 	else PIC_ActivateIRQ(1);
 }
 
-static void KEYBOARD_TransferBuffer(Bitu /*val*/) {
+static void KEYBOARD_TransferBuffer(uint32_t /*val*/)
+{
 	keyb.scheduled = false;
 	if (!keyb.used) {
 		LOG(LOG_KEYBOARD,LOG_NORMAL)("Transfer started with empty buffer");

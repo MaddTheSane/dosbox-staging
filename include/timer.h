@@ -29,7 +29,15 @@
 
 /* underlying clock rate in HZ */
 
-#define PIT_TICK_RATE 1193182
+constexpr int PIT_TICK_RATE = 1193182;
+
+// Short-hand unit conversions
+constexpr auto PIT_TICK_RATE_KHZ = static_cast<double>(PIT_TICK_RATE) / 1000.0;
+// The rate at which a repeating event occurs is the frequency, measured in Hertz.
+
+// The inverse of frequency is the time between events, called 'period'.
+// In this case, we want the period of every 1000 PIT tick events.
+constexpr auto PERIOD_OF_1K_PIT_TICKS = 1000.0 / static_cast<double>(PIT_TICK_RATE);
 
 typedef void (*TIMER_TickHandler)(void);
 
@@ -93,34 +101,34 @@ static constexpr int precise_delay_duration_us = 100;
 static inline void DelayPrecise(const int milliseconds)
 {
 	// The estimate of how long the sleep should take (microseconds)
-	static double estimate = 5e-5;
+	static auto estimate = 5e-5;
 	// Use the estimate value as the default mean time taken
-	static double mean = 5e-5;
-	static double m2 = 0;
+	static auto mean = 5e-5;
+	static auto m2 = 0.0;
 	static int64_t count = 1;
 
 	// Original code operated on seconds, convert
-	double seconds = milliseconds / 1e3;
+	auto seconds = static_cast<double>(milliseconds) / 1e3;
 
 	// sleep as long as we can, then spinlock the rest
 	while (seconds > estimate) {
 		const auto start = GetTicksUs();
 		DelayUs(precise_delay_duration_us);
 		// Original code operated on seconds, convert
-		const double observed = GetTicksUsSince(start) / 1e6;
+		const auto observed = static_cast<double>(GetTicksUsSince(start)) / 1e6;
 		seconds -= observed;
 
 		++count;
-		const double delta = observed - mean;
-		mean += delta / count;
+		const auto delta = observed - mean;
+		mean += delta / static_cast<double>(count);
 		m2 += delta * (observed - mean);
-		const double stddev = std::sqrt(m2 / (count - 1));
+		const auto stddev = std::sqrt(m2 / static_cast<double>(count - 1));
 		estimate = mean + stddev;
 	}
 
-    // spin lock
-    const auto spin_start = GetTicksUs();
-	const int spin_remain = static_cast<int>(seconds * 1e6);
+	// spin lock
+	const auto spin_start = GetTicksUs();
+	const auto spin_remain = lround(seconds * 1e6);
 	do {
 		std::this_thread::yield();
 	} while (GetTicksUsSince(spin_start) <= spin_remain);
@@ -144,4 +152,5 @@ static inline bool CanDelayPrecise()
 
 	return is_precise;
 }
+
 #endif

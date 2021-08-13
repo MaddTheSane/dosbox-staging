@@ -24,7 +24,6 @@
 #include <array>
 #include <cassert>
 #include <cerrno>
-#include <chrono>
 #include <cstdlib>
 #include <string.h>
 #include <stdio.h>
@@ -53,6 +52,7 @@
 #include "keyboard.h"
 #include "mapper.h"
 #include "mouse.h"
+#include "pacer.h"
 #include "pic.h"
 #include "render.h"
 #include "setup.h"
@@ -300,6 +300,7 @@ struct SDL_Block {
 		// See FinalizeWindowState function for details.
 		bool lazy_init_window_size = false;
 		bool vsync = false;
+		int vsync_skip = 0;
 		bool want_resizable_window = false;
 		SDL_WindowEventID last_size_event = {};
 		SCREEN_TYPES type;
@@ -358,7 +359,7 @@ struct SDL_Block {
 	SDL_Rect updateRects[1024];
 #if defined (WIN32)
 	// Time when sdl regains focus (Alt+Tab) in windowed mode
-	Bit32u focus_ticks;
+	int64_t focus_ticks = 0;
 #endif
 	// State of Alt keys for certain special handlings
 	SDL_EventType laltstate = SDL_KEYUP;
@@ -608,30 +609,14 @@ check_surface:
 	return flags;
 }
 
-// The frame-period holds the current duration for which a single host
-// video-frame is displayed. This is kept up-to-date when the video mode is set.
-// A sane starting value is used, which is based on a 60-Hz monitor.
-auto frame_period = std::chrono::nanoseconds(1'000'000'000 / 60);
-static void UpdateFramePeriod()
-{
-	assert(sdl.window);
-	SDL_DisplayMode display_mode;
-	SDL_GetWindowDisplayMode(sdl.window, &display_mode);
-	const int refresh_rate = display_mode.refresh_rate > 0
-	                                 ? display_mode.refresh_rate
-	                                 : 60;
-	frame_period = std::chrono::nanoseconds(1'000'000'000 / refresh_rate);
-}
 
 void GFX_ResetScreen(void) {
 	GFX_Stop();
 	if (sdl.draw.callback)
 		(sdl.draw.callback)( GFX_CallBackReset );
 	GFX_Start();
-	UpdateFramePeriod();
 	CPU_Reset_AutoAdjust();
 }
-
 
 void GFX_ForceFullscreenExit()
 {
@@ -1482,10 +1467,14 @@ static void FocusInput()
 	// Ensure auto-cycles are enabled
 	CPU_Disable_SkipAutoAdjust();
 
+#if defined(WIN32)
+	sdl.focus_ticks = GetTicks();
+#endif
+
 	// Ensure we have input focus when in fullscreen
 	if (!sdl.desktop.fullscreen)
 		return;
-
+	
 	// Do we already have focus?
 	if (SDL_GetWindowFlags(sdl.window) & SDL_WINDOW_INPUT_FOCUS)
 		return;
@@ -1650,7 +1639,10 @@ bool GFX_StartUpdate(uint8_t * &pixels, int &pitch)
 	return false;
 }
 
-void GFX_EndUpdate( const Bit16u *changedLines ) {
+static Pacer render_pacer("Render", 7000);
+
+void GFX_EndUpdate(const Bit16u *changedLines)
+{
 	if (!sdl.update_display_contents)
 		return;
 #if C_OPENGL
@@ -1661,18 +1653,22 @@ void GFX_EndUpdate( const Bit16u *changedLines ) {
 	if ((!using_opengl || !RENDER_GetForceUpdate()) && !sdl.updating)
 		return;
 	bool actually_updating = sdl.updating;
-	sdl.updating=false;
+	sdl.updating = false;
 	switch (sdl.desktop.type) {
-	case SCREEN_TEXTURE:
+	case SCREEN_TEXTURE: {
 		assert(sdl.texture.input_surface);
-		SDL_UpdateTexture(sdl.texture.texture,
-		                  nullptr, // update entire texture
-		                  sdl.texture.input_surface->pixels,
-		                  sdl.texture.input_surface->pitch);
-		SDL_RenderClear(sdl.renderer);
-		SDL_RenderCopy(sdl.renderer, sdl.texture.texture, NULL, &sdl.clip);
-		SDL_RenderPresent(sdl.renderer);
-		break;
+		if (render_pacer.CanRun()) {
+			SDL_UpdateTexture(sdl.texture.texture,
+			                  nullptr, // update entire texture
+			                  sdl.texture.input_surface->pixels,
+			                  sdl.texture.input_surface->pitch);
+			SDL_RenderClear(sdl.renderer);
+			SDL_RenderCopy(sdl.renderer, sdl.texture.texture,
+			               nullptr, &sdl.clip);
+			SDL_RenderPresent(sdl.renderer);
+		}
+		render_pacer.Checkpoint();
+	} break;
 #if C_OPENGL
 	case SCREEN_OPENGL:
 		// Clear drawing area. Some drivers (on Linux) have more than 2 buffers and the screen might
@@ -1716,13 +1712,17 @@ void GFX_EndUpdate( const Bit16u *changedLines ) {
 			return;
 		}
 
-		if (sdl.opengl.program_object) {
-			glUniform1i(sdl.opengl.ruby.frame_count, sdl.opengl.actual_frame_count++);
-			glDrawArrays(GL_TRIANGLES, 0, 3);
-		} else {
-			glCallList(sdl.opengl.displaylist);
+		if (render_pacer.CanRun()) {
+			if (sdl.opengl.program_object) {
+				glUniform1i(sdl.opengl.ruby.frame_count,
+				            sdl.opengl.actual_frame_count++);
+				glDrawArrays(GL_TRIANGLES, 0, 3);
+			} else {
+				glCallList(sdl.opengl.displaylist);
+			}
+			SDL_GL_SwapWindow(sdl.window);
 		}
-		SDL_GL_SwapWindow(sdl.window);
+		render_pacer.Checkpoint();
 		break;
 #endif
 	case SCREEN_SURFACE:
@@ -1743,10 +1743,14 @@ void GFX_EndUpdate( const Bit16u *changedLines ) {
 				}
 				index++;
 			}
-			if (rect_count)
-				SDL_UpdateWindowSurfaceRects(sdl.window,
-				                             sdl.updateRects,
-				                             rect_count);
+			if (rect_count) {
+				if (render_pacer.CanRun()) {
+					SDL_UpdateWindowSurfaceRects(sdl.window,
+					                             sdl.updateRects,
+					                             rect_count);
+				}
+				render_pacer.Checkpoint();
+			}
 		}
 		break;
 	}
@@ -2378,7 +2382,8 @@ static void GUI_StartUp(Section *sec)
 
 	// TODO vsync option is disabled for the time being, as it does not work
 	//      correctly and is causing serious bugs.
-	// sdl.desktop.vsync = section->Get_bool("vsync");
+	sdl.desktop.vsync = section->Get_bool("vsync");
+	sdl.desktop.vsync_skip = section->Get_int("vsync_skip");
 
 	const int display = section->Get_int("display");
 	if ((display >= 0) && (display < SDL_GetNumVideoDisplays())) {
@@ -2666,6 +2671,13 @@ bool GFX_IsFullscreen(void) {
 	return sdl.desktop.fullscreen;
 }
 
+#if defined(MACOSX)
+#define DB_POLLSKIP 3
+#else
+//Not used yet, see comment below
+#define DB_POLLSKIP 1
+#endif
+
 static void HandleVideoResize(int width, int height)
 {
 	/* Maybe a screen rotation has just occurred, so we simply resize.
@@ -2746,14 +2758,33 @@ static void FinalizeWindowState()
 	GFX_ResetScreen();
 }
 
-static bool ProcessEvents()
+bool GFX_Events()
 {
-	SDL_Event event;
-	if (MAPPER_IsUsingJoysticks()) {
-		SDL_JoystickUpdate();
-		MAPPER_UpdateJoysticks();
-	}
+#if defined(MACOSX)
+	// Don't poll too often. This can be heavy on the OS, especially Macs.
+	// In idle mode 3000-4000 polls are done per second without this check.
+	// Macs, with this code,  max 250 polls per second. (non-macs unused
+	// default max 500). Currently not implemented for all platforms, given
+	// the ALT-TAB stuff for WIN32.
+	static auto last_check = GetTicks();
+	auto current_check = GetTicks();
+	if (GetTicksDiff(current_check, last_check) <= DB_POLLSKIP)
+		return true;
+	last_check = current_check;
+#endif
 
+	SDL_Event event;
+#if defined (REDUCE_JOYSTICK_POLLING)
+	if (MAPPER_IsUsingJoysticks()) {
+		static auto last_check_joystick = GetTicks();
+		auto current_check_joystick = GetTicks();
+		if (GetTicksDiff(current_check_joystick, last_check_joystick) > 20) {
+			last_check_joystick = current_check_joystick;
+			SDL_JoystickUpdate();
+			MAPPER_UpdateJoysticks();
+		}
+	}
+#endif
 	while (SDL_PollEvent(&event)) {
 		switch (event.type) {
 		case SDL_WINDOWEVENT:
@@ -2949,7 +2980,9 @@ static bool ProcessEvents()
 			}
 			break; // end of SDL_WINDOWEVENT
 
-		case SDL_MOUSEMOTION: HandleMouseMotion(&event.motion); break;
+		case SDL_MOUSEMOTION:
+			HandleMouseMotion(&event.motion);
+			break;
 		case SDL_MOUSEBUTTONDOWN:
 		case SDL_MOUSEBUTTONUP:
 			if (sdl.mouse.control_choice != NoMouse)
@@ -2990,54 +3023,8 @@ static bool ProcessEvents()
 	return !exit_requested;
 }
 
-// Some modern systems experience excessive lag caused by host-event polling, so
-// we want to avoid excessively querying SDL's event queue every tick through
-// the emulator.
-
-// This function ensure SDL's event queue is processed at least at 200 Hz, which
-// is the maximum PS/2 mouse polling rate on original PC hardware.
-
-// To debug host lag, comment-in the following REPORT_EVENT_LAG define.
-// Normally polling should be well under 1 millisecond, however some hosts
-// can report very high lag (leading to stuttering, dropped frames, etc).
-
-// #define REPORT_EVENT_LAG
-
-bool GFX_MaybeProcessEvents()
-{
-	// Process SDL's event queue at 200 Hz
-	constexpr auto ps2_poll_period = std::chrono::nanoseconds(1'000'000'000 / 200);
-
-	// SDL maintainers recommend processing the SDL's event queue before
-	// each frame. For now, simply ensure that the PS/2 polling period is
-	// quicker than the video frame period. If a time comes when common
-	// displays update faster than 200 Hz, then update this code to pick the
-	// quicker of the two.
-	assert(ps2_poll_period <= frame_period);
-
-	static auto next_process_at = std::chrono::steady_clock::now() + ps2_poll_period;
-	const auto checked_at = std::chrono::steady_clock::now();
-	if (checked_at < next_process_at)
-		return true;
-
-	const bool process_result = ProcessEvents();
-
-#if defined(REPORT_EVENT_LAG)
-	const auto host_lag = std::chrono::steady_clock::now() - checked_at;
-	if (host_lag > std::chrono::milliseconds(3)) {
-		const std::chrono::duration<double, std::milli> lag_ms = host_lag;
-		LOG_MSG("SDL: Processing SDL's event queue took %5.2f ms",
-		        lag_ms.count());
-	}
-#endif
-
-	next_process_at = checked_at + ps2_poll_period;
-	return process_result;
-}
-
-#if defined(WIN32)
-static BOOL WINAPI ConsoleEventHandler(DWORD event)
-{
+#if defined (WIN32)
+static BOOL WINAPI ConsoleEventHandler(DWORD event) {
 	switch (event) {
 	case CTRL_SHUTDOWN_EVENT:
 	case CTRL_LOGOFF_EVENT:
@@ -3051,6 +3038,7 @@ static BOOL WINAPI ConsoleEventHandler(DWORD event)
 	}
 }
 #endif
+
 
 /* static variable to show wether there is not a valid stdout.
  * Fixes some bugs when -noconsole is used in a read only directory */
@@ -3096,7 +3084,7 @@ void Config_Add_SDL() {
 	Section_prop* psection;
 
 	constexpr auto always = Property::Changeable::Always;
-	constexpr auto deprecated = Property::Changeable::Deprecated;
+	// constexpr auto deprecated = Property::Changeable::Deprecated;
 	constexpr auto on_start = Property::Changeable::OnlyAtStart;
 
 	Pbool = sdl_sec->Add_bool("fullscreen", always, false);
@@ -3107,8 +3095,14 @@ void Config_Add_SDL() {
 	pint->Set_help("Number of display to use; values depend on OS and user "
 	               "settings.");
 
-	Pbool = sdl_sec->Add_bool("vsync", deprecated, false);
-	Pbool->Set_help("Vertical sync setting not implemented (setting ignored)");
+	Pbool = sdl_sec->Add_bool("vsync", on_start, false);
+	Pbool->Set_help("Synchronize with display refresh rate if supported. This can\n"
+	                "reduce flickering and tearing, but may also impact performance.");
+
+	pint = sdl_sec->Add_int("vsync_skip", on_start, 7000);
+	pint->Set_help("Number of microseconds to allow rendering to block before skipping "
+	               "the next frame.");
+	pint->SetMinMax(1, 14000);
 
 	Pstring = sdl_sec->Add_string("fullresolution", always, "desktop");
 	Pstring->Set_help("What resolution to use for fullscreen: 'original', 'desktop'\n"
@@ -3650,7 +3644,10 @@ int sdl_main(int argc, char *argv[])
 		/* Some extra SDL Functions */
 		Section_prop * sdl_sec=static_cast<Section_prop *>(control->GetSection("sdl"));
 
-		if (control->cmdline->FindExist("-fullscreen") || sdl_sec->Get_bool("fullscreen")) {
+		render_pacer.SetTimeout(sdl.desktop.vsync_skip);
+
+		if (control->cmdline->FindExist("-fullscreen") ||
+		    sdl_sec->Get_bool("fullscreen")) {
 			if(!sdl.desktop.fullscreen) { //only switch if not already in fullscreen
 				GFX_SwitchFullScreen();
 			}
