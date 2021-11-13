@@ -417,16 +417,6 @@ public:
 		stick[1].xpos = 0.0f;
 		stick[1].ypos = 0.0f;
 		stick[0].transformed = false;
-
-		// Does the user want joysticks to be available for mapping, but hidden in DOS?
-		if (joytype == JOY_NONE)
-			return;
-
-		// Setup the joystick IO port handlers, which lets DOS games
-		// detect and use them
-		const bool wants_timed = section->Get_bool("timed");
-		ReadHandler.Install(0x201, wants_timed ? read_p201_timed : read_p201, IO_MB);
-		WriteHandler.Install(0x201, wants_timed ? write_p201_timed : write_p201, IO_MB);
 	}
 	~JOYSTICK() {
 		// No-op if IO handlers were not installed
