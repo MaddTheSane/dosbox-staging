@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "control.h"
 #include "inout.h"
 #include "mapper.h"
 #include "mem.h"
@@ -31,19 +32,19 @@
 #include "support.h"
 #include "vga.h"
 
-static void write_crtc_index_other(Bitu /*port*/, uint8_t val, Bitu /*iolen*/)
+static void write_crtc_index_other(io_port_t, uint8_t val, io_width_t)
 {
 	// only receives 8-bit data per its IO port registration
 	vga.other.index = val;
 }
 
-static uint8_t read_crtc_index_other(Bitu /*port*/, uint8_t /*iolen*/)
+static uint8_t read_crtc_index_other(io_port_t, io_width_t)
 {
 	// only returns 8-bit data per its IO port registration
 	return vga.other.index;
 }
 
-static void write_crtc_data_other(Bitu /*port*/, uint8_t val, Bitu /*iolen*/)
+static void write_crtc_data_other(io_port_t, uint8_t val, io_width_t)
 {
 	// only receives 8-bit data per its IO port registration
 
@@ -125,7 +126,7 @@ static void write_crtc_data_other(Bitu /*port*/, uint8_t val, Bitu /*iolen*/)
 		LOG(LOG_VGAMISC, LOG_NORMAL)("MC6845:Write %u to illegal index %x", val, vga.other.index);
 	}
 }
-static uint8_t read_crtc_data_other(Bitu /*port*/, uint8_t /*iolen*/)
+static uint8_t read_crtc_data_other(io_port_t, io_width_t)
 {
 	// only returns 8-bit data per its IO port registration
 	switch (vga.other.index) {
@@ -175,7 +176,7 @@ static uint8_t read_crtc_data_other(Bitu /*port*/, uint8_t /*iolen*/)
 	return static_cast<uint8_t>(~0);
 }
 
-static void write_lightpen(Bitu port, uint8_t /*val*/, Bitu)
+static void write_lightpen(io_port_t port, uint8_t /*val*/, io_width_t)
 {
 	// only receives 8-bit data per its IO port registration
 	switch (port) {
@@ -199,12 +200,50 @@ static void write_lightpen(Bitu port, uint8_t /*val*/, Bitu)
 	}
 }
 
-static int16_t brightness = 0;
-static int16_t contrast = 100;
-static int16_t saturation = 100;
-static int16_t sharpness = 0;
-static int16_t hue_offset = 0;
-static uint8_t cga_comp = 0;
+class knob_t {
+public:
+	knob_t() = delete;
+	knob_t(const int default_value, const int min_value, const int max_value)
+	        : def(default_value),
+	          min(min_value),
+	          max(max_value),
+	          val(default_value)
+	{
+		assert(def == val);
+		assert(min <= val && val <= max);
+		assert(min <= max);
+	}
+	// modify the value
+	int get() const { return val; }
+	void set(int new_val) { val = wrap(new_val, min, max); }
+	void turn(int amount) { set(val + amount); }
+	void reset() { set(def); }
+
+	// read-only functions to get constraints
+	float as_float() const { return static_cast<float>(val); }
+	int get_default() const { return def; }
+	int get_min() const { return min; }
+	int get_max() const { return max; }
+
+private:
+	const int def; // "default" is a C++ keyword (don't use it)
+	const int min;
+	const int max;
+	int val;
+};
+
+static knob_t hue(0, -360, 360);
+static knob_t saturation(100, 0, 360);
+static knob_t contrast(100, 0, 360);
+static knob_t brightness(0, -100, 100);
+static knob_t convergence(0, -50, 50);
+
+enum class COMPOSITE_STATE : uint8_t {
+	AUTO = 0,
+	ON,
+	OFF,
+};
+static COMPOSITE_STATE cga_comp = COMPOSITE_STATE::AUTO;
 static bool is_composite_new_era = false;
 
 static uint8_t herc_pal = 0;
@@ -365,6 +404,173 @@ constexpr uint8_t mono_cga_palettes[8][16][3] = {
                 {0x3f, 0x3f, 0x3b},
         }};
 
+constexpr float get_rgbi_coefficient(const bool is_new_cga, const uint8_t ovescan)
+{
+	const auto r_coefficient = is_new_cga ? 0.10f : 0.0f;
+	const auto g_coefficient = is_new_cga ? 0.22f : 0.0f;
+	const auto b_coefficient = is_new_cga ? 0.07f : 0.0f;
+	const auto i_coefficient = is_new_cga ? 0.32f : 0.28f;
+
+	const auto r = (ovescan & 4) ? r_coefficient : 0.0f;
+	const auto g = (ovescan & 2) ? g_coefficient : 0.0f;
+	const auto b = (ovescan & 1) ? b_coefficient : 0.0f;
+	const auto i = (ovescan & 8) ? i_coefficient : 0.0f;
+	return r + g + b + i;
+}
+
+static void update_cga16_color_pcjr()
+{
+	assert(machine == MCH_PCJR);
+
+	// First composite algorithm based on code by reenigne updated by NewRisingSun and tailored for PCjr-only
+	// composite modes (for DOSBox Staging).
+	constexpr auto tau = 6.28318531f;    // == 2*pi
+	constexpr auto ns = 567.0f / 440.0f; // degrees of hue shift per nanosecond
+
+	const auto tv_brightness = brightness.as_float() / 100.0f;
+	const auto tv_saturation = saturation.as_float() / 100.0f;
+	const auto tv_contrast = (1 - tv_brightness) * contrast.as_float() / 100.0f;
+
+	const bool bw = vga.tandy.mode_control & 4;
+	const bool bpp1 = vga.tandy.gfx_control & 0x08;
+
+	std::array<float, 16> rgbi_coefficients = {};
+	for (uint8_t c = 0; c < rgbi_coefficients.size(); c++)
+		rgbi_coefficients[c] = get_rgbi_coefficient(is_composite_new_era, c);
+
+	// The pixel clock delay calculation is not accurate for 2bpp, but the difference is small and a more accurate
+	// calculation would be too slow.
+	constexpr auto rgbi_pixel_delay = 15.5f * ns;
+	constexpr float chroma_pixel_delays[8] = {0.0f,        // Black:   no chroma
+	                                          35.0f * ns,  // Blue:    no XORs
+	                                          44.5f * ns,  // Green:   XOR on rising and falling edges
+	                                          39.5f * ns,  // Cyan:    XOR on falling but not rising edge
+	                                          44.5f * ns,  // Red:     XOR on rising and falling edges
+	                                          39.5f * ns,  // Magenta: XOR on falling but not/ rising edge
+	                                          44.5f * ns,  // Yellow:  XOR on rising and falling edges
+	                                          39.5f * ns}; // White:   XOR on falling but not rising edge
+
+	constexpr uint8_t overscan = 15;
+	constexpr auto cp_d = chroma_pixel_delays[overscan & 7];
+	const auto rgbi_d = rgbi_coefficients[overscan];
+	const auto chroma_coefficient = is_composite_new_era ? 0.29f : 0.72f;
+
+	constexpr auto burst_delay = 60.0f * ns;
+	const auto color_delay = bpp1 ? 0.0f : 25.0f * ns;
+
+	const float pixel_clock_delay = (cp_d * chroma_coefficient + rgbi_pixel_delay * rgbi_d) /
+	                                        (chroma_coefficient + rgbi_d) +
+	                                burst_delay + color_delay;
+
+	const float hue_adjust = (-(90.0f - 33.0f) - hue.as_float() + pixel_clock_delay) * tau / 360.0f;
+	float chroma_signals[8][4];
+	for (uint8_t i = 0; i < 4; i++) {
+		chroma_signals[0][i] = 0;
+		chroma_signals[7][i] = 1;
+		for (uint8_t j = 0; j < 6; j++) {
+			constexpr float phases[6] = {270.0f - 21.5f * ns,  // blue
+			                             135.0f - 29.5f * ns,  // green
+			                             180.0f - 21.5f * ns,  // cyan
+			                             000.0f - 21.5f * ns,  // red
+			                             315.0f - 29.5f * ns,  // magenta
+			                             090.0f - 21.5f * ns}; // yellow/burst
+
+			// All the duty cycle fractions are the same, just under 0.5 as the rising edge is delayed 2ns
+			// more than the falling edge.
+			constexpr float duty = 0.5f - 2 * ns / 360.0f;
+
+			// We have a rectangle wave with period 1 (in units of the reciprocal of the color burst
+			// frequency) and duty cycle fraction "duty" and phase "phase". We band-limit this wave to
+			// frequency 2 and sample it at intervals of 1/4. We model our band-limited wave with
+
+			// 4 frequency components:
+			//   f(x) = a + b*sin(x*tau) + c*cos(x*tau) +
+			//   d*sin(x*2*tau)
+			// Then:
+			//   a =   integral(0, 1, f(x)*dx) = duty
+			//   b = 2*integral(0, 1, f(x)*sin(x*tau)*dx) =
+			//   2*integral(0, duty, sin(x*tau)*dx) =
+			//   2*(1-cos(x*tau))/tau c = 2*integral(0, 1,
+			//   f(x)*cos(x*tau)*dx) = 2*integral(0, duty,
+			//   cos(x*tau)*dx) = 2*sin(duty*tau)/tau d =
+			//   2*integral(0, 1, f(x)*sin(x*2*tau)*dx) =
+			//   2*integral(0, duty, sin(x*4*pi)*dx) =
+			//   2*(1-cos(2*tau*duty))/(2*tau)
+
+			constexpr auto a = duty;
+			const auto b = 2.0f * (1.0f - cosf(duty * tau)) / tau;
+			const auto c = 2.0f * sinf(duty * tau) / tau;
+			const auto d = 2.0f * (1.0f - cosf(duty * 2 * tau)) / (2 * tau);
+			const auto x = (phases[j] + 21.5f * ns + pixel_clock_delay) / 360.0f + i / 4.0f;
+
+			chroma_signals[j + 1][i] = a + b * sinf(x * tau) + c * cosf(x * tau) + d * sinf(x * 2 * tau);
+		}
+	}
+
+	// PCjr CGA palette table
+	const std::array<uint8_t, 4> pcjr_palette = {
+	        vga.attr.palette[0],
+	        vga.attr.palette[1],
+	        vga.attr.palette[2],
+	        vga.attr.palette[3],
+	};
+
+	for (uint8_t x = 0; x < 4; ++x) { // Position of pixel in question
+		const bool even = !(x & 1);
+		for (uint8_t bits = 0; bits < (even ? 0x10 : 0x40); ++bits) {
+			float Y = 0.0f, I = 0.0f, Q = 0.0f;
+			for (uint8_t p = 0; p < 4; ++p) { // Position within color carrier cycle
+				// generate pixel pattern.
+				uint8_t rgbi = 0;
+				if (bpp1) {
+					rgbi = ((bits >> (3 - p)) & (even ? 1 : 2)) != 0 ? overscan : 0;
+				} else {
+					const size_t i = even ? (bits >> (2 - (p & 2))) & 3
+					                      : (bits >> (4 - ((p + 1) & 6))) & 3;
+					assert(i < pcjr_palette.size());
+					rgbi = pcjr_palette[i];
+				}
+				const uint8_t c = (bw && rgbi & 7) ? 7 : rgbi & 7;
+
+				// calculate composite output
+				const auto chroma = chroma_signals[c][(p + x) & 3] * chroma_coefficient;
+				const auto composite = chroma + rgbi_coefficients[rgbi];
+
+				Y += composite;
+				if (!bw) { // burst on
+					I += composite * 2 * cosf(hue_adjust + (p + x) * tau / 4.0f);
+					Q += composite * 2 * sinf(hue_adjust + (p + x) * tau / 4.0f);
+				}
+			}
+
+			Y = clamp(tv_brightness + tv_contrast * Y / 4.0f, 0.0f, 1.0f);
+			I = clamp(tv_saturation * tv_contrast * I / 4.0f, -0.5957f, 0.5957f);
+			Q = clamp(tv_saturation * tv_contrast * Q / 4.0f, -0.5226f, 0.5226f);
+
+			constexpr auto gamma = 2.2f;
+
+			auto normalize_and_apply_gamma = [=](float v) -> float {
+				const auto normalized = clamp((v - 0.075f) / (1 - 0.075f), 0.0f, 1.0f);
+				return powf(normalized, gamma);
+			};
+			const auto R = normalize_and_apply_gamma(Y + 0.9563f * I + 0.6210f * Q);
+			const auto G = normalize_and_apply_gamma(Y - 0.2721f * I - 0.6474f * Q);
+			const auto B = normalize_and_apply_gamma(Y - 1.1069f * I + 1.7046f * Q);
+
+			auto to_8bit_without_gamma = [=](float v) -> uint8_t {
+				const auto without_gamma = clamp(powf(v, 1 / gamma), 0.0f, 1.0f);
+				return static_cast<uint8_t>(255 * without_gamma);
+			};
+			const auto r = to_8bit_without_gamma(1.5073f * R - 0.3725f * G - 0.0832f * B);
+			const auto g = to_8bit_without_gamma(-0.0275f * R + 0.9350f * G + 0.0670f * B);
+			const auto b = to_8bit_without_gamma(-0.0272f * R - 0.0401f * G + 1.1677f * B);
+
+			const uint8_t index = bits | ((x & 1) == 0 ? 0x30 : 0x80) | ((x & 2) == 0 ? 0x40 : 0);
+			RENDER_SetPal(index, r, g, b);
+		}
+	}
+}
+
 template <typename chroma_t>
 constexpr float new_cga_v(const chroma_t c,
                           const float i,
@@ -428,15 +634,15 @@ static void update_cga16_color()
 	                           ? new_cga_v(chroma_multiplexer[255], i3, i3, i3, i3)
 	                           : chroma_multiplexer[255] + i3;
 
-	const auto mode_contrast = 2.56f * contrast / (max_v - min_v);
+	const auto mode_contrast = 2.56f * contrast.as_float() / (max_v - min_v);
 
-	const auto mode_brightness = brightness * 5 - 256 * min_v / (max_v - min_v);
+	const auto mode_brightness = brightness.as_float() * 5 - 256 * min_v / (max_v - min_v);
 
 	const bool in_tandy_text_mode = (vga.mode == M_CGA_TEXT_COMPOSITE) &&
 	                                (vga.tandy.mode_control & 1);
 	const auto mode_hue = in_tandy_text_mode ? 14.0f : 4.0f;
 
-	const auto mode_saturation = saturation * (is_composite_new_era ? 5.8f : 2.9f) / 100;
+	const auto mode_saturation = saturation.as_float() * (is_composite_new_era ? 5.8f : 2.9f) / 100;
 
 	// Update the Composite CGA palette
 	const bool in_tandy_mode_4 = vga.tandy.mode_control & 4;
@@ -476,7 +682,7 @@ static void update_cga16_color()
 	const auto q = static_cast<float>(CGA_Composite_Table[6 * 68 + 1] -
 	                                  CGA_Composite_Table[6 * 68 + 3]);
 
-	const auto a = tau * (33 + 90 + hue_offset + mode_hue) / 360.0f;
+	const auto a = tau * (33 + 90 + hue.as_float() + mode_hue) / 360.0f;
 	const auto c = cosf(a);
 	const auto s = sinf(a);
 
@@ -500,7 +706,7 @@ static void update_cga16_color()
 	vga.gq = static_cast<int>(-gi * iq_adjust_q + gq * iq_adjust_i);
 	vga.bi = static_cast<int>(bi * iq_adjust_i + bq * iq_adjust_q);
 	vga.bq = static_cast<int>(-bi * iq_adjust_q + bq * iq_adjust_i);
-	vga.sharpness = sharpness * 256 / 100;
+	vga.sharpness = convergence.get() * 256 / 100;
 }
 
 enum CRT_KNOB : uint8_t {
@@ -509,7 +715,7 @@ enum CRT_KNOB : uint8_t {
 	SATURATION,
 	CONTRAST,
 	BRIGHTNESS,
-	SHARPNESS,
+	CONVERGENCE,
 	ENUM_END
 };
 static auto crt_knob = CRT_KNOB::ERA;
@@ -521,45 +727,15 @@ static void log_crt_knob_value()
 		LOG_MSG("COMPOSITE: %s-era CGA selected",
 		        is_composite_new_era ? "New" : "Old");
 		break;
-	case CRT_KNOB::HUE:
-		LOG_MSG("COMPOSITE: Hue is %d", hue_offset);
-		break;
-	case CRT_KNOB::SATURATION:
-		LOG_MSG("COMPOSITE: Saturation at %d", saturation);
-		break;
-	case CRT_KNOB::CONTRAST:
-		LOG_MSG("COMPOSITE: Contrast at %d", contrast);
-		break;
-	case CRT_KNOB::BRIGHTNESS:
-		LOG_MSG("COMPOSITE: Brightness at %d", brightness);
-		break;
-	case CRT_KNOB::SHARPNESS:
-		LOG_MSG("COMPOSITE: Sharpness at %d", sharpness);
-		break;
-	case CRT_KNOB::ENUM_END:
-		assertm(false, "Should not reach CRT knob end marker");
-		break;
+	case CRT_KNOB::HUE: LOG_MSG("COMPOSITE: Hue is %d", hue.get()); break;
+	case CRT_KNOB::SATURATION: LOG_MSG("COMPOSITE: Saturation is %d", saturation.get()); break;
+	case CRT_KNOB::CONTRAST: LOG_MSG("COMPOSITE: Contrast is %d", contrast.get()); break;
+	case CRT_KNOB::BRIGHTNESS: LOG_MSG("COMPOSITE: Brightness is %d", brightness.get()); break;
+	case CRT_KNOB::CONVERGENCE: LOG_MSG("COMPOSITE: Convergence is %d", convergence.get()); break;
+	case CRT_KNOB::ENUM_END: assertm(false, "Should not reach CRT knob end marker"); break;
 	}
 }
-
-static void turn_crt_knob(bool pressed, const int amount)
-{
-	if (!pressed)
-		return;
-	switch (crt_knob) {
-	case CRT_KNOB::ERA: is_composite_new_era = !is_composite_new_era; break;
-	case CRT_KNOB::HUE: hue_offset = (hue_offset + amount) % 360; break;
-	case CRT_KNOB::SATURATION: saturation += amount; break;
-	case CRT_KNOB::CONTRAST: contrast += amount; break;
-	case CRT_KNOB::BRIGHTNESS: brightness += amount; break;
-	case CRT_KNOB::SHARPNESS: sharpness += amount; break;
-	case CRT_KNOB::ENUM_END:
-		assertm(false, "Should not reach CRT knob end marker");
-		break;
-	}
-	update_cga16_color();
-	log_crt_knob_value();
-}
+static void turn_crt_knob(bool pressed, const int amount);
 
 static void turn_crt_knob_positive(bool pressed)
 {
@@ -575,8 +751,15 @@ static void select_next_crt_knob(bool pressed)
 {
 	if (!pressed)
 		return;
-	const auto next_knob = static_cast<uint8_t>(crt_knob) + 1;
+
+	auto next_knob = static_cast<uint8_t>(crt_knob) + 1;
+
+	// PCjr doesn't have a convergence knob
+	if (machine == MCH_PCJR && next_knob >= CRT_KNOB::CONVERGENCE)
+		next_knob++;
+
 	crt_knob = static_cast<CRT_KNOB>(next_knob % CRT_KNOB::ENUM_END);
+
 	log_crt_knob_value();
 }
 
@@ -604,6 +787,7 @@ static void write_cga_color_select(uint8_t val)
 		VGA_SetCGA2Table(0,val & 0xf);
 		vga.attr.overscan_color = 0;
 		break;
+	case M_CGA16: update_cga16_color_pcjr(); break;
 	case M_TEXT:
 		vga.tandy.border_color = val & 0xf;
 		vga.attr.overscan_color = 0;
@@ -613,7 +797,7 @@ static void write_cga_color_select(uint8_t val)
 	}
 }
 
-static void write_cga(Bitu port, uint8_t val, Bitu /*iolen*/)
+static void write_cga(io_port_t port, uint8_t val, io_width_t)
 {
 	// only receives 8-bit data per its IO port registration
 	switch (port) {
@@ -622,27 +806,38 @@ static void write_cga(Bitu port, uint8_t val, Bitu /*iolen*/)
 		vga.attr.disabled = (val&0x8)? 0: 1;
 		if (vga.tandy.mode_control & 0x2) {		// graphics mode
 			if (vga.tandy.mode_control & 0x10) {// highres mode
-				if (cga_comp==1 || ((cga_comp==0 && !(val&0x4)) && !mono_cga)) {	// composite display
+				if (cga_comp == COMPOSITE_STATE::ON ||
+				    ((cga_comp == COMPOSITE_STATE::AUTO &&
+				      !(val & 0x4)) &&
+				     !mono_cga)) {
 
 					// composite ntsc 640x200 16 color mode
-					VGA_SetMode(M_CGA2_COMPOSITE);
-					update_cga16_color();
+					if (machine == MCH_PCJR) {
+						VGA_SetMode(M_CGA16);
+					} else {
+						VGA_SetMode(M_CGA2_COMPOSITE);
+						update_cga16_color();
+					}
 				} else {
 					VGA_SetMode(M_TANDY2);
 				}
 			} else {							// lowres mode
-				if (cga_comp==1) {				// composite display
+				if (cga_comp == COMPOSITE_STATE::ON) {
 					// composite ntsc 640x200 16 color mode
-					VGA_SetMode(M_CGA4_COMPOSITE);
-					update_cga16_color();
-				} else {
+					if (machine == MCH_PCJR) {
+						VGA_SetMode(M_CGA16);
+					} else {
+						VGA_SetMode(M_CGA4_COMPOSITE);
+						update_cga16_color();
+					}
+				} else if (machine != MCH_PCJR) {
 					VGA_SetMode(M_TANDY4);
 				}
 			}
 
 			write_cga_color_select(vga.tandy.color_select);
 		} else {
-			if (cga_comp == 1) { // composite display
+			if (cga_comp == COMPOSITE_STATE::ON) { // composite display
 				VGA_SetMode(M_CGA_TEXT_COMPOSITE);
 				update_cga16_color();
 			} else {
@@ -659,15 +854,42 @@ static void write_cga(Bitu port, uint8_t val, Bitu /*iolen*/)
 
 static void PCJr_FindMode();
 
-static void Composite(bool pressed) {
-	if (!pressed) return;
-	if (++cga_comp>2) cga_comp=0;
-	LOG_MSG("Composite output: %s",(cga_comp==0)?"auto":((cga_comp==1)?"on":"off"));
+static void apply_composite_state()
+{
 	// switch RGB and Composite if in graphics mode
 	if (vga.tandy.mode_control & 0x2 && machine == MCH_PCJR)
 		PCJr_FindMode();
 	else
-		write_cga(0x3d8, vga.tandy.mode_control, 1);
+		write_cga(0x3d8, vga.tandy.mode_control, io_width_t::byte);
+
+/* 	if (vga.tandy.mode_control & 0x2) {
+		if (machine == MCH_PCJR) {
+			PCJr_FindMode();
+		} else {
+			write_cga(0x3d8, vga.tandy.mode_control, io_width_t::byte);
+		}
+	}
+ */
+
+}
+
+static void Composite(bool pressed)
+{
+	if (!pressed)
+		return;
+
+	// Step through the composite modes
+	if (cga_comp == COMPOSITE_STATE::AUTO)
+		cga_comp = COMPOSITE_STATE::ON;
+	else if (cga_comp == COMPOSITE_STATE::ON)
+		cga_comp = COMPOSITE_STATE::OFF;
+	else
+		cga_comp = COMPOSITE_STATE::AUTO;
+
+	LOG_MSG("COMPOSITE: State is %s", cga_comp == COMPOSITE_STATE::AUTO ? "auto"
+	                                  : cga_comp == COMPOSITE_STATE::ON ? "on"
+	                                                                    : "off");
+	apply_composite_state();
 }
 
 static void tandy_update_palette() {
@@ -709,11 +931,9 @@ static void tandy_update_palette() {
 		// PCJr
 		switch (vga.mode) {
 		case M_TANDY2:
-		case M_CGA2_COMPOSITE:
 			VGA_SetCGA2Table(vga.attr.palette[0],vga.attr.palette[1]);
 			break;
 		case M_TANDY4:
-		case M_CGA4_COMPOSITE:
 			VGA_SetCGA4Table(
 				vga.attr.palette[0], vga.attr.palette[1],
 				vga.attr.palette[2], vga.attr.palette[3]);
@@ -721,7 +941,10 @@ static void tandy_update_palette() {
 		default:
 			break;
 		}
-		update_cga16_color();
+		if (machine == MCH_PCJR)
+			update_cga16_color_pcjr();
+		else
+			update_cga16_color();
 	}
 }
 
@@ -736,14 +959,31 @@ static void TANDY_FindMode()
 			} else VGA_SetMode(M_TANDY16);
 		}
 		else if (vga.tandy.gfx_control & 0x08) {
-			VGA_SetMode(M_TANDY4);
-		}
-		else if (vga.tandy.mode_control & 0x10)
-			VGA_SetMode(M_TANDY2);
-		else {
-			if (vga.mode==M_TANDY16) {
-				VGA_SetModeNow(M_TANDY4);
-			} else VGA_SetMode(M_TANDY4);
+			if (cga_comp == COMPOSITE_STATE::ON) {
+				// composite ntsc 640x200 16 color mode
+				VGA_SetMode(M_CGA4_COMPOSITE);
+				update_cga16_color();
+			} else {
+				VGA_SetMode(M_TANDY4);
+			}
+		} else if (vga.tandy.mode_control & 0x10) {
+			if (cga_comp == COMPOSITE_STATE::ON) {
+				// composite ntsc 640x200 16 color mode
+				VGA_SetMode(M_CGA2_COMPOSITE);
+				update_cga16_color();
+			} else {
+				VGA_SetMode(M_TANDY2);
+			}
+		} else {
+			// otherwise some 4-colour graphics mode
+			const auto new_mode = (cga_comp == COMPOSITE_STATE::ON)
+			                              ? M_CGA4_COMPOSITE
+			                              : M_TANDY4;
+			if (vga.mode == M_TANDY16) {
+				VGA_SetModeNow(new_mode);
+			} else {
+				VGA_SetMode(new_mode);
+			}
 		}
 		tandy_update_palette();
 	} else {
@@ -753,7 +993,7 @@ static void TANDY_FindMode()
 
 static void PCJr_FindMode()
 {
-	is_composite_new_era = true;
+	assert(machine == MCH_PCJR);
 	if (vga.tandy.mode_control & 0x2) {
 		if (vga.tandy.mode_control & 0x10) {
 			// bit4 of mode control 1 signals 16 colour graphics mode
@@ -763,21 +1003,24 @@ static void PCJr_FindMode()
 				VGA_SetMode(M_TANDY16);
 		} else if (vga.tandy.gfx_control & 0x08) {
 			// bit3 of mode control 2 signals 2 colour graphics mode
-			if (cga_comp == 1 ||
-			    (cga_comp == 0 && !(vga.tandy.mode_control & 0x4))) {
-				VGA_SetMode(M_CGA2_COMPOSITE);
+			if (cga_comp == COMPOSITE_STATE::ON ||
+			    (cga_comp == COMPOSITE_STATE::AUTO &&
+			     !(vga.tandy.mode_control & 0x4))) {
+				VGA_SetMode(M_CGA16);
 			} else {
 				VGA_SetMode(M_TANDY2);
 			}
 		} else {
 			// otherwise some 4-colour graphics mode
-			const auto new_mode = (cga_comp == 1) ? M_CGA4_COMPOSITE
-			                                      : M_TANDY4;
+			const auto new_mode = (cga_comp == COMPOSITE_STATE::ON) ? M_CGA16 : M_TANDY4;
 			if (vga.mode == M_TANDY16) {
 				VGA_SetModeNow(new_mode);
 			} else {
 				VGA_SetMode(new_mode);
 			}
+		}
+		if (vga.mode == M_CGA16) {
+			update_cga16_color_pcjr();
 		}
 		tandy_update_palette();
 	} else {
@@ -844,7 +1087,7 @@ static void write_tandy_reg(uint8_t val)
 	}
 }
 
-static void write_tandy(Bitu port, uint8_t val, Bitu /*iolen*/)
+static void write_tandy(io_port_t port, uint8_t val, io_width_t)
 {
 	// only receives 8-bit data per its IO port registration
 	switch (port) {
@@ -863,6 +1106,9 @@ static void write_tandy(Bitu port, uint8_t val, Bitu /*iolen*/)
 	case 0x3d9:
 		vga.tandy.color_select=val;
 		tandy_update_palette();
+		// Re-apply the composite mode after updating the palette
+		if (cga_comp == COMPOSITE_STATE::ON)
+			apply_composite_state();
 		break;
 	case 0x3da:
 		vga.tandy.reg_index = val;
@@ -891,7 +1137,7 @@ static void write_tandy(Bitu port, uint8_t val, Bitu /*iolen*/)
 	}
 }
 
-static void write_pcjr(Bitu port, uint8_t val, Bitu /*iolen*/)
+static void write_pcjr(io_port_t port, uint8_t val, io_width_t)
 {
 	// only receives 8-bit data per its IO port registration
 	switch (port) {
@@ -1027,7 +1273,7 @@ void Herc_Palette()
 	}
 }
 
-static void write_hercules(Bitu port, uint8_t val, Bitu /*iolen*/)
+static void write_hercules(Bitu port, uint8_t val, io_width_t)
 {
 	switch (port) {
 	case 0x3b8: {
@@ -1073,7 +1319,7 @@ static void write_hercules(Bitu port, uint8_t val, Bitu /*iolen*/)
 	}
 }
 
-uint8_t read_herc_status(Bitu /*port*/, uint8_t /*iolen*/)
+uint8_t read_herc_status(io_port_t, io_width_t)
 {
 	// only returns 8-bit data per its IO port registration
 
@@ -1106,7 +1352,7 @@ uint8_t read_herc_status(Bitu /*port*/, uint8_t /*iolen*/)
 
 void VGA_SetupOther()
 {
-	memset(&vga.tandy, 0, sizeof(vga.tandy));
+	vga.tandy = VGA_TANDY(); // reset our Tandy struct
 	vga.attr.disabled = 0;
 	vga.config.bytes_skip=0;
 
@@ -1125,8 +1371,8 @@ void VGA_SetupOther()
 		vga.draw.font_tables[0] = vga.draw.font_tables[1] = vga.draw.font;
 	}
 	if (machine==MCH_CGA || IS_TANDY_ARCH || machine==MCH_HERC) {
-		IO_RegisterWriteHandler(0x3db,write_lightpen,IO_MB);
-		IO_RegisterWriteHandler(0x3dc,write_lightpen,IO_MB);
+		IO_RegisterWriteHandler(0x3db, write_lightpen, io_width_t::byte);
+		IO_RegisterWriteHandler(0x3dc, write_lightpen, io_width_t::byte);
 	}
 	if (machine==MCH_HERC) {
 		extern uint8_t int10_font_14[256 * 14];
@@ -1138,18 +1384,9 @@ void VGA_SetupOther()
 		                  "hercpal", "Herc Pal");
 	}
 	if (machine==MCH_CGA) {
-		IO_RegisterWriteHandler(0x3d8,write_cga,IO_MB);
-		IO_RegisterWriteHandler(0x3d9,write_cga,IO_MB);
-		if (!mono_cga) {
-			MAPPER_AddHandler(select_next_crt_knob, SDL_SCANCODE_F10,
-			                  0, "select", "Sel Knob");
-			MAPPER_AddHandler(turn_crt_knob_positive, SDL_SCANCODE_F11,
-			                  0, "incval", "Inc Knob");
-			MAPPER_AddHandler(turn_crt_knob_negative, SDL_SCANCODE_F11,
-			                  MMOD2, "decval", "Dec Knob");
-			MAPPER_AddHandler(Composite, SDL_SCANCODE_F12, 0,
-			                  "cgacomp", "CGA Comp");
-		} else {
+		IO_RegisterWriteHandler(0x3d8, write_cga, io_width_t::byte);
+		IO_RegisterWriteHandler(0x3d9, write_cga, io_width_t::byte);
+		if (mono_cga) {
 			MAPPER_AddHandler(CycleMonoCGAPal, SDL_SCANCODE_F11, 0,
 			                  "monocgapal", "Mono CGA Pal");
 			MAPPER_AddHandler(CycleMonoCGABright, SDL_SCANCODE_F11, MMOD2,
@@ -1157,21 +1394,22 @@ void VGA_SetupOther()
 		}
 	}
 	if (machine==MCH_TANDY) {
-		write_tandy( 0x3df, 0x0, 0 );
-		IO_RegisterWriteHandler(0x3d8,write_tandy,IO_MB);
-		IO_RegisterWriteHandler(0x3d9,write_tandy,IO_MB);
-		IO_RegisterWriteHandler(0x3da,write_tandy,IO_MB);
-		IO_RegisterWriteHandler(0x3de,write_tandy,IO_MB);
-		IO_RegisterWriteHandler(0x3df,write_tandy,IO_MB);
+		write_tandy(0x3df, 0x0, io_width_t::byte);
+		IO_RegisterWriteHandler(0x3d8, write_tandy, io_width_t::byte);
+		IO_RegisterWriteHandler(0x3d9, write_tandy, io_width_t::byte);
+		IO_RegisterWriteHandler(0x3da, write_tandy, io_width_t::byte);
+		IO_RegisterWriteHandler(0x3de, write_tandy, io_width_t::byte);
+		IO_RegisterWriteHandler(0x3df, write_tandy, io_width_t::byte);
 	}
-	if (machine==MCH_PCJR) {
-		// Start the PCjr composite huge almost 1/3rd into the CGA hue
-		hue_offset = 100;
-
+	if (machine == MCH_PCJR) {
 		//write_pcjr will setup base address
-		write_pcjr( 0x3df, 0x7 | (0x7 << 3), 0 );
-		IO_RegisterWriteHandler(0x3da,write_pcjr,IO_MB);
-		IO_RegisterWriteHandler(0x3df,write_pcjr,IO_MB);
+		write_pcjr(0x3df, 0x7 | (0x7 << 3), io_width_t::byte);
+		IO_RegisterWriteHandler(0x3da, write_pcjr, io_width_t::byte);
+		IO_RegisterWriteHandler(0x3df, write_pcjr, io_width_t::byte);
+	}
+	// Add composite hotkeys for CGA, Tandy, and PCjr
+	if ((machine == MCH_CGA && !mono_cga) || machine == MCH_TANDY ||
+	    machine == MCH_PCJR) {
 		MAPPER_AddHandler(select_next_crt_knob, SDL_SCANCODE_F10, 0,
 		                  "select", "Sel Knob");
 		MAPPER_AddHandler(turn_crt_knob_positive, SDL_SCANCODE_F11, 0,
@@ -1186,27 +1424,27 @@ void VGA_SetupOther()
 		for (uint8_t i = 0; i < 4; ++i) {
 			// The registers are repeated as the address is not decoded properly;
 			// The official ports are 3b4, 3b5
-			const auto index_port = base + i * 2u;
-			IO_RegisterWriteHandler(index_port, write_crtc_index_other, IO_MB);
-			IO_RegisterReadHandler(index_port, read_crtc_index_other, IO_MB);
+			const uint16_t index_port = base + i * 2u;
+			IO_RegisterWriteHandler(index_port, write_crtc_index_other, io_width_t::byte);
+			IO_RegisterReadHandler(index_port, read_crtc_index_other, io_width_t::byte);
 
-			const auto data_port = index_port + 1u;
-			IO_RegisterWriteHandler(data_port, write_crtc_data_other, IO_MB);
-			IO_RegisterReadHandler(data_port, read_crtc_data_other, IO_MB);
+			const uint16_t data_port = index_port + 1u;
+			IO_RegisterWriteHandler(data_port, write_crtc_data_other, io_width_t::byte);
+			IO_RegisterReadHandler(data_port, read_crtc_data_other, io_width_t::byte);
 		}
 		vga.herc.enable_bits=0;
 		vga.herc.mode_control=0xa; // first mode written will be text mode
 		vga.crtc.underline_location = 13;
-		IO_RegisterWriteHandler(0x3b8,write_hercules,IO_MB);
-		IO_RegisterWriteHandler(0x3bf,write_hercules,IO_MB);
-		IO_RegisterReadHandler(0x3ba,read_herc_status,IO_MB);
+		IO_RegisterWriteHandler(0x3b8, write_hercules, io_width_t::byte);
+		IO_RegisterWriteHandler(0x3bf, write_hercules, io_width_t::byte);
+		IO_RegisterReadHandler(0x3ba, read_herc_status, io_width_t::byte);
 	} else if (!IS_EGAVGA_ARCH) {
 		constexpr uint16_t base = 0x3d0;
 		for (uint8_t port_ct = 0; port_ct < 4; ++port_ct) {
-			IO_RegisterWriteHandler(base + port_ct * 2, write_crtc_index_other, IO_MB);
-			IO_RegisterWriteHandler(base + port_ct * 2 + 1, write_crtc_data_other, IO_MB);
-			IO_RegisterReadHandler(base + port_ct * 2, read_crtc_index_other, IO_MB);
-			IO_RegisterReadHandler(base + port_ct * 2 + 1, read_crtc_data_other, IO_MB);
+			IO_RegisterWriteHandler(base + port_ct * 2, write_crtc_index_other, io_width_t::byte);
+			IO_RegisterWriteHandler(base + port_ct * 2 + 1, write_crtc_data_other, io_width_t::byte);
+			IO_RegisterReadHandler(base + port_ct * 2, read_crtc_index_other, io_width_t::byte);
+			IO_RegisterReadHandler(base + port_ct * 2 + 1, read_crtc_data_other, io_width_t::byte);
 		}
 	}
 }
@@ -1233,14 +1471,14 @@ void boxer_setHerculesTintMode(Bit8u mode)
 
 double boxer_CGACompositeHueOffset()
 {
-    return hue_offset;
+    return hue.get();
 }
 
 void boxer_setCGACompositeHueOffset(double offset)
 {
-    if (offset != hue_offset)
+    if (offset != hue.get())
     {
-        hue_offset = offset;
+        hue.set(offset);
         if (machine == MCH_CGA)
         {
             update_cga16_color();
@@ -1251,16 +1489,117 @@ void boxer_setCGACompositeHueOffset(double offset)
 //--Added 2019-10-18 by C.W. Betts to give Boxer control over CGA composite mode
 Bit8u boxer_CGAComponentMode(void)
 {
-	return cga_comp;
+	return (Bit8u)cga_comp;
 }
 
 void boxer_setCGAComponentMode(Bit8u newCGA)
 {
-	cga_comp = newCGA;
-	if (cga_comp>2) cga_comp=0;
+	cga_comp = COMPOSITE_STATE(newCGA);
+	if ((Bit8u)cga_comp>2) cga_comp=COMPOSITE_STATE::AUTO;
 	if (vga.tandy.mode_control & 0x2) {
-		write_cga(0x3d8,vga.tandy.mode_control,1);
+		write_cga(0x3d8,vga.tandy.mode_control, io_width_t::byte);
 	}
 }
 //--End of modifications
 
+//--Added 2022-03-25 by C.W. Betts to give Boxer information about a display's refresh rate.
+//TODO: stub!
+int boxer_GetDisplayRefreshRate(void)
+{
+	return 60;
+}
+//--End of modifications
+
+static void composite_init(Section *sec)
+{
+	assert(sec);
+	const auto conf = static_cast<Section_prop *>(sec);
+	assert(conf);
+	const std::string state = conf->Get_string("composite");
+	cga_comp = (state == "auto" ? COMPOSITE_STATE::AUTO
+	            : state == "on" ? COMPOSITE_STATE::ON
+	                            : COMPOSITE_STATE::OFF);
+
+	const auto era_choice = std::string(conf->Get_string("era"));
+	is_composite_new_era = era_choice == "new" ||
+	                       (machine == MCH_PCJR && era_choice == "auto");
+
+	hue.set(conf->Get_int("hue"));
+	saturation.set(conf->Get_int("saturation"));
+	contrast.set(conf->Get_int("contrast"));
+	brightness.set(conf->Get_int("brightness"));
+	convergence.set(conf->Get_int("convergence"));
+
+	if (cga_comp == COMPOSITE_STATE::ON) {
+		LOG_MSG("COMPOSITE: %s-era enabled with settings: hue %d, saturation %d,"
+		        " contrast %d, brightness %d, and convergence %d",
+		        is_composite_new_era ? "New" : "Old", hue.get(), saturation.get(), contrast.get(),
+		        brightness.get(), convergence.get());
+	}
+}
+
+static void composite_settings(Section_prop &secprop)
+{
+	constexpr auto when_idle = Property::Changeable::WhenIdle;
+
+	const char *states[] = {"auto", "on", "off", 0};
+	auto str_prop = secprop.Add_string("composite", when_idle, "auto");
+	str_prop->Set_values(states);
+	str_prop->Set_help("Enable composite mode on start. 'auto' lets the program decide.\n"
+	                   "Note: Fine-tune the settings below (ie: hue) using the composite hotkeys.\n"
+	                   "      Then read the new settings from your console and enter them here.");
+
+	const char *eras[] = {"auto", "old", "new", 0};
+	str_prop = secprop.Add_string("era", when_idle, "auto");
+	str_prop->Set_values(eras);
+	str_prop->Set_help(
+	        "Era of composite technology. When 'auto', PCjr uses new and CGA/Tandy use old.");
+
+	auto int_prop = secprop.Add_int("hue", when_idle, hue.get_default());
+	int_prop->SetMinMax(hue.get_min(), hue.get_max());
+	int_prop->Set_help("Appearance of RGB palette. For example, adjust until sky is blue.");
+
+	int_prop = secprop.Add_int("saturation", when_idle, saturation.get_default());
+	int_prop->SetMinMax(saturation.get_min(), saturation.get_max());
+	int_prop->Set_help("Intensity of colors, from washed out to vivid.");
+
+	int_prop = secprop.Add_int("contrast", when_idle, contrast.get_default());
+	int_prop->SetMinMax(contrast.get_min(), contrast.get_max());
+	int_prop->Set_help("Ratio between the dark and light area.");
+
+	int_prop = secprop.Add_int("brightness", when_idle, brightness.get_default());
+	int_prop->SetMinMax(brightness.get_min(), brightness.get_max());
+	int_prop->Set_help("Luminosity of the image, from dark to light.");
+
+	int_prop = secprop.Add_int("convergence", when_idle, convergence.get_default());
+	int_prop->SetMinMax(convergence.get_min(), convergence.get_max());
+	int_prop->Set_help("Convergence of subpixel elements, from blurry to sharp (CGA and Tandy-only).");
+}
+
+static void turn_crt_knob(bool pressed, const int amount)
+{
+	if (!pressed)
+		return;
+	switch (crt_knob) {
+	case CRT_KNOB::ERA: is_composite_new_era = !is_composite_new_era; break;
+	case CRT_KNOB::HUE: hue.turn(amount); break;
+	case CRT_KNOB::SATURATION: saturation.turn(amount); break;
+	case CRT_KNOB::CONTRAST: contrast.turn(amount); break;
+	case CRT_KNOB::BRIGHTNESS: brightness.turn(amount); break;
+	case CRT_KNOB::CONVERGENCE: convergence.turn(amount); break;
+	case CRT_KNOB::ENUM_END: assertm(false, "Should not reach CRT knob end marker"); break;
+	}
+	if (machine == MCH_PCJR)
+		update_cga16_color_pcjr();
+	else
+		update_cga16_color();
+
+	log_crt_knob_value();
+}
+
+void VGA_AddCompositeSettings(Config &conf)
+{
+	auto sec = conf.AddSection_prop("composite", &composite_init, true);
+	assert(sec);
+	composite_settings(*sec);
+}

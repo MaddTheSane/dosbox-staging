@@ -41,6 +41,7 @@
 #include "regs.h"
 #include "string_utils.h"
 #include "support.h"
+#include "timer.h"
 #include "../ints/int10.h"
 
 // clang-format off
@@ -381,10 +382,16 @@ void DOS_Shell::CMD_ECHO(char * args){
 	} else WriteOut("%s\r\n",args);
 }
 
+int64_t ticks_at_program_launch = 0;
 void DOS_Shell::CMD_EXIT(char *args)
 {
 	HELP("EXIT");
-	exit_requested = true;
+	if (GetTicksSince(ticks_at_program_launch) <= 2000) {
+		WriteOut(MSG_Get("SHELL_CMD_EXIT_TOO_SOON"));
+		LOG_WARNING("SHELL: Caught a very early 'exit' attempt, which means something might have failed.");
+	} else {
+		exit_cmd_called = true;
+	}
 }
 
 void DOS_Shell::CMD_CHDIR(char * args) {
@@ -1051,7 +1058,7 @@ void DOS_Shell::CMD_COPY(char * args) {
 			if (plus) *plus++ = 0;
 			safe_strcpy(source_x, source_p);
 			bool has_drive_spec = false;
-			size_t source_x_len = strlen(source_x);
+			size_t source_x_len = safe_strlen(source_x);
 			if (source_x_len>0) {
 				if (source_x[source_x_len-1] == ':') has_drive_spec = true;
 			}
@@ -1684,7 +1691,7 @@ void DOS_Shell::CMD_CHOICE(char * args){
 	Bit16u n=1;
 	do {
 		DOS_ReadFile(STDIN, &c, &n);
-		if (exit_requested)
+		if (shutdown_requested)
 			break;
 	} while (!c || !(ptr = strchr(rem, (optS ? c : toupper(c)))));
 	c = optS ? c : (Bit8u)toupper(c);

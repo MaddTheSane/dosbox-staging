@@ -1383,15 +1383,15 @@ static void OPL3_initalize(OPL3 *chip)
 
 	/* Amplitude modulation: 27 output levels (triangle waveform); 1 level takes one of: 192, 256 or 448 samples */
 	/* One entry from LFO_AM_TABLE lasts for 64 samples */
-	chip->lfo_am_inc = (1.0 / 64.0) * (1<<LFO_SH) * chip->freqbase;
+	chip->lfo_am_inc = static_cast<uint32_t>((1.0 / 64.0) * (1<<LFO_SH) * chip->freqbase);
 
 	/* Vibrato: 8 output levels (triangle waveform); 1 level takes 1024 samples */
-	chip->lfo_pm_inc = (1.0 / 1024.0) * (1<<LFO_SH) * chip->freqbase;
+	chip->lfo_pm_inc = static_cast<uint32_t>((1.0 / 1024.0) * (1<<LFO_SH) * chip->freqbase);
 
 	/*logerror ("chip->lfo_am_inc = %8x ; chip->lfo_pm_inc = %8x\n", chip->lfo_am_inc, chip->lfo_pm_inc);*/
 
 	/* Noise generator: a step takes 1 sample */
-	chip->noise_f = (1.0 / 1.0) * (1<<FREQ_SH) * chip->freqbase;
+	chip->noise_f = static_cast<uint32_t>((1.0 / 1.0) * (1<<FREQ_SH) * chip->freqbase);
 
 	chip->eg_timer_add  = (1<<EG_SH)  * chip->freqbase;
 	chip->eg_timer_overflow = (1) * (1<<EG_SH);
@@ -1633,7 +1633,7 @@ static inline void set_sl_rr(OPL3 *chip,int slot,int v)
 }
 
 
-static void update_channels(OPL3 *chip, OPL3_CH *CH)
+static void update_channels(MAYBE_UNUSED OPL3 *chip, OPL3_CH *CH)
 {
 	/* update channel passed as a parameter and a channel at CH+=3; */
 	if (CH->extended)
@@ -2442,7 +2442,7 @@ static int OPL3TimerOver(OPL3 *chip,int c)
 	return chip->status>>7;
 }
 
-static void OPL3_save_state(OPL3 *chip, device_t *device) {
+static void OPL3_save_state(MAYBE_UNUSED OPL3 *chip, MAYBE_UNUSED device_t *device) {
 #if 0 
 	for (int ch=0; ch<18; ch++) {
 		OPL3_CH *channel = &chip->P_CH[ch];

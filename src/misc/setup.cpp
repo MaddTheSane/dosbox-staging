@@ -951,15 +951,12 @@ Section *Config::GetSectionFromProperty(const char *prop) const
 	return nullptr;
 }
 
-bool Config::ParseConfigFile(char const * const configfilename) {
-	//static bool first_configfile = true;
+bool Config::ParseConfigFile(const std::string &type, const std::string &configfilename)
+{
+	// static bool first_configfile = true;
 	ifstream in(configfilename);
 	if (!in) return false;
 	configfiles.push_back(configfilename);
-
-	LOG_MSG("CONFIG: Loading %s file %s",
-	        configfiles.size() == 1 ? "primary" : "additional",
-	        configfilename);
 
 	//Get directory from configfilename, used with relative paths.
 	current_config_dir=configfilename;
@@ -1005,6 +1002,9 @@ bool Config::ParseConfigFile(char const * const configfilename) {
 		}
 	}
 	current_config_dir.clear();//So internal changes don't use the path information
+
+	LOG_INFO("CONFIG: Loaded %s conf file %s", type.c_str(), configfilename.c_str());
+
 	return true;
 }
 
@@ -1370,5 +1370,51 @@ void CommandLine::Shift(unsigned int amount) {
 	while(amount--) {
 		file_name = cmds.size()?(*(cmds.begin())):"";
 		if(cmds.size()) cmds.erase(cmds.begin());
+	}
+}
+
+// Parse the user's configuration files starting with the primary, then custom
+// -conf's, and finally the local dosbox.conf
+void SETUP_ParseConfigFiles(const std::string &config_path)
+{
+	std::string config_file;
+
+	// First: parse the user's primary config file
+	const bool wants_primary_conf = !control->cmdline->FindExist("-noprimaryconf", true);
+	if (wants_primary_conf) {
+		Cross::GetPlatformConfigName(config_file);
+		std::string config_combined = config_path + config_file;
+		control->ParseConfigFile("primary", config_combined);
+
+		// Primary doesn't exist, so let's create and load it
+		if (!control->configfiles.size()) {
+			std::string new_config_path = config_path;
+			Cross::CreatePlatformConfigDir(new_config_path);
+			config_combined = new_config_path + config_file;
+			if (control->PrintConfig(config_combined)) {
+				LOG_MSG("CONFIG: Wrote new primary conf file '%s'", config_combined.c_str());
+				control->ParseConfigFile("new primary", config_combined);
+			} else {
+				LOG_WARNING("CONFIG: Unable to write a new primary conf file '%s'",
+				            config_combined.c_str());
+			}
+		}
+	}
+
+	// Second: parse all intermediate -conf <files>
+	while (control->cmdline->FindString("-conf", config_file, true)) {
+		if (!control->ParseConfigFile("custom", config_file)) {
+			// try to load it from the user directory
+			if (!control->ParseConfigFile("custom", config_path + config_file)) {
+				LOG_MSG("CONFIG: Can't open custom conf file: %s",
+				        config_file.c_str());
+			}
+		}
+	}
+
+	// Third: parse the local 'dosbox.conf', if available
+	const bool wants_local_conf = !control->cmdline->FindExist("-nolocalconf", true);
+	if (wants_local_conf) {
+		control->ParseConfigFile("local", "dosbox.conf");
 	}
 }

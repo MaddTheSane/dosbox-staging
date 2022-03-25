@@ -24,6 +24,7 @@
 #include <cassert>
 #include <limits>
 #include <cstring>
+#include <unordered_map>
 
 #include "setup.h"
 #include "cpu.h"
@@ -36,192 +37,18 @@
 
 //#define ENABLE_PORTLOG
 
-std::unordered_map<io_port_t, IO_WriteHandler> io_writehandlers[IO_SIZES] = {};
-std::unordered_map<io_port_t, IO_ReadHandler> io_readhandlers[IO_SIZES] = {};
+// type-sized IO handler containers
+extern std::unordered_map<io_port_t, io_read_f> io_read_handlers[io_widths];
+extern std::unordered_map<io_port_t, io_write_f> io_write_handlers[io_widths];
 
-void port_within_proposed(io_port_t port) {
-	assert(port < std::numeric_limits<io_port_t_proposed>::max());
-}
+// type-sized IO handler API
+uint8_t read_byte_from_port(const io_port_t port);
+uint16_t read_word_from_port(const io_port_t port);
+uint32_t read_dword_from_port(const io_port_t port);
+void write_byte_to_port(const io_port_t port, const uint8_t val);
+void write_word_to_port(const io_port_t port, const uint16_t val);
+void write_dword_to_port(const io_port_t port, const uint32_t val);
 
-void val_within_proposed(io_val_t val) {
-	assert(val <= std::numeric_limits<io_val_t_proposed>::max());
-}
-
-static io_val_t ReadBlocked(io_port_t /*port*/, Bitu /*iolen*/)
-{
-	return static_cast<io_val_t>(~0);
-}
-
-static void WriteBlocked(io_port_t /*port*/, io_val_t /*val*/, Bitu /*iolen*/)
-{}
-
-static io_val_t ReadDefault(io_port_t port, Bitu iolen);
-static void WriteDefault(io_port_t port, io_val_t val, Bitu iolen);
-
-// The ReadPort and WritePort functions lookup and call the handler
-// at the desired port. If the port hasn't been assigned (and the
-// lookup is empty), then the default handler is assigned and called.
-static io_val_t ReadPort(uint8_t req_bytes, io_port_t port)
-{
-	// Convert bytes to handler map index MB.0x1->0, MW.0x2->1, and MD.0x4->2
-	const uint8_t idx = req_bytes >> 1;
-	return io_readhandlers[idx].emplace(port, ReadDefault).first->second(port, req_bytes);
-}
-
-static void WritePort(uint8_t put_bytes, io_port_t port, io_val_t val)
-{
-	// Convert bytes to handler map index MB.0x1->0, MW.0x2->1, and MD.0x4->2
-	const uint8_t idx = put_bytes >> 1;
-
-	 // Convert bytes into a cut-off mask: 1->0xff, 2->0xffff, 4->0xffffff
-	const auto mask = (1ul << (put_bytes * 8)) - 1;
-	io_writehandlers[idx]
-	        .emplace(port, WriteDefault)
-	        .first->second(port, val & mask, put_bytes);
-}
-
-static io_val_t ReadDefault(io_port_t port, Bitu iolen)
-{
-	port_within_proposed(port);
-
-	switch (iolen) {
-	case 1:
-		LOG(LOG_IO, LOG_WARN)("IOBUS: Unexpected read from %04xh; blocking",
-		                      static_cast<uint32_t>(port));
-		io_readhandlers[0][port] = ReadBlocked;
-		return 0xff;
-	case 2: return ReadPort(IO_MB, port) | (ReadPort(IO_MB, port + 1) << 8);
-	case 4: return ReadPort(IO_MW, port) | (ReadPort(IO_MW, port + 2) << 16);
-	}
-	return 0;
-}
-
-static void WriteDefault(io_port_t port, io_val_t val, Bitu iolen)
-{
-	port_within_proposed(port);
-	val_within_proposed(val);
-
-	switch (iolen) {
-	case 1:
-		LOG(LOG_IO, LOG_WARN)("IOBUS: Unexpected write of %u to %04xh; blocking",
-		                      static_cast<uint32_t>(val),
-		                      static_cast<uint32_t>(port));
-		io_writehandlers[0][port] = WriteBlocked;
-		break;
-	case 2:
-		WritePort(IO_MB, port, val);
-		WritePort(IO_MB, port + 1, val >> 8);
-		break;
-	case 4:
-		WritePort(IO_MW, port, val);
-		WritePort(IO_MW, port + 2, val >> 16);
-		break;
-	}
-}
-
-void IO_RegisterReadHandler(io_port_t port, IO_ReadHandler handler, Bitu mask, Bitu range)
-{
-	port_within_proposed(port);
-
-	while (range--) {
-		if (mask&IO_MB) io_readhandlers[0][port]=handler;
-		if (mask&IO_MW) io_readhandlers[1][port]=handler;
-		if (mask&IO_MD) io_readhandlers[2][port]=handler;
-		port++;
-	}
-}
-
-void IO_RegisterWriteHandler(io_port_t port, IO_WriteHandler handler, Bitu mask, Bitu range)
-{
-	port_within_proposed(port);
-
-	while (range--) {
-		if (mask&IO_MB) io_writehandlers[0][port]=handler;
-		if (mask&IO_MW) io_writehandlers[1][port]=handler;
-		if (mask&IO_MD) io_writehandlers[2][port]=handler;
-		port++;
-	}
-}
-
-void IO_FreeReadHandler(io_port_t port, Bitu mask, Bitu range)
-{
-	port_within_proposed(port);
-
-	while (range--) {
-		if (mask & IO_MB)
-			io_readhandlers[0].erase(port);
-		if (mask & IO_MW)
-			io_readhandlers[1].erase(port);
-		if (mask & IO_MD)
-			io_readhandlers[2].erase(port);
-		port++;
-	}
-}
-
-void IO_FreeWriteHandler(io_port_t port, Bitu mask, Bitu range)
-{
-	port_within_proposed(port);
-
-	while (range--) {
-		if (mask & IO_MB)
-			io_writehandlers[0].erase(port);
-		if (mask & IO_MW)
-			io_writehandlers[1].erase(port);
-		if (mask & IO_MD)
-			io_writehandlers[2].erase(port);
-		port++;
-	}
-}
-
-void IO_ReadHandleObject::Install(io_port_t port, IO_ReadHandler handler, Bitu mask, Bitu range)
-{
-	port_within_proposed(port);
-
-	if(!installed) {
-		installed=true;
-		m_port=port;
-		m_mask=mask;
-		m_range=range;
-		IO_RegisterReadHandler(port,handler,mask,range);
-	} else
-		E_Exit("IO_readHandler already installed port %#" PRIxPTR, port);
-}
-
-void IO_ReadHandleObject::Uninstall(){
-	if(!installed) return;
-	IO_FreeReadHandler(m_port,m_mask,m_range);
-	installed=false;
-}
-
-IO_ReadHandleObject::~IO_ReadHandleObject(){
-	Uninstall();
-}
-
-void IO_WriteHandleObject::Install(io_port_t port, IO_WriteHandler handler, Bitu mask, Bitu range)
-{
-	port_within_proposed(port);
-
-	if(!installed) {
-		installed=true;
-		m_port=port;
-		m_mask=mask;
-		m_range=range;
-		IO_RegisterWriteHandler(port,handler,mask,range);
-	} else
-		E_Exit("IO_writeHandler already installed port %#" PRIxPTR, port);
-}
-
-void IO_WriteHandleObject::Uninstall() {
-	if(!installed) return;
-	IO_FreeWriteHandler(m_port,m_mask,m_range);
-	installed=false;
-}
-
-IO_WriteHandleObject::~IO_WriteHandleObject(){
-	Uninstall();
-	// LOG_MSG("IOBUS: FreeWritehandler called with port %04x",
-	// static_cast<uint32_t>(m_port));
-}
 
 struct IOF_Entry {
 	Bitu cs;
@@ -263,43 +90,38 @@ constexpr int32_t IODELAY_WRITE_MICROSk = static_cast<int32_t>(
         1024 / IODELAY_WRITE_MICROS);
 
 inline void IO_USEC_read_delay() {
-	Bits delaycyc = CPU_CycleMax/IODELAY_READ_MICROSk;
-	if(GCC_UNLIKELY(delaycyc > CPU_Cycles)) delaycyc = CPU_Cycles;
+	auto delaycyc = CPU_CycleMax / IODELAY_READ_MICROSk;
+	if (GCC_UNLIKELY(delaycyc > CPU_Cycles))
+		delaycyc = CPU_Cycles;
 	CPU_Cycles -= delaycyc;
 	CPU_IODelayRemoved += delaycyc;
 }
 
 inline void IO_USEC_write_delay() {
-	Bits delaycyc = CPU_CycleMax/IODELAY_WRITE_MICROSk;
-	if(GCC_UNLIKELY(delaycyc > CPU_Cycles)) delaycyc = CPU_Cycles;
+	auto delaycyc = CPU_CycleMax / IODELAY_WRITE_MICROSk;
+	if (GCC_UNLIKELY(delaycyc > CPU_Cycles))
+		delaycyc = CPU_Cycles;
 	CPU_Cycles -= delaycyc;
 	CPU_IODelayRemoved += delaycyc;
 }
 
 #ifdef ENABLE_PORTLOG
 static Bit8u crtc_index = 0;
-const char* const len_type[] = {" 8","16","32"};
-void log_io(Bitu width, bool write, io_port_t port, io_val_t val)
-{
-	port_within_proposed(port);
-	val_within_proposed(val);
 
+void log_io(io_width_t width, bool write, io_port_t port, io_val_t val)
+{
 	switch(width) {
-	case 0:
-		val&=0xff;
-		break;
-	case 1:
-		val&=0xffff;
-		break;
+	case io_width_t::byte: val &= 0xff; break;
+	case io_width_t::word: val &= 0xffff; break;
 	}
 	if (write) {
 		// skip the video cursor position spam
 		if (port==0x3d4) {
-			if (width==0) crtc_index = (Bit8u)val;
-			else if(width==1) crtc_index = (Bit8u)(val>>8);
+			if (width==io_width_t::byte) crtc_index = (Bit8u)val;
+			else if(width==io_width_t::word) crtc_index = (Bit8u)(val>>8);
 		}
 		if (crtc_index==0xe || crtc_index==0xf) {
-			if((width==0 && (port==0x3d4 || port==0x3d5))||(width==1 && port==0x3d4))
+			if((width==io_width_t::byte && (port==0x3d4 || port==0x3d5))||(width==io_width_t::word && port==0x3d4))
 				return;
 		}
 
@@ -317,9 +139,8 @@ void log_io(Bitu width, bool write, io_port_t port, io_val_t val)
 		// case 0x3c5: // VGA seq
 			break;
 		default:
-			LOG_MSG("IOSBUS: iow%s % 4x % 4x, cs:ip %04x:%04x",
-			        len_type[width], static_cast<uint32_t>(port),
-			        val, SegValue(cs), reg_eip);
+			LOG_MSG("IOSBUS: write width=%u bytes, % 4x % 4x, cs:ip %04x:%04x",
+			        static_cast<uint8_t>(width), port, val, SegValue(cs), reg_eip);
 			break;
 		}
 	} else {
@@ -336,9 +157,8 @@ void log_io(Bitu width, bool write, io_port_t port, io_val_t val)
 			// don't log for the above cases
 			break;
 		default:
-			LOG_MSG("IOBUS: ior%s % 4x % 4x,\t\tcs:ip %04x:%04x",
-			        len_type[width], static_cast<uint32_t>(port),
-			        val, SegValue(cs), reg_eip);
+			LOG_MSG("IOBUS: read width=%u bytes % 4x % 4x,\t\tcs:ip %04x:%04x",
+			        static_cast<uint8_t>(width), port, val, SegValue(cs), reg_eip);
 			break;
 		}
 	}
@@ -347,12 +167,9 @@ void log_io(Bitu width, bool write, io_port_t port, io_val_t val)
 #define log_io(W, X, Y, Z)
 #endif
 
-void IO_WriteB(io_port_t port, io_val_t val)
+void IO_WriteB(io_port_t port, uint8_t val)
 {
-	port_within_proposed(port);
-	val_within_proposed(val);
-
-	log_io(0, true, port, val);
+	log_io(io_width_t::byte, true, port, val);
 	if (GCC_UNLIKELY(GETFLAG(VM) && (CPU_IO_Exception(port,1)))) {
 		LazyFlags old_lflags;
 		memcpy(&old_lflags,&lflags,sizeof(LazyFlags));
@@ -366,8 +183,8 @@ void IO_WriteB(io_port_t port, io_val_t val)
 		CPU_Push16(reg_ip);
 		Bit8u old_al = reg_al;
 		Bit16u old_dx = reg_dx;
-		reg_al = static_cast<uint8_t>(val);
-		reg_dx = static_cast<uint16_t>(port);
+		reg_al = val;
+		reg_dx = port;
 		RealPt icb = CALLBACK_RealPointer(call_priv_io);
 		SegSet16(cs,RealSeg(icb));
 		reg_eip = RealOff(icb)+0x08;
@@ -383,16 +200,13 @@ void IO_WriteB(io_port_t port, io_val_t val)
 	}
 	else {
 		IO_USEC_write_delay();
-		WritePort(IO_MB, port, val);
+		write_byte_to_port(port, val);
 	}
 }
 
-void IO_WriteW(io_port_t port, io_val_t val)
+void IO_WriteW(io_port_t port, uint16_t val)
 {
-	port_within_proposed(port);
-	val_within_proposed(val);
-
-	log_io(1, true, port, val);
+	log_io(io_width_t::word, true, port, val);
 	if (GCC_UNLIKELY(GETFLAG(VM) && (CPU_IO_Exception(port,2)))) {
 		LazyFlags old_lflags;
 		memcpy(&old_lflags,&lflags,sizeof(LazyFlags));
@@ -406,8 +220,8 @@ void IO_WriteW(io_port_t port, io_val_t val)
 		CPU_Push16(reg_ip);
 		Bit16u old_ax = reg_ax;
 		Bit16u old_dx = reg_dx;
-		reg_ax = static_cast<uint16_t>(val);
-		reg_dx = static_cast<uint16_t>(port);
+		reg_ax = val;
+		reg_dx = port;
 		RealPt icb = CALLBACK_RealPointer(call_priv_io);
 		SegSet16(cs,RealSeg(icb));
 		reg_eip = RealOff(icb)+0x0a;
@@ -423,16 +237,13 @@ void IO_WriteW(io_port_t port, io_val_t val)
 	}
 	else {
 		IO_USEC_write_delay();
-		WritePort(IO_MW, port, val);
+		write_word_to_port(port, val);
 	}
 }
 
-void IO_WriteD(io_port_t port, io_val_t val)
+void IO_WriteD(io_port_t port, uint32_t val)
 {
-	port_within_proposed(port);
-	val_within_proposed(val);
-
-	log_io(2, true, port, val);
+	log_io(io_width_t::dword, true, port, val);
 	if (GCC_UNLIKELY(GETFLAG(VM) && (CPU_IO_Exception(port,4)))) {
 		LazyFlags old_lflags;
 		memcpy(&old_lflags,&lflags,sizeof(LazyFlags));
@@ -446,8 +257,8 @@ void IO_WriteD(io_port_t port, io_val_t val)
 		CPU_Push16(reg_ip);
 		Bit32u old_eax = reg_eax;
 		Bit16u old_dx = reg_dx;
-		reg_eax = static_cast<uint32_t>(val);
-		reg_dx = static_cast<uint16_t>(port);
+		reg_eax = val;
+		reg_dx = port;
 		RealPt icb = CALLBACK_RealPointer(call_priv_io);
 		SegSet16(cs,RealSeg(icb));
 		reg_eip = RealOff(icb)+0x0c;
@@ -461,15 +272,13 @@ void IO_WriteD(io_port_t port, io_val_t val)
 		memcpy(&lflags,&old_lflags,sizeof(LazyFlags));
 		cpudecoder=old_cpudecoder;
 	} else {
-		WritePort(IO_MD, port, val);
+		write_dword_to_port(port, val);
 	}
 }
 
-io_val_t IO_ReadB(io_port_t port)
+uint8_t IO_ReadB(io_port_t port)
 {
-	port_within_proposed(port);
-
-	io_val_t retval;
+	uint8_t retval;
 	if (GCC_UNLIKELY(GETFLAG(VM) && (CPU_IO_Exception(port,1)))) {
 		LazyFlags old_lflags;
 		memcpy(&old_lflags,&lflags,sizeof(LazyFlags));
@@ -483,7 +292,7 @@ io_val_t IO_ReadB(io_port_t port)
 		CPU_Push16(reg_ip);
 		Bit8u old_al = reg_al;
 		Bit16u old_dx = reg_dx;
-		reg_dx = static_cast<uint16_t>(port);
+		reg_dx = port;
 		RealPt icb = CALLBACK_RealPointer(call_priv_io);
 		SegSet16(cs,RealSeg(icb));
 		reg_eip = RealOff(icb)+0x00;
@@ -501,17 +310,15 @@ io_val_t IO_ReadB(io_port_t port)
 	}
 	else {
 		IO_USEC_read_delay();
-		retval = ReadPort(IO_MB, port);
+		retval = read_byte_from_port(port);
 	}
-	log_io(0, false, port, retval);
+	log_io(io_width_t::byte, false, port, retval);
 	return retval;
 }
 
-io_val_t IO_ReadW(io_port_t port)
+uint16_t IO_ReadW(io_port_t port)
 {
-	port_within_proposed(port);
-
-	io_val_t retval;
+	uint16_t retval;
 	if (GCC_UNLIKELY(GETFLAG(VM) && (CPU_IO_Exception(port,2)))) {
 		LazyFlags old_lflags;
 		memcpy(&old_lflags,&lflags,sizeof(LazyFlags));
@@ -525,7 +332,7 @@ io_val_t IO_ReadW(io_port_t port)
 		CPU_Push16(reg_ip);
 		Bit16u old_ax = reg_ax;
 		Bit16u old_dx = reg_dx;
-		reg_dx = static_cast<uint16_t>(port);
+		reg_dx = port;
 		RealPt icb = CALLBACK_RealPointer(call_priv_io);
 		SegSet16(cs,RealSeg(icb));
 		reg_eip = RealOff(icb)+0x02;
@@ -542,17 +349,15 @@ io_val_t IO_ReadW(io_port_t port)
 	}
 	else {
 		IO_USEC_read_delay();
-		retval = ReadPort(IO_MW, port);
+		retval = read_word_from_port(port);
 	}
-	log_io(1, false, port, retval);
+	log_io(io_width_t::word, false, port, retval);
 	return retval;
 }
 
-io_val_t IO_ReadD(io_port_t port)
+uint32_t IO_ReadD(io_port_t port)
 {
-	port_within_proposed(port);
-
-	io_val_t retval;
+	uint32_t retval;
 	if (GCC_UNLIKELY(GETFLAG(VM) && (CPU_IO_Exception(port,4)))) {
 		LazyFlags old_lflags;
 		memcpy(&old_lflags,&lflags,sizeof(LazyFlags));
@@ -566,7 +371,7 @@ io_val_t IO_ReadD(io_port_t port)
 		CPU_Push16(reg_ip);
 		Bit32u old_eax = reg_eax;
 		Bit16u old_dx = reg_dx;
-		reg_dx = static_cast<uint16_t>(port);
+		reg_dx = port;
 		RealPt icb = CALLBACK_RealPointer(call_priv_io);
 		SegSet16(cs,RealSeg(icb));
 		reg_eip = RealOff(icb)+0x04;
@@ -581,12 +386,13 @@ io_val_t IO_ReadD(io_port_t port)
 		memcpy(&lflags,&old_lflags,sizeof(LazyFlags));
 		cpudecoder=old_cpudecoder;
 	} else {
-		retval = ReadPort(IO_MD, port);
+		retval = read_dword_from_port(port);
 	}
 
-	log_io(2, false, port, retval);
+	log_io(io_width_t::dword, false, port, retval);
 	return retval;
 }
+
 
 class IO final : public Module_base {
 public:
@@ -596,19 +402,19 @@ public:
 	~IO()
 	{
 		size_t total_bytes = 0u;
-		for (uint8_t i = 0; i < IO_SIZES; ++i) {
-			const size_t readers = io_readhandlers[i].size();
-			const size_t writers = io_writehandlers[i].size();
-			DEBUG_LOG_MSG("IOBUS: Releasing %lu read and %lu write %d-bit port handlers",
-			              readers, writers, 8 << i);
-			total_bytes += readers * sizeof(IO_ReadHandler) +
-			               sizeof(io_readhandlers[i]);
-			total_bytes += writers * sizeof(IO_WriteHandler) +
-			               sizeof(io_readhandlers[i]);
-			io_readhandlers[i].clear();
-			io_writehandlers[i].clear();
+		for (uint8_t i = 0; i < io_widths; ++i) {
+			const auto readers = io_read_handlers[i].size();
+			const auto writers = io_write_handlers[i].size();
+			DEBUG_LOG_MSG("IOBUS: Releasing %d read and %d write %d-bit port handlers",
+			              static_cast<int>(readers), static_cast<int>(writers), 8 << i);
+
+			total_bytes += readers * sizeof(io_read_f) + sizeof(io_read_handlers[i]);
+			total_bytes += writers * sizeof(io_write_f) + sizeof(io_write_handlers[i]);
+			io_read_handlers[i].clear();
+			io_write_handlers[i].clear();
 		}
-		DEBUG_LOG_MSG("IOBUS: Handlers consumed %lu total bytes", total_bytes);
+		DEBUG_LOG_MSG("IOBUS: Handlers consumed %d total bytes",
+		              static_cast<int>(total_bytes));
 	}
 };
 

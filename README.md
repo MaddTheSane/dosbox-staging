@@ -26,7 +26,7 @@ support today's systems.
 |                                | DOSBox Staging                | DOSBox
 |-                               |-                              |-
 | **Version control**            | Git                           | [SVN]
-| **Language**                   | C++14                         | C++03<sup>[1]</sup>
+| **Language**                   | C++17                         | C++03<sup>[1]</sup>
 | **SDL**                        | >= 2.0.5                      | 1.2<sup>＊</sup>
 | **Buildsystem**                | Meson or Visual Studio 2019   | Autotools or Visual Studio 2003
 | **CI**                         | Yes                           | No
@@ -82,7 +82,7 @@ Feature differences between release binaries (or unpatched sources):
 | **Relative window size**    | Yes (`windowresolution=small`, `medium`, or `large`) | `windowresolution=X%`
 | **[OPL] emulators**         | compat, fast, mame, nuked<sup>[8]</sup>              | compat, fast, mame
 | **[CGA]/mono support**      | Yes (`machine=cga_mono`)<sup>[9]</sup>               | Only CGA with colour
-| **PCjr CGA composite mode** | Yes (`machine=pcjr` with composite hotkeys)          | N/A
+| **CGA composite modes**     | Yes (`machine=pcjr/tandy/cga` with hotkeys)          | N/A
 | **[Wayland] support**       | Experimental (use `SDL_VIDEODRIVER=wayland`)         | N/A
 | **Modem phonebook file**    | Yes (`phonebookfile=<name>`)                         | N/A
 | **Autotype command**        | Yes<sup>[10]</sup>                                   | N/A
@@ -117,6 +117,20 @@ Feature differences between release binaries (or unpatched sources):
 
 [Links to the newest builds](https://dosbox-staging.github.io/downloads/devel/)
 
+## Get the source
+
+  - First, ensure git always updates your submodules when you pull (one-time step):
+
+    ``` shell
+    git config --global submodule.recurse true
+    ```
+
+  - Clone the repository (one-time step):
+
+    ``` shell
+    git clone --recurse-submodules https://github.com/dosbox-staging/dosbox-staging.git
+    ```
+
 ## Build instructions
 
 Read [BUILD.md] for the comprehensive compilation guide.
@@ -134,8 +148,15 @@ sudo dnf install ccache gcc-c++ meson alsa-lib-devel libpng-devel \
 
 ``` shell
 # Debian, Ubuntu
-sudo apt install ccache build-essential meson libasound2-dev libpng-dev \
+sudo apt install ccache build-essential libasound2-dev libpng-dev \
                  libsdl2-dev libsdl2-net-dev libopusfile-dev libfluidsynth-dev
+
+# Install Meson on Debian-10 "Buster" or Ubuntu-20.04 and older
+sudo apt install python3-setuptools
+sudo pip3 install --upgrade meson ninja
+
+# Install Meson on Debian-11 "Bullseye" or Ubuntu-21.04 and newer
+sudo apt install meson
 ```
 
 ``` shell
@@ -157,23 +178,55 @@ xcode-select --install
 brew install ccache meson libpng sdl2 sdl2_net opusfile fluid-synth
 ```
 
-Instructions for creating an optimised release build:
+### Build and stay up-to-date with the latest sources
 
-``` shell
-git clone https://github.com/dosbox-staging/dosbox-staging.git
-cd dosbox-staging
-meson setup -Dbuildtype=release build
-ninja -C build
-./build/dosbox
-```
+  - Checkout the master branch, which will include the submodules:
 
-To build and link the MT-32 and FluidSynth subprojects statically,
-add the `-Ddefault_library=static` option during setup.
+    ``` shell
+    # commit or stash any personal code changes
+    git checkout master -f
+    ```
 
-To see all of Meson's setup options, run:
-``` shell
-meson configure
-```
+  - Pull the latest updates. This is necessary every time you want a new build:
+
+    ``` shell
+    git pull
+    ```
+
+  - Optionally, you can clean your ccache and working directories. This is only
+    advised if you have unexpected build failures:
+
+    ``` shell
+    ccache -C
+    git clean -fdx
+    ```
+
+  - Setup the build. This is a one-time step either after cloning the repo or
+    cleaning your working directories:
+
+    ``` shell
+    meson setup \
+        -Dbuildtype=release \
+        -Ddefault_library=static \
+        -Db_asneeded=true \
+        -Dtry_static_libs=png \
+        -Dfluidsynth:enable-floats=true \
+        -Dfluidsynth:try-static-deps=true \
+      build/release
+    ```
+
+    The above enables all of DOSBox Staging's functional features. If you're
+    interested in seeing all of Meson's setup options, run: `meson configure`.
+
+
+  - Compile the sources. This is necessary every time you want a new build:
+
+    ``` shell
+    meson compile -C build/release
+    ```
+
+    Your binary is: `build/release/dosbox` -- have fun!
+
 
 ### Windows - Visual Studio (2019 or newer)
 
@@ -237,11 +290,11 @@ For some historical context of why this repo exists you can read
 [discord]:          https://discord.gg/WwAg3Xf
 [build-lin1-badge]: https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Linux%20builds?label=Linux%20(x86_64)
 [build-linux]:      https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Linux+builds%22
-[build-lin2-badge]: https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Platform%20builds?label=Linux%20(ARM,%20S390x)
+[build-lin2-badge]: https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Platform%20builds?label=Linux%20(arm64,%20S390x)
 [build-linux-2]:    https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Platform+builds%22
 [build-win-badge]:  https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/Windows%20builds?label=Windows%20(x86,%20x86_64)
 [build-win]:        https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22Windows+builds%22
-[build-mac-badge]:  https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/macOS%20builds?label=macOS%20(x86_64)
+[build-mac-badge]:  https://img.shields.io/github/workflow/status/dosbox-staging/dosbox-staging/macOS%20builds?label=macOS%20(arm64,%20x86_64)
 [build-mac]:        https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22macOS+builds%22
 [coverity-badge]:   https://img.shields.io/coverity/scan/dosbox-staging
 [lgtm-badge]:       https://img.shields.io/lgtm/grade/cpp/github/dosbox-staging/dosbox-staging

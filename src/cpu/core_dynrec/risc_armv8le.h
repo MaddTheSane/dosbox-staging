@@ -447,7 +447,7 @@ static void gen_mov_qword_to_reg_imm(HostReg dest_reg,Bit64u imm) {
 }
 
 // helper function for gen_mov_word_to_reg
-static void gen_mov_word_to_reg_helper(HostReg dest_reg,void* data,bool dword,HostReg data_reg) {
+static void gen_mov_word_to_reg_helper(HostReg dest_reg, MAYBE_UNUSED void* data,bool dword,HostReg data_reg) {
 	if (dword) {
 		cache_addd( LDR_IMM(dest_reg, data_reg, 0) );       // ldr dest_reg, [data_reg]
 	} else {
@@ -523,7 +523,7 @@ static bool gen_mov_memval_from_reg(HostReg src_reg, void *dest, Bitu size) {
 }
 
 // helper function for gen_mov_word_from_reg
-static void gen_mov_word_from_reg_helper(HostReg src_reg,void* dest,bool dword, HostReg data_reg) {
+static void gen_mov_word_from_reg_helper(HostReg src_reg, MAYBE_UNUSED void* dest,bool dword, HostReg data_reg) {
 	if (dword) {
 		cache_addd( STR_IMM(src_reg, data_reg, 0) );        // str src_reg, [data_reg]
 	} else {
@@ -762,7 +762,7 @@ static void INLINE gen_call_function_raw(void * func) {
 // generate a call to a function with paramcount parameters
 // note: the parameters are loaded in the architecture specific way
 // using the gen_load_param_ functions below
-static INLINE const Bit8u* gen_call_function_setup(void * func,Bitu paramcount,bool fastcall=false) {
+static INLINE const Bit8u* gen_call_function_setup(void * func, MAYBE_UNUSED Bitu paramcount, MAYBE_UNUSED bool fastcall=false) {
 	const Bit8u* proc_addr = cache.pos;
 	gen_call_function_raw(func);
 	return proc_addr;
@@ -1133,10 +1133,8 @@ static void gen_fill_function_ptr(const Bit8u * pos,void* fct_ptr,Bitu flags_typ
 }
 #endif
 
-static void cache_block_closing(const Bit8u* block_start,Bitu block_size) {
-	//flush cache - GCC/LLVM builtin
-	__builtin___clear_cache((char *)block_start, (char *)(block_start+block_size));
-}
+static void cache_block_closing(MAYBE_UNUSED const Bit8u *block_start,
+                                MAYBE_UNUSED Bitu block_size) { }
 
 static void cache_block_before_close(void) { }
 

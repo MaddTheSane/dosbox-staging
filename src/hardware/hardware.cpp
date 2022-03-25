@@ -30,6 +30,7 @@
 #include "mem.h"
 #include "pic.h"
 #include "render.h"
+#include "rgb24.h"
 #include "setup.h"
 #include "string_utils.h"
 #include "support.h"
@@ -336,7 +337,15 @@ void CAPTURE_VideoStop() {
 #endif
 }
 
-void CAPTURE_AddImage(Bitu width, Bitu height, Bitu bpp, Bitu pitch, Bitu flags, float fps, Bit8u * data, Bit8u * pal) {
+void CAPTURE_AddImage(MAYBE_UNUSED Bitu width,
+                      MAYBE_UNUSED Bitu height,
+                      MAYBE_UNUSED Bitu bpp,
+                      MAYBE_UNUSED Bitu pitch,
+                      MAYBE_UNUSED Bitu flags,
+                      MAYBE_UNUSED float fps,
+                      MAYBE_UNUSED Bit8u *data,
+                      MAYBE_UNUSED Bit8u *pal)
+{
 #if (C_SSHOT)
 	Bitu i;
 	Bit8u doubleRow[SCALER_MAXWIDTH*4];
@@ -468,6 +477,20 @@ void CAPTURE_AddImage(Bitu width, Bitu height, Bitu bpp, Bitu pitch, Bitu flags,
 				}
 				rowPointer = doubleRow;
 				break;
+			case 24:
+				if (flags & CAPTURE_FLAG_DBLW) {
+					for (uint32_t x = 0; x < countWidth; ++x) {
+						const auto pixel = host_to_le(static_cast<rgb24 *>(srcLine)[x]);
+						reinterpret_cast<rgb24 *>(doubleRow)[x * 2 + 0] = pixel;
+						reinterpret_cast<rgb24 *>(doubleRow)[x * 2 + 1] = pixel;
+						rowPointer = doubleRow;
+					}
+				}
+				// There is no else statement here because
+				// rowPointer is already defined as srcLine
+				// above which is already 24-bit single row
+
+				break;
 			case 32:
 				if (flags & CAPTURE_FLAG_DBLW) {
 					for (Bitu x=0;x<countWidth;x++) {
@@ -511,9 +534,15 @@ skip_shot:
 		case 8:format = ZMBV_FORMAT_8BPP;break;
 		case 15:format = ZMBV_FORMAT_15BPP;break;
 		case 16:format = ZMBV_FORMAT_16BPP;break;
-		case 32:format = ZMBV_FORMAT_32BPP;break;
-		default:
-			goto skip_video;
+
+		// ZMBV is "the DOSBox capture format" supported by external
+		// tools such as VLC, MPV, and ffmpeg. Because DOSBox originally
+		// didn't have 24-bit color, the format itself doesn't support
+		// it. I this case we tell ZMBV the data is 32-bit and let the
+		// rgb24's int() cast operator up-convert.
+		case 24: format = ZMBV_FORMAT_32BPP; break;
+		case 32: format = ZMBV_FORMAT_32BPP; break;
+		default: goto skip_video;
 		}
 		if (!capture.video.handle) {
 			capture.video.handle = OpenCaptureFile("Video",".avi");
@@ -554,14 +583,14 @@ skip_shot:
 
 		for (i=0;i<height;i++) {
 			void * rowPointer;
+			void * srcLine;
+			if (flags & CAPTURE_FLAG_DBLH)
+				srcLine=(data+(i >> 1)*pitch);
+			else
+				srcLine=(data+(i >> 0)*pitch);
 			if (flags & CAPTURE_FLAG_DBLW) {
-				void *srcLine;
-				Bitu x;
-				Bitu countWidth = width >> 1;
-				if (flags & CAPTURE_FLAG_DBLH)
-					srcLine=(data+(i >> 1)*pitch);
-				else
-					srcLine=(data+(i >> 0)*pitch);
+				uint32_t x = 0;
+				const uint32_t countWidth = width >> 1;
 				switch ( bpp) {
 				case 8:
 					for (x=0;x<countWidth;x++)
@@ -574,6 +603,13 @@ skip_shot:
 						((Bit16u *)doubleRow)[x*2+0] =
 						((Bit16u *)doubleRow)[x*2+1] = ((Bit16u *)srcLine)[x];
 					break;
+				case 24:
+					for (x = 0; x < countWidth; ++x) {
+						const auto pixel = static_cast<rgb24 *>(srcLine)[x];
+						reinterpret_cast<uint32_t *>(doubleRow)[x * 2 + 0] = pixel;
+						reinterpret_cast<uint32_t *>(doubleRow)[x * 2 + 1] = pixel;
+					}
+					break;
 				case 32:
 					for (x=0;x<countWidth;x++)
 						((Bit32u *)doubleRow)[x*2+0] =
@@ -582,10 +618,17 @@ skip_shot:
 				}
                 rowPointer=doubleRow;
 			} else {
-				if (flags & CAPTURE_FLAG_DBLH)
-					rowPointer=(data+(i >> 1)*pitch);
-				else
-					rowPointer=(data+(i >> 0)*pitch);
+				if (bpp == 24) {
+					const auto countWidth = width;
+					for (uint32_t x = 0; x < countWidth; ++x) {
+						const auto pixel = static_cast<rgb24 *>(srcLine)[x];
+						reinterpret_cast<uint32_t *>(doubleRow)[x] = pixel;
+					}
+					// Using doubleRow for this conversion when it is not actually double row!
+					rowPointer = doubleRow;
+				} else {
+					rowPointer = srcLine;
+				}
 			}
 			capture.video.codec->CompressLines( 1, &rowPointer );
 		}
@@ -608,7 +651,6 @@ skip_video:
 #endif
 	return;
 }
-
 
 #if (C_SSHOT)
 static void CAPTURE_ScreenShotEvent(bool pressed) {
@@ -811,7 +853,7 @@ public:
 
 static HARDWARE *hardware_module;
 
-void HARDWARE_Destroy(Section *sec)
+void HARDWARE_Destroy(MAYBE_UNUSED Section *sec)
 {
 	delete hardware_module;
 }

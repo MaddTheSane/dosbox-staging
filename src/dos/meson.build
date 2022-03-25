@@ -21,14 +21,29 @@ libdos_sources = files([
   'drives.cpp',
   'drive_virtual.cpp',
   'program_autotype.cpp',
+  'program_biostest.cpp',
+  'program_boot.cpp',
   'program_choice.cpp',
   'program_help.cpp',
+  'program_imgmount.cpp',
+  'program_intro.cpp',
+  'program_keyb.cpp',
+  'program_loadfix.cpp',
+  'program_loadrom.cpp',
   'program_ls.cpp',
+  'program_mem.cpp',
+  'program_mount_common.cpp',
+  'program_mount.cpp',
+  'program_rescan.cpp',
 ])
 
 libdos = static_library('dos', libdos_sources,
                         include_directories : incdir,
-                        dependencies : [sdl2_dep, libdecoders_dep])
+                        dependencies : [
+                          sdl2_dep,
+                          libdecoders_dep,
+                          libloguru_dep,
+                        ])
 
 libdos_dep = declare_dependency(link_with : libdos)
 

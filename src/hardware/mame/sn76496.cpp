@@ -285,7 +285,7 @@ void sn76496_base_device::device_start()
 	{
 		// limit volume to avoid clipping
 		if (out > MAX_OUTPUT / 4) m_vol_table[i] = MAX_OUTPUT / 4;
-		else m_vol_table[i] = out;
+		else m_vol_table[i] = static_cast<int32_t>(out);
 
 		out /= 1.258925412; /* = 10 ^ (2/20) = 2dB */
 	}
@@ -393,7 +393,7 @@ void sn76496_base_device::countdown_cycles()
 	}
 }
 
-void sn76496_base_device::sound_stream_update(sound_stream &stream, stream_sample_t **inputs, stream_sample_t **outputs, int samples)
+void sn76496_base_device::sound_stream_update(MAYBE_UNUSED sound_stream &stream, MAYBE_UNUSED stream_sample_t **inputs, stream_sample_t **outputs, int samples)
 {
 	int i;
 	stream_sample_t *lbuffer = outputs[0];

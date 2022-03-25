@@ -1530,7 +1530,7 @@ void InitTables( void ) {
 #endif
 }
 
-Bit32u Handler::WriteAddr(uint16_t port, Bit8u val)
+Bit32u Handler::WriteAddr(io_port_t port, Bit8u val)
 {
 	return chip.WriteAddr(port, val);
 }

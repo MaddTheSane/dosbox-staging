@@ -26,6 +26,7 @@
 #include "mem.h"
 #include "inout.h"
 #include "dos_inc.h"
+#include "string_utils.h"
 
 #define VESA_SUCCESS          0x00
 #define VESA_FAIL             0x01
@@ -125,48 +126,73 @@ Bit8u VESA_GetSVGAInformation(Bit16u seg,Bit16u off) {
 	return VESA_SUCCESS;
 }
 
+bool can_triple_buffer_8bit(const VideoModeBlock &m)
+{
+	assert(m.type == M_LIN8);
+	const auto padding = m.htotal;
+	const uint32_t needed_bytes = (m.swidth + padding) * (m.vtotal + padding) * 3;
+	return vga.vmemsize >= needed_bytes;
+}
+
 Bit8u VESA_GetSVGAModeInformation(Bit16u mode,Bit16u seg,Bit16u off) {
 	MODE_INFO minfo;
 	memset(&minfo,0,sizeof(minfo));
 	PhysPt buf=PhysMake(seg,off);
-	Bitu pageSize;
+	int pageSize = 0;
 	Bit8u modeAttributes;
-	Bitu i=0;
 
 	mode&=0x3fff;	// vbe2 compatible, ignore lfb and keep screen content bits
 	if (mode<0x100) return 0x01;
 	if (svga.accepts_mode) {
 		if (!svga.accepts_mode(mode)) return 0x01;
 	}
-	while (ModeList_VGA[i].mode!=0xffff) {
-		if (mode==ModeList_VGA[i].mode) goto foundit; else i++;
+
+	// Find the requested mode in our table of VGA modes
+	bool found_mode = false;
+	assert(ModeList_VGA.size());
+	auto mblock = ModeList_VGA.back();
+	for (auto &v : ModeList_VGA) {
+		if (v.mode == mode) {
+			mblock = v;
+			found_mode = true;
+			break;
+		}
 	}
-	return VESA_FAIL;
-foundit:
-	if ((int10.vesa_oldvbe) && (ModeList_VGA[i].mode>=0x120)) return 0x01;
-	VideoModeBlock * mblock=&ModeList_VGA[i];
-	switch (mblock->type) {
+	if (!found_mode)
+		return VESA_FAIL;
+
+	// Was the found mode VESA 2.0 but the user requested VESA 1.2?
+	if (mblock.mode >= 0x120 && int10.vesa_oldvbe)
+		return VESA_FAIL;
+
+	bool ok_per_mode_pref;
+	switch (mblock.type) {
 	case M_LIN4:
-		pageSize = mblock->sheight * mblock->swidth/8;
-		minfo.BytesPerScanLine = host_to_le16(mblock->swidth / 8);
+		pageSize = mblock.sheight * mblock.swidth/8;
+		minfo.BytesPerScanLine = host_to_le16(mblock.swidth / 8);
 		minfo.NumberOfPlanes = 0x4;
 		minfo.BitsPerPixel = 4u;
 		minfo.MemoryModel = 3u; // ega planar mode
 		modeAttributes = 0x1b; // Color, graphics, no linear buffer
 		break;
 	case M_LIN8:
-		pageSize = mblock->sheight * mblock->swidth;
-		minfo.BytesPerScanLine = host_to_le16(mblock->swidth);
+		pageSize = mblock.sheight * mblock.swidth;
+		minfo.BytesPerScanLine = host_to_le16(mblock.swidth);
 		minfo.NumberOfPlanes = 0x1;
 		minfo.BitsPerPixel = 8u;
 		minfo.MemoryModel = 4u; // packed pixel
 		modeAttributes = 0x1b; // Color, graphics
-		if (!int10.vesa_nolfb)
+
+		ok_per_mode_pref = (int10.vesa_mode_preference == VESA_MODE_PREF::ALL ||
+		                     (int10.vesa_mode_preference == VESA_MODE_PREF::COMPATIBLE &&
+		                      can_triple_buffer_8bit(mblock)));
+
+		if (!int10.vesa_nolfb && ok_per_mode_pref)
 			modeAttributes |= 0x80; // linear framebuffer
 		break;
 	case M_LIN15:
-		pageSize = mblock->sheight * mblock->swidth*2;
-		minfo.BytesPerScanLine = host_to_le16(mblock->swidth * 2);
+		pageSize = mblock.sheight * mblock.swidth*2;
+		minfo.BytesPerScanLine = host_to_le16(mblock.swidth * 2);
 		minfo.NumberOfPlanes = 0x1;
 		minfo.BitsPerPixel = 15u;
 		minfo.MemoryModel = 6u; // HiColour
@@ -183,8 +209,8 @@ foundit:
 			modeAttributes |= 0x80; // linear framebuffer
 		break;
 	case M_LIN16:
-		pageSize = mblock->sheight * mblock->swidth*2;
-		minfo.BytesPerScanLine = host_to_le16(mblock->swidth * 2);
+		pageSize = mblock.sheight * mblock.swidth*2;
+		minfo.BytesPerScanLine = host_to_le16(mblock.swidth * 2);
 		minfo.NumberOfPlanes = 0x1;
 		minfo.BitsPerPixel = 16u;
 		minfo.MemoryModel = 6u; // HiColour
@@ -198,9 +224,32 @@ foundit:
 		if (!int10.vesa_nolfb)
 			modeAttributes |= 0x80; // linear framebuffer
 		break;
+	case M_LIN24:
+		// Mode 0x212 has 128 extra bytes per scan line for
+		// compatibility with Windows 640x480 24-bit S3 Trio drivers
+		if (mode == 0x212) {
+			pageSize = mblock.sheight * (mblock.swidth * 3 + 128);
+			minfo.BytesPerScanLine = host_to_le16(mblock.swidth * 3 + 128);
+		} else {
+			pageSize = mblock.sheight * (mblock.swidth * 3);
+			minfo.BytesPerScanLine = host_to_le16(mblock.swidth * 3);
+		}
+		minfo.NumberOfPlanes = 0x1u;
+		minfo.BitsPerPixel = 24u;
+		minfo.MemoryModel = 6u; // HiColour
+		minfo.RedMaskSize = 8u;
+		minfo.RedMaskPos = 0x10;
+		minfo.GreenMaskSize = 0x8;
+		minfo.GreenMaskPos = 0x8;
+		minfo.BlueMaskSize = 0x8;
+		minfo.BlueMaskPos = 0x0;
+		modeAttributes = 0x1b; // Color, graphics
+		if (!int10.vesa_nolfb)
+			modeAttributes |= 0x80; // linear framebuffer
+		break;
 	case M_LIN32:
-		pageSize = mblock->sheight * mblock->swidth*4;
-		minfo.BytesPerScanLine = host_to_le16(mblock->swidth * 4);
+		pageSize = mblock.sheight * mblock.swidth*4;
+		minfo.BytesPerScanLine = host_to_le16(mblock.swidth * 4);
 		minfo.NumberOfPlanes = 0x1u;
 		minfo.BitsPerPixel = 32u;
 		minfo.MemoryModel = 6u; // HiColour
@@ -218,7 +267,7 @@ foundit:
 		break;
 	case M_TEXT:
 		pageSize = 0;
-		minfo.BytesPerScanLine = host_to_le16(mblock->twidth * 2);
+		minfo.BytesPerScanLine = host_to_le16(mblock.twidth * 2);
 		minfo.NumberOfPlanes = 0x4;
 		minfo.BitsPerPixel = 4u;
 		minfo.MemoryModel = 0u; // text
@@ -233,36 +282,36 @@ foundit:
 		pageSize += 0x10000;
 		pageSize &= ~0xFFFF;
 	}
-	Bitu pages = 0;
-	if (pageSize > vga.vmemsize) {
+	int pages = 0;
+	if (pageSize > static_cast<int>(vga.vmemsize)) {
 		// mode not supported by current hardware configuration
 		modeAttributes &= ~0x1;
 	} else if (pageSize) {
 		pages = (vga.vmemsize / pageSize)-1;
-	}
-	assert(pages <= 255);
+	}	
+	assert(pages <= UINT8_MAX);
 	minfo.NumberOfImagePages = static_cast<uint8_t>(pages);
 	minfo.ModeAttributes = host_to_le16(modeAttributes);
 	minfo.WinAAttributes = 0x7; // Exists/readable/writable
 
-	if (mblock->type==M_TEXT) {
+	if (mblock.type==M_TEXT) {
 		minfo.WinGranularity = host_to_le16(32u);
 		minfo.WinSize = host_to_le16(32u);
 		minfo.WinASegment = host_to_le16(0xb800);
-		minfo.XResolution = host_to_le16(mblock->twidth);
-		minfo.YResolution = host_to_le16(mblock->theight);
+		minfo.XResolution = host_to_le16(mblock.twidth);
+		minfo.YResolution = host_to_le16(mblock.theight);
 	} else {
 		minfo.WinGranularity = host_to_le16(64u);
 		minfo.WinSize = host_to_le16(64u);
 		minfo.WinASegment = host_to_le16(0xa000);
-		minfo.XResolution = host_to_le16(mblock->swidth);
-		minfo.YResolution = host_to_le16(mblock->sheight);
+		minfo.XResolution = host_to_le16(mblock.swidth);
+		minfo.YResolution = host_to_le16(mblock.sheight);
 	}
 	minfo.WinFuncPtr = host_to_le32(int10.rom.set_window);
 	minfo.NumberOfBanks = 0x1;
 	minfo.Reserved_page = 0x1;
-	minfo.XCharSize = static_cast<uint8_t>(mblock->cwidth);
-	minfo.YCharSize = static_cast<uint8_t>(mblock->cheight);
+	minfo.XCharSize = mblock.cwidth;
+	minfo.YCharSize = mblock.cheight;
 	if (!int10.vesa_nolfb)
 		minfo.PhysBasePtr = host_to_le32(S3_LFB_BASE);
 
@@ -286,9 +335,9 @@ Bit8u VESA_GetSVGAMode(Bit16u & mode) {
 
 Bit8u VESA_SetCPUWindow(Bit8u window,Bit8u address) {
 	if (window) return VESA_FAIL;
-	if (((Bit32u)(address)*64*1024<vga.vmemsize)) {
+	if ((Bit32u)(address)*64*1024 < vga.vmemsize) {
 		IO_Write(0x3d4,0x6a);
-		IO_Write(0x3d5,(Bit8u)address);
+		IO_Write(0x3d5, address);
 		return VESA_SUCCESS;
 	} else return VESA_FAIL;
 }
@@ -343,50 +392,70 @@ Bit8u VESA_GetPalette(PhysPt data,Bitu index,Bitu count) {
 	return VESA_SUCCESS;
 }
 
-// maximum offset for the S3 Trio64 is 10 bits
-#define S3_MAX_OFFSET 0x3ff
-
-Bit8u VESA_ScanLineLength(Bit8u subcall,Bit16u val, Bit16u & bytes,Bit16u & pixels,Bit16u & lines) {
+uint8_t VESA_ScanLineLength(uint8_t subcall,
+                            uint16_t val,
+                            uint16_t &bytes,
+                            uint16_t &pixels,
+                            uint16_t &lines)
+{
 	// offset register: virtual scanline length
-	Bitu pixels_per_offset;
-	Bitu bytes_per_offset = 8;
-	Bitu vmemsize = vga.vmemsize;
-	Bitu new_offset = vga.config.scan_len;
-	Bitu screen_height = CurMode->sheight;
+	auto new_offset = static_cast<int>(vga.config.scan_len);
+	auto screen_height = CurMode->sheight;
+	auto usable_vmem_bytes = vga.vmemsize;
+	uint8_t bits_per_pixel = 8;
+	uint8_t bytes_per_offset = 8;
+	bool align_to_nearest_4th_pixel = false;
+
+	// LOG_MSG("VESA_ScanLineLength: s-%lux%lu, t-%lux%lu, c-%lux%lu,
+	//         p-tot=%lu p-start=%lu p-len=%lu, h-tol=%lu h-len=%lu",
+	//         CurMode->swidth, CurMode->sheight, CurMode->twidth,
+	//         CurMode->theight, CurMode->cwidth, CurMode->cheight,
+	//         CurMode->ptotal,CurMode->pstart,CurMode->plength,
+	//         CurMode->htotal,CurMode->vtotal);
 
 	switch (CurMode->type) {
 	case M_TEXT:
-		vmemsize = 0x8000;      // we have only the 32kB window here
+		// In text mode we only have a 32 KiB window to operate on
+		usable_vmem_bytes = 32 * 1024;
 		screen_height = CurMode->theight;
-		pixels_per_offset = 16; // two characters each 8 pixels wide
 		bytes_per_offset = 4;   // 2 characters + 2 attributes
+		bits_per_pixel = 4;
 		break;
 	case M_LIN4:
-		pixels_per_offset = 16;
 		bytes_per_offset = 2;
-		vmemsize /= 4; // planar mode
+		bits_per_pixel = 4;
+		usable_vmem_bytes /= 4; // planar mode
 		break;
-	case M_LIN8:
-		pixels_per_offset = 8;
-		break;
+	case M_LIN8: bits_per_pixel = 8; break;
 	case M_LIN15:
-	case M_LIN16:
-		pixels_per_offset = 4;
+	case M_LIN16: bits_per_pixel = 16; break;
+	case M_LIN24:
+		align_to_nearest_4th_pixel = true;
+		bits_per_pixel = 24;
 		break;
-	case M_LIN32:
-		pixels_per_offset = 2;
-		break;
+	case M_LIN32: bits_per_pixel = 32; break;
 	default:
 		return VESA_MODE_UNSUPPORTED;
 	}
+	constexpr int gcd = 8 * 8; // greatest common dividsor
+
+	// The 'bytes' and 'pixels' return values
+	// (reference-assigns) are multiplied up from the offset length, so here
+	// we reverse those calculations using UINT16_MAX as of the offset
+	// length to determine its maximum possible value that won't cause the
+	// bytes or pixels calculations to overflow.
+	const auto max_offset = std::min(UINT16_MAX / bytes_per_offset,
+	                                 UINT16_MAX * bits_per_pixel / gcd);
+
 	switch (subcall) {
 	case 0x00: // set scan length in pixels
-		new_offset = val / pixels_per_offset;
-		if (val % pixels_per_offset) new_offset++;
-		
-		if (new_offset > S3_MAX_OFFSET)
+		new_offset = val * bits_per_pixel / gcd;
+		if (align_to_nearest_4th_pixel)
+			new_offset -= (new_offset % 3);
+
+		if (new_offset > max_offset)
 			return VESA_HW_UNSUPPORTED; // scanline too long
-		vga.config.scan_len = new_offset;
+		vga.config.scan_len = check_cast<uint16_t>(new_offset);
 		VGA_CheckScanLength();
 		break;
 
@@ -395,21 +464,20 @@ Bit8u VESA_ScanLineLength(Bit8u subcall,Bit16u val, Bit16u & bytes,Bit16u & pixe
 		break;
 
 	case 0x02: // set scan length in bytes
-		new_offset = val / bytes_per_offset;
-		if (val % bytes_per_offset) new_offset++;
-		
-		if (new_offset > S3_MAX_OFFSET)
+		new_offset = ceil_udivide(val, bytes_per_offset);
+		if (new_offset > max_offset)
 			return VESA_HW_UNSUPPORTED; // scanline too long
-		vga.config.scan_len = new_offset;
+		vga.config.scan_len = check_cast<uint16_t>(new_offset);
 		VGA_CheckScanLength();
 		break;
 
 	case 0x03: // get maximum scan line length
 		// the smaller of either the hardware maximum scanline length or
 		// the limit to get full y resolution of this mode
-		new_offset = S3_MAX_OFFSET;
-		if ((new_offset * bytes_per_offset * screen_height) > vmemsize)
-			new_offset = vmemsize / (bytes_per_offset * screen_height);
+		new_offset = max_offset;
+		if ((new_offset * bytes_per_offset * screen_height) >
+		    static_cast<int>(usable_vmem_bytes))
+			new_offset = usable_vmem_bytes / (bytes_per_offset * screen_height);
 		break;
 
 	default:
@@ -417,64 +485,68 @@ Bit8u VESA_ScanLineLength(Bit8u subcall,Bit16u val, Bit16u & bytes,Bit16u & pixe
 	}
 
 	// set up the return values
-	bytes = (Bit16u)(new_offset * bytes_per_offset);
-	pixels = (Bit16u)(new_offset * pixels_per_offset);
-	if (!bytes)
+	bytes = check_cast<uint16_t>(new_offset * bytes_per_offset);
+	pixels = check_cast<uint16_t>(new_offset * gcd / bits_per_pixel);
+	if (!bytes) {
 		// return failure on division by zero
 		// some real VESA BIOS implementations may crash here
 		return VESA_FAIL;
+	}
+	const auto supported_lines = usable_vmem_bytes / bytes;
+	const auto gap = supported_lines % screen_height;
+	constexpr uint8_t max_gap = 8;
+	lines = gap < max_gap ? screen_height
+	                      : check_cast<uint16_t>(supported_lines);
 
-	lines = (Bit16u)(vmemsize / bytes);
-	
 	if (CurMode->type==M_TEXT)
 		lines *= CurMode->cheight;
+
+	// LOG_MSG("VESA_ScanLineLength subcall=%u, val=%u, vga.config.scan_len = %lu,"
+	//         "pixels = %u, bytes = %u, lines = %u, supported_lines = %d ",
+	//         subcall, val, vga.config.scan_len, pixels,
+	//         bytes, lines, supported_lines);
 
 	return VESA_SUCCESS;
 }
 
 Bit8u VESA_SetDisplayStart(Bit16u x,Bit16u y,bool wait) {
-	Bitu pixels_per_offset;
-	Bitu panning_factor = 1;
-
+	uint8_t panning_factor = 1;
+	uint8_t bits_per_pixel = 0;
+	bool align_to_nearest_4th_pixel = false;
 	switch (CurMode->type) {
 	case M_TEXT:
-	case M_LIN4:
-		pixels_per_offset = 16;
-		break;
+	case M_LIN4: bits_per_pixel = 4; break;
 	case M_LIN8:
+		bits_per_pixel = 8;
 		panning_factor = 2; // the panning register ignores bit0 in this mode
-		pixels_per_offset = 8;
 		break;
 	case M_LIN15:
 	case M_LIN16:
+		bits_per_pixel = 16;
 		panning_factor = 2; // this may be DOSBox specific
-		pixels_per_offset = 4;
 		break;
-	case M_LIN32:
-		pixels_per_offset = 2;
+	case M_LIN24:
+		align_to_nearest_4th_pixel = true;
+		bits_per_pixel = 24;
 		break;
-	default:
-		return VESA_MODE_UNSUPPORTED;
+	case M_LIN32: bits_per_pixel = 32; break;
+	default: return VESA_MODE_UNSUPPORTED;
 	}
-	// We would have to divide y by the character height for text modes and
-	// write the remainder to the CRTC preset row scan register,
-	// but VBE2 BIOSes that actually get that far also don't.
-	// Only a VBE3 BIOS got it right.
-	Bitu virtual_screen_width = vga.config.scan_len * pixels_per_offset;
-	Bitu new_start_pixel = virtual_screen_width * y + x;
-	Bitu new_crtc_start = new_start_pixel / (pixels_per_offset/2);
-	Bitu new_panning = new_start_pixel % (pixels_per_offset/2);
-	new_panning *= panning_factor;
+	constexpr uint8_t lcf = 32; // least common factor
+	uint32_t start = (vga.config.scan_len * lcf * 2 * y + x * bits_per_pixel) / lcf;
+	if (align_to_nearest_4th_pixel)
+		start -= (start % 3);
+	vga.config.display_start = start;
 
-	vga.config.display_start = new_crtc_start;
-	
 	// Setting the panning register is nice as it allows for super smooth
 	// scrolling, but if we hit the retrace pulse there may be flicker as
 	// panning and display start are latched at different times. 
 
 	IO_Read(0x3da);              // reset attribute flipflop
 	IO_Write(0x3c0,0x13 | 0x20); // panning register, screen on
-	IO_Write(0x3c0,new_panning);
+
+	const auto new_panning = x % (lcf / bits_per_pixel);
+	IO_Write(0x3c0, static_cast<uint8_t>(new_panning * panning_factor));
 
 	// Wait for retrace if requested
 	if (wait) CALLBACK_RunRealFar(RealSeg(int10.rom.wait_retrace),RealOff(int10.rom.wait_retrace));
@@ -488,8 +560,6 @@ Bit8u VESA_GetDisplayStart(Bit16u & x,Bit16u & y) {
 
 	switch (CurMode->type) {
 	case M_TEXT:
-		pixels_per_offset = 16;
-		break;
 	case M_LIN4:
 		pixels_per_offset = 16;
 		break;
@@ -568,9 +638,9 @@ void INT10_SetupVESA(void) {
 			if (svga.accepts_mode(ModeList_VGA[i].mode)) canuse_mode=true;
 		}
 		if (ModeList_VGA[i].mode>=0x100 && canuse_mode) {
-			if ((!int10.vesa_oldvbe) || (ModeList_VGA[i].mode<0x120)) {
-				phys_writew(PhysMake(0xc000,int10.rom.used),ModeList_VGA[i].mode);
-				int10.rom.used+=2;
+			if (!int10.vesa_oldvbe || ModeList_VGA[i].mode < 0x120) {
+				phys_writew(PhysMake(0xc000, int10.rom.used), ModeList_VGA[i].mode);
+				int10.rom.used += 2;
 			}
 		}
 		i++;
@@ -578,7 +648,7 @@ void INT10_SetupVESA(void) {
 	phys_writew(PhysMake(0xc000,int10.rom.used),0xffff);
 	int10.rom.used+=2;
 	int10.rom.oemstring=RealMake(0xc000,int10.rom.used);
-	Bitu len=(Bitu)(strlen(string_oem)+1);
+	const auto len = safe_strlen(string_oem) + 1;
 	for (i=0;i<len;i++) {
 		phys_writeb(0xc0000+int10.rom.used++,string_oem[i]);
 	}
@@ -600,7 +670,10 @@ void INT10_SetupVESA(void) {
 	int10.rom.pmode_interface_start = int10.rom.used - RealOff( int10.rom.pmode_interface );
 	phys_writew( Real2Phys(int10.rom.pmode_interface) + 2, int10.rom.pmode_interface_start);
 	callback.pmStart=CALLBACK_Allocate();
-	int10.rom.used += (Bit16u)CALLBACK_Setup(callback.pmStart, VESA_PMSetStart, CB_VESA_PM, PhysMake(0xc000,int10.rom.used), "VESA PM Set Start");
+	int10.rom.used += (Bit16u)CALLBACK_Setup(callback.pmStart,
+	                                         VESA_PMSetStart, CB_VESA_PM,
+	                                         PhysMake(0xc000, int10.rom.used),
+	                                         "VESA PM Set Start");
 	/* PM Set Palette call */
 	int10.rom.pmode_interface_palette = int10.rom.used - RealOff( int10.rom.pmode_interface );
 	phys_writew( Real2Phys(int10.rom.pmode_interface) + 4, int10.rom.pmode_interface_palette);

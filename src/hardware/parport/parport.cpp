@@ -93,7 +93,7 @@ void CParallel::handleEvent(Bit16u type) {
 	handleUpperEvent(type);
 }
 
-static Bitu PARALLEL_Read (Bitu port, Bitu iolen) {
+static io_val_t PARALLEL_Read (io_port_t port, io_width_t iolen) {
 	for(Bitu i = 0; i < 3; i++) {
 		if(parallel_baseaddr[i]==(port&0xfffc) && (parallelPortObjects[i]!=0)) {
 			Bitu retval=0xff;
@@ -120,7 +120,7 @@ static Bitu PARALLEL_Read (Bitu port, Bitu iolen) {
 	return 0xff;
 }
 
-static void PARALLEL_Write (Bitu port, Bitu val, Bitu) {
+static void PARALLEL_Write (io_port_t port, io_val_t val, io_width_t width) {
 	for(Bitu i = 0; i < 4; i++) {
 		if(parallel_baseaddr[i]==(port&0xfffc) && parallelPortObjects[i]) {
 #if PARALLEL_DEBUG
@@ -207,8 +207,8 @@ CParallel::CParallel(CommandLine* cmd, Bitu portnr, Bit8u initirq) {
 	LOG_MSG("Parallel%" sBitfs(d) ": BASE %" sBitfs(x) "h",portnr+1,base);
 
 	for (Bitu i = 0; i < 3; i++) {
-		WriteHandler[i].Install (i + base, PARALLEL_Write, IO_MB);
-		ReadHandler[i].Install (i + base, PARALLEL_Read, IO_MB);
+		WriteHandler[i].Install (i + base, PARALLEL_Write, io_width_t::byte);
+		ReadHandler[i].Install (i + base, PARALLEL_Read, io_width_t::byte);
 	}
 	BIOS_SetLPTPort(portnr,base);
 	mydosdevice=new device_LPT(portnr, this);

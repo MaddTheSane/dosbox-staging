@@ -133,6 +133,7 @@ private:
 					}
 				} else if ((modrm&7)!=4 || (sib&7)!=5)
 					break;
+				FALLTHROUGH;
 			case 2:	cache_addd((Bit32u)offset); break;
 			case 1: cache_addb((Bit8u)offset); break;
 			}
@@ -342,7 +343,8 @@ static BlockReturn gen_runcodeInit(const Bit8u *code) {
 	cache_addb(0xc3);          // ret
 	
 	dyn_mem_execute(cache_addr, cache_bytes);
-	dyn_cache_invalidate(cache_addr, cache_bytes);
+	const auto cache_flush_bytes = static_cast<size_t>(cache.pos - oldpos);
+	dyn_cache_invalidate(cache_addr, cache_flush_bytes);
 
 	cache.pos = oldpos;
 	return gen_runcode(code);
@@ -552,7 +554,7 @@ static void gen_mov_host(void * data,DynReg * dr1,Bitu size,Bitu di1=0) {
 		op.setreg(idx,di1);
 		tmp = 0x8A; // mov r8, []
 		break;
-	case 2: op.setword(); // mov r16, []
+	case 2: op.setword(); FALLTHROUGH; // mov r16, []
 	case 4: op.setreg(idx);
 		tmp = 0x8B; // mov r32, []
 		break;
@@ -1303,7 +1305,8 @@ static void gen_dh_fpu_saveInit(void) {
 	cache_addb(0xC3); // RET
 	
 	dyn_mem_execute(cache_addr, cache_bytes);
-	dyn_cache_invalidate(cache_addr, cache_bytes);
+	const auto cache_flush_bytes = static_cast<size_t>(cache.pos - oldpos);
+	dyn_cache_invalidate(cache_addr, cache_flush_bytes);
 
 	cache.pos = oldpos;
 	gen_dh_fpu_save();

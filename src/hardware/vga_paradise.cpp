@@ -24,22 +24,21 @@
 #include "mem.h"
 
 struct SVGA_PVGA1A_DATA {
-	Bitu PR0A;
-	Bitu PR0B;
-	Bitu PR1;
-	Bitu PR2;
-	Bitu PR3;
-	Bitu PR4;
-	Bitu PR5;
+	uint8_t PR0A = 0;
+	uint8_t PR0B = 0;
+	uint8_t PR1 = 0;
+	uint8_t PR2 = 0;
+	uint8_t PR3 = 0;
+	uint8_t PR4 = 0;
+	uint8_t PR5 = 0;
 
 	inline bool locked() { return (PR5&7)!=5; }
 
-	Bitu clockFreq[4];
-	Bitu biosMode;
+	uint32_t clockFreq[4] = {0, 0, 0, 0};
+	Bitu biosMode = 0;
 };
 
-static SVGA_PVGA1A_DATA pvga1a = { 0,0, 0,0,0,0,0, {0,0,0,0}, 0 };
-
+static SVGA_PVGA1A_DATA pvga1a = {};
 
 static void bank_setup_pvga1a() {
 // Note: There is some inconsistency in available documentation. Most sources tell that PVGA1A used
@@ -58,7 +57,8 @@ static void bank_setup_pvga1a() {
 	}
 }
 
-void write_p3cf_pvga1a(Bitu reg,Bitu val,Bitu /*iolen*/) {
+void write_p3cf_pvga1a(io_port_t reg, uint8_t val, io_width_t)
+{
 	if (pvga1a.locked() && reg >= 0x09 && reg <= 0x0e)
 		return;
 
@@ -103,12 +103,13 @@ void write_p3cf_pvga1a(Bitu reg,Bitu val,Bitu /*iolen*/) {
 		pvga1a.PR5 = val;
 		break;
 	default:
-		LOG(LOG_VGAMISC,LOG_NORMAL)("VGA:GFX:PVGA1A:Write to illegal index %2" sBitfs(X), reg);
+		LOG(LOG_VGAMISC,LOG_NORMAL)("VGA:GFX:PVGA1A:Write to illegal index %2x", reg);
 		break;
 	}
 }
 
-Bitu read_p3cf_pvga1a(Bitu reg,Bitu /*iolen*/) {
+uint8_t read_p3cf_pvga1a(io_port_t reg, io_width_t)
+{
 	if (pvga1a.locked() && reg >= 0x09 && reg <= 0x0e)
 		return 0x0;
 
@@ -128,19 +129,20 @@ Bitu read_p3cf_pvga1a(Bitu reg,Bitu /*iolen*/) {
 	case 0x0f:
 		return pvga1a.PR5;
 	default:
-		LOG(LOG_VGAMISC,LOG_NORMAL)("VGA:GFX:PVGA1A:Read from illegal index %2" sBitfs(X), reg);
+		LOG(LOG_VGAMISC,LOG_NORMAL)("VGA:GFX:PVGA1A:Read from illegal index %2x", reg);
 		break;
 	}
 
 	return 0x0;
 }
 
-void FinishSetMode_PVGA1A(Bitu /*crtc_base*/, VGA_ModeExtraData* modeData) {
+void FinishSetMode_PVGA1A(io_port_t /*crtc_base*/, VGA_ModeExtraData *modeData)
+{
 	pvga1a.biosMode = modeData->modeNo;
 
 	// Reset to single bank and set it to 0. May need to unlock first (DPaint locks on exit)
 	IO_Write(0x3ce, 0x0f);
-	Bitu oldlock = IO_Read(0x3cf);
+	const auto oldlock = IO_Read(0x3cf);
 	IO_Write(0x3cf, 0x05);
 	IO_Write(0x3ce, 0x09);
 	IO_Write(0x3cf, 0x00);
@@ -186,14 +188,16 @@ void DetermineMode_PVGA1A() {
 	}
 }
 
-void SetClock_PVGA1A(Bitu which,Bitu target) {
+void SetClock_PVGA1A(Bitu which, const uint32_t target)
+{
 	if (which < 4) {
 		pvga1a.clockFreq[which]=1000*target;
 		VGA_StartResize();
 	}
 }
 
-Bitu GetClock_PVGA1A() {
+uint32_t GetClock_PVGA1A()
+{
 	return pvga1a.clockFreq[(vga.misc_output >> 2) & 3];
 }
 
@@ -231,4 +235,5 @@ void SVGA_Setup_ParadisePVGA1A(void) {
 	}
 
 	IO_Write(0x3cf, 0x05); // Enable!
+	VGA_LogInitialization("Paradise VGA 1A", "DRAM");
 }

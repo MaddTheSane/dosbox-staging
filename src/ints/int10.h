@@ -21,6 +21,8 @@
 
 #include "dosbox.h"
 
+#include <vector>
+
 #include "mem.h"
 #include "vga.h"
 
@@ -112,23 +114,30 @@ extern Bit8u int10_font_14_alternate[20 * 15 + 1];
 extern Bit8u int10_font_16_alternate[19 * 17 + 1];
 
 struct VideoModeBlock {
-	Bit16u	mode;
-	VGAModes	type;
-	Bitu	swidth, sheight;
-	Bitu	twidth, theight;
-	Bitu	cwidth, cheight;
-	Bitu	ptotal,pstart,plength;
+	uint16_t mode;
+	VGAModes type;
+	uint16_t swidth, sheight;
+	uint8_t twidth, theight;
+	uint8_t cwidth, cheight;
+	uint8_t ptotal;
+	uint32_t pstart;
+	uint32_t plength;
 
-	Bitu	htotal,vtotal;
-	Bitu	hdispend,vdispend;
-	Bitu	special;
-	
+	uint16_t htotal, vtotal;
+	uint16_t hdispend, vdispend;
+	uint16_t special;
 };
-extern VideoModeBlock ModeList_VGA[];
+
+extern std::vector<VideoModeBlock> ModeList_VGA;
 extern VideoModeBlock * CurMode;
 
-typedef struct {
-	struct {
+enum class VESA_MODE_PREF {
+	COMPATIBLE, // optimizes out-of-the-box compatibility with games
+	ALL, // use all VESA modes (compromise being some games might not handle them properly)
+};
+
+struct Int10Data {
+	struct Int10DataRom{
 		RealPt font_8_first;
 		RealPt font_8_second;
 		RealPt font_14;
@@ -150,11 +159,13 @@ typedef struct {
 		Bit16u pmode_interface_window;
 		Bit16u pmode_interface_palette;
 		Bit16u used;
-	} rom;
-	Bit16u vesa_setmode;
-	bool vesa_nolfb;
-	bool vesa_oldvbe;
-} Int10Data;
+	} rom = {};
+	Bit16u vesa_setmode = 0;
+
+	VESA_MODE_PREF vesa_mode_preference = VESA_MODE_PREF::COMPATIBLE;
+	bool vesa_nolfb = false;
+	bool vesa_oldvbe = false;
+};
 
 extern Int10Data int10;
 

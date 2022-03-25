@@ -32,11 +32,11 @@
 
 enum class Verbosity : int8_t {
 	//                  Splash | Welcome | Early Stdout |
-	High = 4,       //   yes   |   yes   |    yes       |
-	Medium = 3,     //   no    |   yes   |    yes       |
-	Low = 2,        //   no    |   no    |    yes       |
+	Quiet = 0,      //   no    |   no    |    no        |
 	SplashOnly = 1, //   yes   |   no    |    no        |
-	Quiet = 0       //   no    |   no    |    no        |
+	Low = 2,        //   no    |   no    |    yes       |
+	Medium = 3,     //   no    |   yes   |    yes       |
+	High = 4,       //   yes   |   yes   |    yes       |
 };
 
 class Config {
@@ -89,7 +89,8 @@ public:
 	void ShutDown();
 	void StartUp();
 	bool PrintConfig(const std::string &filename) const;
-	bool ParseConfigFile(char const * const configfilename);
+	bool ParseConfigFile(const std::string &type,
+	                     const std::string &configfilename);
 	void ParseEnv();
 	bool SecureMode() const { return secure_mode; }
 	void SwitchToSecureMode() { secure_mode = true; }//can't be undone

@@ -48,6 +48,7 @@
 #include "debug.h"
 #include "fs_utils.h"
 #include "gui_msgs.h"
+#include "../ints/int10.h"
 #include "joystick.h"
 #include "keyboard.h"
 #include "mapper.h"
@@ -443,6 +444,29 @@ void GFX_SetTitle(Bit32s cycles, int /*frameskip*/, bool paused)
 	SDL_SetWindowTitle(sdl.window, title);
 }
 
+int GFX_GetDisplayRefreshRate()
+{
+	constexpr auto invalid_refresh = -1;
+	assert(sdl.window);
+	const int display_in_use = SDL_GetWindowDisplayIndex(sdl.window);
+	if (display_in_use < 0) {
+		LOG_ERR("SDL: Could not get the current window index: %s", SDL_GetError());
+		return invalid_refresh;
+	}
+
+	SDL_DisplayMode mode;
+	if (SDL_GetCurrentDisplayMode(display_in_use, &mode) != 0) {
+		LOG_ERR("SDL: Could not get the current display mode: %s", SDL_GetError());
+		return invalid_refresh;
+	}
+	if (mode.refresh_rate < 23 || mode.refresh_rate > 500) {
+		LOG_ERR("SDL: Got an unexpected refresh rate of %d Hz; not using it", mode.refresh_rate);
+		return invalid_refresh;
+	}
+
+	return mode.refresh_rate;
+}
+
 /* This function is SDL_EventFilter which is being called when event is
  * pushed into the SDL event queue.
  *
@@ -509,8 +533,8 @@ static void SetIcon()
 
 static void RequestExit(bool pressed)
 {
-	exit_requested = pressed;
-	if (exit_requested)
+	shutdown_requested = pressed;
+	if (shutdown_requested)
 		DEBUG_LOG_MSG("SDL: Exit requested");
 }
 
@@ -624,11 +648,12 @@ void GFX_ForceFullscreenExit()
 	GFX_ResetScreen();
 }
 
-static int int_log2 (int val) {
-    int log = 0;
-    while ((val >>= 1) != 0)
-	log++;
-    return log;
+MAYBE_UNUSED static int int_log2(int val)
+{
+	int log = 0;
+	while ((val >>= 1) != 0)
+		log++;
+	return log;
 }
 
 // This is a hack to prevent SDL2 from re-creating window internally. Prevents
@@ -780,9 +805,14 @@ static SDL_Window *SetWindowMode(SCREEN_TYPES screen_type,
 		SDL_GetWindowDisplayMode(sdl.window, &displayMode);
 		displayMode.w = width;
 		displayMode.h = height;
-		SDL_SetWindowDisplayMode(sdl.window, &displayMode);
+
+		if (SDL_SetWindowDisplayMode(sdl.window, &displayMode) != 0) {
+			LOG_WARNING("SDL: Failed setting fullscreen mode to %dx%d at %d Hz", displayMode.w, displayMode.h, displayMode.refresh_rate);
+		}
 		SDL_SetWindowFullscreen(sdl.window,
-		                        sdl.desktop.full.display_res ? SDL_WINDOW_FULLSCREEN_DESKTOP : SDL_WINDOW_FULLSCREEN);
+		                        sdl.desktop.full.display_res
+		                                ? SDL_WINDOW_FULLSCREEN_DESKTOP
+		                                : SDL_WINDOW_FULLSCREEN);
 	} else {
 		// If you feel inclined to remove this SDL_SetWindowSize call
 		// (or further modify when it is being invoked), then make sure
@@ -1015,8 +1045,11 @@ static SDL_Point calc_pp_scale(int avw, int avh)
 		return {1, 1};
 }
 
-Bitu GFX_SetSize(Bitu width, Bitu height, Bitu flags,
-                 double scalex, double scaley,
+Bitu GFX_SetSize(Bitu width,
+                 Bitu height,
+                 MAYBE_UNUSED Bitu flags,
+                 double scalex,
+                 double scaley,
                  GFX_CallBack_t callback,
                  double pixel_aspect)
 {
@@ -1421,7 +1454,8 @@ dosurface:
 	return retFlags;
 }
 
-void GFX_SetShader(const char* src) {
+void GFX_SetShader(MAYBE_UNUSED const char *src)
+{
 #if C_OPENGL
 	if (!sdl.opengl.use_shader || src == sdl.opengl.shader_src)
 		return;
@@ -1652,7 +1686,7 @@ void GFX_EndUpdate(const Bit16u *changedLines)
 #endif
 	if ((!using_opengl || !RENDER_GetForceUpdate()) && !sdl.updating)
 		return;
-	bool actually_updating = sdl.updating;
+	MAYBE_UNUSED bool actually_updating = sdl.updating;
 	sdl.updating = false;
 	switch (sdl.desktop.type) {
 	case SCREEN_TEXTURE: {
@@ -2012,7 +2046,7 @@ static std::string NormalizeConfValue(const char *val)
 	return pref;
 }
 
-static std::string get_glshader_value()
+MAYBE_UNUSED static std::string get_glshader_value()
 {
 #if C_OPENGL
 	assert(control);
@@ -2296,7 +2330,7 @@ static SDL_Rect calc_viewport_pp(int win_width, int win_height)
 	return {x, y, w, h};
 }
 
-static SDL_Rect calc_viewport(int width, int height)
+MAYBE_UNUSED static SDL_Rect calc_viewport(int width, int height)
 {
 	if (sdl.scaling_mode == SCALING_MODE::PERFECT)
 		return calc_viewport_pp(width, height);
@@ -2560,56 +2594,60 @@ static void GUI_StartUp(Section *sec)
 		mouse_control_msg = "will move seamlessly without being captured";
 	} else if (control_choice == "nomouse") {
 		sdl.mouse.control_choice = NoMouse;
-		mouse_control_msg = "will not be active";
+		mouse_control_msg = "is disabled";
 	} else {
 		assert(sdl.mouse.control_choice == CaptureOnClick);
 	}
-	const std::string mclick_choice = s->Get_string("capture_mouse_second_value");
+
 	std::string middle_control_msg;
-	if (mclick_choice == "middlerelease") {
-		sdl.mouse.middle_will_release = true;
+
+	if (sdl.mouse.control_choice != NoMouse) {
+		const std::string mclick_choice = s->Get_string("capture_mouse_second_value");
+
+		// release the mouse is the default; this logic handles an empty 2nd value
+		sdl.mouse.middle_will_release = (mclick_choice != "middlegame");
+
+
+		middle_control_msg = sdl.mouse.middle_will_release
+		                             ? " and middle-click will uncapture the mouse"
+		                             : " and middle-clicks will be sent to the game";
+
+		// Only setup the Ctrl/Cmd+F10 handler if the mouse is capturable
 		if (sdl.mouse.control_choice & (CaptureOnClick | CaptureOnStart))
-			middle_control_msg = " and middle-click will uncapture the mouse";
-	} else {
-		sdl.mouse.middle_will_release = false;
-		if (sdl.mouse.control_choice & (CaptureOnClick | CaptureOnStart))
-			middle_control_msg = " and middle-clicks will be sent to the game";
+			MAPPER_AddHandler(ToggleMouseCapture, SDL_SCANCODE_F10,
+			                  PRIMARY_MOD, "capmouse", "Cap Mouse");
+
+		// Apply the user's mouse sensitivity settings
+		Prop_multival *p3 = section->Get_multival("sensitivity");
+		sdl.mouse.xsensitivity = p3->GetSection()->Get_int("xsens");
+		sdl.mouse.ysensitivity = p3->GetSection()->Get_int("ysens");
+
+		// Apply raw mouse input setting
+		SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP,
+		                        section->Get_bool("raw_mouse_input") ? "0" : "1",
+		                        SDL_HINT_OVERRIDE);
 	}
 	LOG_MSG("SDL: Mouse %s%s.", mouse_control_msg.c_str(), middle_control_msg.c_str());
-
-	// Only setup the Ctrl/Cmd+F10 handler if the mouse is capturable
-	if (sdl.mouse.control_choice & (CaptureOnStart | CaptureOnClick)) {
-		MAPPER_AddHandler(ToggleMouseCapture, SDL_SCANCODE_F10,
-		                  PRIMARY_MOD, "capmouse", "Cap Mouse");
-	}
-
-	// Apply the user's mouse sensitivity settings
-	Prop_multival* p3 = section->Get_multival("sensitivity");
-	sdl.mouse.xsensitivity = p3->GetSection()->Get_int("xsens");
-	sdl.mouse.ysensitivity = p3->GetSection()->Get_int("ysens");
-
-	// Apply raw mouse input setting
-	SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP,
-	                        section->Get_bool("raw_mouse_input") ? "0" : "1",
-	                        SDL_HINT_OVERRIDE);
 
 	/* Get some Event handlers */
 	MAPPER_AddHandler(RequestExit, SDL_SCANCODE_F9, PRIMARY_MOD, "shutdown",
 	                  "Shutdown");
 	MAPPER_AddHandler(SwitchFullScreen, SDL_SCANCODE_RETURN, MMOD2,
 	                  "fullscr", "Fullscreen");
-	MAPPER_AddHandler(Restart, SDL_SCANCODE_HOME, MMOD1 | MMOD2,
-	                  "restart", "Restart");
+	MAPPER_AddHandler(Restart, SDL_SCANCODE_HOME, MMOD1 | MMOD2, "restart",
+	                  "Restart");
 #if C_DEBUG
-	/* Pause binds with activate-debugger */
+/* Pause binds with activate-debugger */
 #else
 	MAPPER_AddHandler(&PauseDOSBox, SDL_SCANCODE_PAUSE, MMOD2,
 	                  "pause", "Pause Emu.");
 #endif
 	/* Get Keyboard state of numlock and capslock */
 	SDL_Keymod keystate = SDL_GetModState();
-	if(keystate&KMOD_NUM) startup_state_numlock = true;
-	if(keystate&KMOD_CAPS) startup_state_capslock = true;
+	if (keystate & KMOD_NUM)
+		startup_state_numlock = true;
+	if (keystate & KMOD_CAPS)
+		startup_state_capslock = true;
 }
 
 static void HandleMouseMotion(SDL_MouseMotionEvent * motion) {
@@ -3006,6 +3044,7 @@ bool GFX_Events()
 			if ((event.key.keysym.sym == SDLK_TAB) &&
 			    (GetTicksSince(sdl.focus_ticks) < 2))
 				break;
+			FALLTHROUGH;
 #endif
 #if defined (MACOSX)
 		case SDL_KEYDOWN:
@@ -3016,11 +3055,12 @@ bool GFX_Events()
 				RequestExit(true);
 				break;
 			}
+			FALLTHROUGH;
 #endif
 		default: MAPPER_CheckEvent(&event);
 		}
 	}
-	return !exit_requested;
+	return !shutdown_requested;
 }
 
 #if defined (WIN32)
@@ -3095,15 +3135,6 @@ void Config_Add_SDL() {
 	pint->Set_help("Number of display to use; values depend on OS and user "
 	               "settings.");
 
-	Pbool = sdl_sec->Add_bool("vsync", on_start, false);
-	Pbool->Set_help("Synchronize with display refresh rate if supported. This can\n"
-	                "reduce flickering and tearing, but may also impact performance.");
-
-	pint = sdl_sec->Add_int("vsync_skip", on_start, 7000);
-	pint->Set_help("Number of microseconds to allow rendering to block before skipping "
-	               "the next frame.");
-	pint->SetMinMax(1, 14000);
-
 	Pstring = sdl_sec->Add_string("fullresolution", always, "desktop");
 	Pstring->Set_help("What resolution to use for fullscreen: 'original', 'desktop'\n"
 	                  "or a fixed size (e.g. 1024x768).");
@@ -3119,18 +3150,27 @@ void Config_Add_SDL() {
 	        "             WxH format. For example: 1024x768.\n"
 	        "             Scaling is not performed for output=surface.");
 
-	const char *outputs[] = {
-		"surface",
-		"texture",
-		"texturenb",
-		"texturepp",
+	Pbool = sdl_sec->Add_bool("vsync", on_start, false);
+	Pbool->Set_help(
+	        "Synchronize with display refresh rate if supported. This can\n"
+	        "reduce flickering and tearing, but may also impact performance.");
+
+	pint = sdl_sec->Add_int("vsync_skip", on_start, 7000);
+	pint->Set_help("Number of microseconds to allow rendering to block before skipping "
+	               "the next frame.");
+	pint->SetMinMax(1, 14000);
+
+	const char *outputs[] =
+	{ "surface",
+	  "texture",
+	  "texturenb",
+	  "texturepp",
 #if C_OPENGL
-		"opengl",
-		"openglnb",
-		"openglpp",
+	  "opengl",
+	  "openglnb",
+	  "openglpp",
 #endif
-		0
-	};
+	  0 };
 
 #if C_OPENGL
 	Pstring = sdl_sec->Add_string("output", Property::Changeable::Always, "opengl");
@@ -3148,16 +3188,14 @@ void Config_Add_SDL() {
 	// Define mouse control settings
 	Pmulti = sdl_sec->Add_multi("capture_mouse", always, " ");
 	const char *mouse_controls[] = {
-		"seamless", // default
-		"onclick",
-		"onstart",
-		"nomouse",
-		0
+	        "seamless", // default
+	        "onclick",  "onstart", "nomouse", 0,
 	};
 	const char *middle_controls[] = {
-		"middlerelease", // default
-		"middlegame",
-		0
+	        "middlerelease", // default
+	        "middlegame",
+	        "", // allow empty second value for 'nomouse'
+	        0,
 	};
 	// Generate and set the mouse control defaults from above arrays
 	std::string mouse_control_defaults(mouse_controls[0]);
@@ -3173,16 +3211,15 @@ void Config_Add_SDL() {
 	        ->Set_values(middle_controls);
 
 	// Construct and set the help block using defaults set above
-	std::string mouse_control_help(
-	        "Choose a mouse control method:\n"
-	        "   onclick:        Capture the mouse when clicking inside the window.\n"
-	        "   onstart:        Capture the mouse immediately on start.\n"
-	        "   seamless:       Never cature the mouse; let it move seamlessly.\n"
-	        "   nomouse:        Hide the mouse and don't send input to the game.\n"
-	        "Choose how middle-clicks are handled (second parameter):\n"
-	        "   middlegame:     Middle-clicks are sent to the game.\n"
-	        "   middlerelease:  Middle-click will release the captured mouse.\n"
-	        "Defaults (if not present or incorrect): ");
+	std::string mouse_control_help("Choose a mouse control method:\n"
+	                               "   onclick:        Capture the mouse when clicking inside the window.\n"
+	                               "   onstart:        Capture the mouse immediately on start.\n"
+	                               "   seamless:       Never capture the mouse; let it move seamlessly.\n"
+	                               "   nomouse:        Hide the mouse and don't send input to the game.\n"
+	                               "Choose how middle-clicks are handled (second parameter):\n"
+	                               "   middlegame:     Middle-clicks are sent to the game.\n"
+	                               "   middlerelease:  Middle-click will release the captured mouse.\n"
+	                               "Defaults (if not present or incorrect): ");
 	mouse_control_help += mouse_control_defaults;
 	Pmulti->Set_help(mouse_control_help);
 
@@ -3467,6 +3504,18 @@ void GFX_GetSize(int &width, int &height, bool &fullscreen)
 int sdl_main(int argc, char *argv[])
 {
 	int rcode = 0; // assume good until proven otherwise
+	
+	// Setup logging right away
+	loguru::g_preamble_date    = true; // The date field
+	loguru::g_preamble_time    = true; // The time of the current day
+	loguru::g_preamble_uptime  = false; // The time since init call
+	loguru::g_preamble_thread  = false; // The logging thread
+	loguru::g_preamble_file    = false; // The file from which the log originates from
+	loguru::g_preamble_verbose = false; // The verbosity field
+	loguru::g_preamble_pipe    = true; // The pipe symbol right before the message	
+
+	loguru::init(argc, argv);
+
 	try {
 		Disable_OS_Scaling(); //Do this early on, maybe override it through some parameter.
 		OverrideWMClass(); // Before SDL2 video subsystem is initialized
@@ -3553,69 +3602,8 @@ int sdl_main(int argc, char *argv[])
 	// Once initialized, ensure we clean up SDL for all exit conditions
 	atexit(QuitSDL);
 
-	/* Parse configuration files */
-	std::string config_file, config_combined;
-
-	std::string config_path = CROSS_GetPlatformConfigDir();
-
-	//First parse -userconf
-	if(control->cmdline->FindExist("-userconf",true)){
-		config_file.clear();
-		Cross::GetPlatformConfigDir(config_path);
-		Cross::GetPlatformConfigName(config_file);
-		config_combined = config_path + config_file;
-		control->ParseConfigFile(config_combined.c_str());
-		if(!control->configfiles.size()) {
-			//Try to create the userlevel configfile.
-			config_file.clear();
-			Cross::CreatePlatformConfigDir(config_path);
-			Cross::GetPlatformConfigName(config_file);
-			config_combined = config_path + config_file;
-			if (control->PrintConfig(config_combined)) {
-				LOG_MSG("CONFIG: Generating default configuration\n"
-					"CONFIG: Writing it to %s",
-					config_combined.c_str());
-				// Load them as well. Makes relative paths much easier
-				control->ParseConfigFile(config_combined.c_str());
-			}
-		}
-	}
-
-	//Second parse -conf switches
-	while(control->cmdline->FindString("-conf",config_file,true)) {
-		if (!control->ParseConfigFile(config_file.c_str())) {
-			// try to load it from the user directory
-			if (!control->ParseConfigFile((config_path + config_file).c_str())) {
-				LOG_MSG("CONFIG: Can't open specified config file: %s",config_file.c_str());
-			}
-		}
-	}
-	// if none found => parse localdir conf
-	if(!control->configfiles.size()) control->ParseConfigFile("dosbox.conf");
-
-	// if none found => parse userlevel conf
-	if(!control->configfiles.size()) {
-		config_file.clear();
-		Cross::GetPlatformConfigName(config_file);
-		control->ParseConfigFile((config_path + config_file).c_str());
-	}
-
-	if(!control->configfiles.size()) {
-		//Try to create the userlevel configfile.
-		config_file.clear();
-		Cross::CreatePlatformConfigDir(config_path);
-		Cross::GetPlatformConfigName(config_file);
-		config_combined = config_path + config_file;
-		if (control->PrintConfig(config_combined)) {
-			LOG_MSG("CONFIG: Generating default configuration\n"
-				"CONFIG: Writing it to %s",
-				config_combined.c_str());
-			// Load them as well. Makes relative paths much easier
-			control->ParseConfigFile(config_combined.c_str());
-		} else {
-			LOG_MSG("CONFIG: Using default settings. Create a configfile to change them");
-		}
-	}
+	const auto config_path = CROSS_GetPlatformConfigDir();
+	SETUP_ParseConfigFiles(config_path);
 
 #if C_OPENGL
 	const std::string glshaders_dir = config_path + "glshaders";

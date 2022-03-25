@@ -100,7 +100,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\include;..\src\platform\visualc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\include;..\submodules\loguru;..\src\platform\visualc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -112,7 +112,7 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <FloatingPointExceptions>true</FloatingPointExceptions>
-      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
       <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
       <MinimalRebuild>false</MinimalRebuild>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -136,7 +136,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\include;..\src\platform\visualc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\include;..\submodules\loguru;..\src\platform\visualc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -150,7 +150,7 @@
       <OmitFramePointers>false</OmitFramePointers>
       <FloatingPointExceptions>true</FloatingPointExceptions>
       <MinimalRebuild>false</MinimalRebuild>
-      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
       <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <AssemblerOutput>AssemblyAndSourceCode</AssemblerOutput>
@@ -176,7 +176,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
-      <AdditionalIncludeDirectories>..\include;..\src\platform\visualc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\include;..\submodules\loguru;..\src\platform\visualc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
@@ -191,7 +191,7 @@
       <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
       <FloatingPointModel>Fast</FloatingPointModel>
       <FloatingPointExceptions>false</FloatingPointExceptions>
-      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AssemblerOutput>AssemblyAndSourceCode</AssemblerOutput>
       <BufferSecurityCheck>false</BufferSecurityCheck>
     </ClCompile>
@@ -224,7 +224,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
-      <AdditionalIncludeDirectories>..\include;..\src\platform\visualc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\include;..\submodules\loguru;..\src\platform\visualc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
@@ -239,7 +239,7 @@
       <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
       <FloatingPointModel>Fast</FloatingPointModel>
       <FloatingPointExceptions>false</FloatingPointExceptions>
-      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AssemblerOutput>AssemblyAndSourceCode</AssemblerOutput>
       <BufferSecurityCheck>false</BufferSecurityCheck>
     </ClCompile>
@@ -306,9 +306,20 @@
     <ClCompile Include="..\src\dos\drive_overlay.cpp" />
     <ClCompile Include="..\src\dos\drive_virtual.cpp" />
     <ClCompile Include="..\src\dos\program_autotype.cpp" />
+    <ClCompile Include="..\src\dos\program_biostest.cpp" />
+    <ClCompile Include="..\src\dos\program_boot.cpp" />
     <ClCompile Include="..\src\dos\program_choice.cpp" />
     <ClCompile Include="..\src\dos\program_help.cpp" />
+    <ClCompile Include="..\src\dos\program_imgmount.cpp" />
+    <ClCompile Include="..\src\dos\program_intro.cpp" />
+    <ClCompile Include="..\src\dos\program_keyb.cpp" />
+    <ClCompile Include="..\src\dos\program_loadfix.cpp" />
+    <ClCompile Include="..\src\dos\program_loadrom.cpp" />
     <ClCompile Include="..\src\dos\program_ls.cpp" />
+    <ClCompile Include="..\src\dos\program_mem.cpp" />
+    <ClCompile Include="..\src\dos\program_mount_common.cpp" />
+    <ClCompile Include="..\src\dos\program_mount.cpp" />
+    <ClCompile Include="..\src\dos\program_rescan.cpp" />
     <ClCompile Include="..\src\fpu\fpu.cpp" />
     <ClCompile Include="..\src\gui\render.cpp" />
     <ClCompile Include="..\src\gui\render_scalers.cpp" />
@@ -327,6 +338,7 @@
     <ClCompile Include="..\src\hardware\hardware.cpp" />
     <ClCompile Include="..\src\hardware\innovation.cpp" />
     <ClCompile Include="..\src\hardware\iohandler.cpp" />
+    <ClCompile Include="..\src\hardware\iohandler_containers.cpp" />
     <ClCompile Include="..\src\hardware\ipx.cpp" />
     <ClCompile Include="..\src\hardware\ipxserver.cpp" />
     <ClCompile Include="..\src\hardware\joystick.cpp" />
@@ -426,6 +438,7 @@
     <ClCompile Include="..\src\shell\shell_batch.cpp" />
     <ClCompile Include="..\src\shell\shell_cmds.cpp" />
     <ClCompile Include="..\src\shell\shell_misc.cpp" />
+    <ClCompile Include="..\submodules\loguru\loguru.cpp" />
     <ClCompile Include="..\src\platform\visualc\version.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -487,6 +500,7 @@
     <ClInclude Include="..\src\cpu\core_dyn_x86\dyn_fpu.h" />
     <ClInclude Include="..\src\cpu\core_dyn_x86\dyn_fpu_dh.h" />
     <ClInclude Include="..\src\cpu\core_dyn_x86\helpers.h" />
+    <ClInclude Include="..\src\cpu\core_dyn_x86\risc_x64.h" />
     <ClInclude Include="..\src\cpu\core_dyn_x86\risc_x86.h" />
     <ClInclude Include="..\src\cpu\core_dyn_x86\string.h" />
     <ClInclude Include="..\src\cpu\core_full\ea_lookup.h" />
@@ -575,6 +589,7 @@
     <ClInclude Include="..\src\midi\midi_win32.h" />
     <ClInclude Include="..\src\platform\visualc\config.h" />
     <ClInclude Include="..\src\platform\visualc\unistd.h" />
+    <ClInclude Include="..\submodules\loguru\loguru.hpp" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="..\src\dosbox.ico" />

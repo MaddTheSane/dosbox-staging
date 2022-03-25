@@ -20,20 +20,18 @@
 
 #include <array>
 #include <iomanip>
-#include <sstream>
 #include <string.h>
-#include <math.h> 
+#include <math.h>
 
+#include "dma.h"
 #include "inout.h"
 #include "mixer.h"
-#include "dma.h"
+#include "midi.h"
 #include "pic.h"
 #include "setup.h"
-#include "support.h"
 #include "shell.h"
-#include "midi.h"
-
-using namespace std;
+#include "string_utils.h"
+#include "support.h"
 
 #define SB_PIC_EVENTS 0
 
@@ -95,81 +93,87 @@ enum {
 };
 
 struct SB_INFO {
-	Bitu freq;
+	uint32_t freq = 0;
 	struct {
-		bool stereo,sign,autoinit;
-		DMA_MODES mode;
-		Bitu rate,mul;
-		Bit32u singlesize;		//size for single cycle transfers
-		Bit32u autosize;		//size for auto init transfers
-		Bitu left;				//Left in active cycle
-		Bitu min;
-		Bit64u start;
+		bool stereo = false;
+		bool sign = false;
+		bool autoinit = false;
+		DMA_MODES mode = DSP_DMA_NONE;
+		uint32_t rate = 0;     // sample rate
+		uint32_t mul = 0;      // samples-per-millisecond multipler
+		uint32_t singlesize = 0; // size for single cycle transfers
+		uint32_t autosize = 0;   // size for auto init transfers
+		uint32_t left = 0;     // Left in active cycle
+		uint32_t min = 0;
 		union {
-			Bit8u  b8[DMA_BUFSIZE];
-			Bit16s b16[DMA_BUFSIZE];
-		} buf;
-		Bitu bits;
-		DmaChannel * chan;
-		Bitu remain_size;
-	} dma;
-	bool speaker;
-	bool midi;
-	Bit8u time_constant;
-	DSP_MODES mode;
-	SB_TYPES type;
+			uint8_t  b8[DMA_BUFSIZE];
+			int16_t b16[DMA_BUFSIZE];
+		} buf = {};
+		uint32_t bits = 0;
+		DmaChannel *chan = nullptr;
+		uint32_t remain_size = 0;
+	} dma = {};
+	bool speaker = false;
+	bool midi = false;
+	uint8_t time_constant = 0;
+	DSP_MODES mode = MODE_NONE;
+	SB_TYPES type = SBT_NONE;
 	struct {
 		bool pending_8bit;
 		bool pending_16bit;
-	} irq;
+	} irq = {};
 	struct {
-		Bit8u state;
-		Bit8u cmd;
-		Bit8u cmd_len;
-		Bit8u cmd_in_pos;
-		Bit8u cmd_in[DSP_BUFSIZE];
+		uint8_t state = 0;
+		uint8_t cmd = 0;
+		uint8_t cmd_len = 0;
+		uint8_t cmd_in_pos = 0;
+		uint8_t cmd_in[DSP_BUFSIZE] = {};
 		struct {
-			Bit8u lastval;
-			Bit8u data[DSP_BUFSIZE];
-			Bitu pos,used;
-		} in,out;
-		Bit8u test_register;
-		Bitu write_busy;
-	} dsp;
+			uint8_t lastval = 0; // last values added to the fifo
+			uint8_t data[DSP_BUFSIZE] = {};
+			uint8_t pos = 0;  // index of current entry
+			uint8_t used = 0; // number of entries in the fifo
+		} in = {}, out = {};
+		uint8_t test_register = 0;
+		uint32_t write_busy = 0;
+	} dsp = {};
 	struct {
-		Bit16s data[DSP_DACSIZE+1];
-		Bitu used;
-		Bit16s last;
-	} dac;
+		int16_t data[DSP_DACSIZE + 1] = {};
+		uint16_t used = 0; // number of entries in the DAC
+		int16_t last = 0;   // index of current entry
+	} dac = {};
 	struct {
-		Bit8u index;
-		Bit8u dac[2],fm[2],cda[2],master[2],lin[2];
-		Bit8u mic;
-		bool stereo;
-		bool enabled;
-		bool filtered;
-		Bit8u unhandled[0x48];
-	} mixer;
+		uint8_t index = 0;
+		uint8_t dac[2] = {};
+		uint8_t fm[2] = {};
+		uint8_t cda[2] = {};
+		uint8_t master[2] = {};
+		uint8_t lin[2] = {};
+		uint8_t mic = 0;
+		bool stereo = false;
+		bool enabled = false;
+		bool filtered = false;
+		uint8_t unhandled[0x48] = {};
+	} mixer = {};
 	struct {
-		Bit8u reference;
-		Bits stepsize;
-		bool haveref;
-	} adpcm;
+		uint8_t reference = 0;
+		Bits stepsize = 0;
+		bool haveref = false;
+	} adpcm = {};
 	struct {
-		Bitu base;
-		Bitu irq;
-		Bit8u dma8,dma16;
-	} hw;
+		uint16_t base = 0;
+		uint8_t irq = 0;
+		uint8_t dma8 = 0;
+		uint8_t dma16 = 0;
+	} hw = {};
 	struct {
-		Bits value;
-		Bitu count;
-	} e2;
-	MixerChannel * chan;
+		int value = 0;
+		uint32_t count = 0;
+	} e2 = {};
+	MixerChannel *chan = nullptr;
 };
 
-
-
-static SB_INFO sb;
+static SB_INFO sb = {};
 
 // number of bytes in input for commands (sb/sbpro)
 static Bit8u DSP_cmd_len_sb[256] = {
@@ -331,12 +335,12 @@ static void DSP_DMA_CallBack(DmaChannel * chan, DMAEvent event) {
 			//Catch up to current time, but don't generate an IRQ!
 			//Fixes problems with later sci games.
 			const auto t = PIC_FullIndex() - last_dma_callback;
-			Bitu s = static_cast<Bitu>(sb.dma.rate * t / 1000.0);
+			auto s = static_cast<uint32_t>(sb.dma.rate * t / 1000.0);
 			if (s > sb.dma.min) {
 				LOG(LOG_SB,LOG_NORMAL)("limiting amount masked to sb.dma.min");
 				s = sb.dma.min;
 			}
-			Bitu min_size = sb.dma.mul >> SB_SH;
+			auto min_size = sb.dma.mul >> SB_SH;
 			if (!min_size) min_size = 1;
 			min_size *= 2;
 			if (sb.dma.left > min_size) {
@@ -468,7 +472,9 @@ INLINE Bit8u decode_ADPCM_3_sample(Bit8u sample,Bit8u & reference,Bits& scale) {
 
 static void PlayDMATransfer(uint32_t size)
 {
-	Bitu read=0;Bitu done=0;Bitu i=0;
+	uint32_t read = 0;
+	uint32_t done = 0;
+	uint32_t i = 0;
 	last_dma_callback = PIC_FullIndex();
 
 	//Determine how much you should read
@@ -530,13 +536,17 @@ static void PlayDMATransfer(uint32_t size)
 	case DSP_DMA_8:
 		if (sb.dma.stereo) {
 			read=sb.dma.chan->Read(size,&sb.dma.buf.b8[sb.dma.remain_size]);
-			Bitu total=read+sb.dma.remain_size;
-            if (!sb.dma.sign)  sb.chan->AddSamples_s8(total>>1,sb.dma.buf.b8);
-            else sb.chan->AddSamples_s8s(total>>1,(Bit8s*)sb.dma.buf.b8);
-			if (total&1) {
+			const uint32_t total = read + sb.dma.remain_size;
+			if (!sb.dma.sign)
+				sb.chan->AddSamples_s8(total >> 1, sb.dma.buf.b8);
+			else
+				sb.chan->AddSamples_s8s(total >> 1,
+				                        (Bit8s *)sb.dma.buf.b8);
+			if (total & 1) {
 				sb.dma.remain_size=1;
 				sb.dma.buf.b8[0]=sb.dma.buf.b8[total-1];
-			} else sb.dma.remain_size=0;
+			} else
+				sb.dma.remain_size = 0;
 		} else {
 			read=sb.dma.chan->Read(size,sb.dma.buf.b8);
 			if (!sb.dma.sign) sb.chan->AddSamples_m8(read,sb.dma.buf.b8);
@@ -551,7 +561,7 @@ static void PlayDMATransfer(uint32_t size)
 			   16-bit DMA Read returns word size */
 			read=sb.dma.chan->Read(size,(Bit8u *)&sb.dma.buf.b16[sb.dma.remain_size])
 				>> (sb.dma.mode==DSP_DMA_16_ALIASED ? 1:0);
-			Bitu total=read+sb.dma.remain_size;
+			const uint32_t total = read + sb.dma.remain_size;
 #if defined(WORDS_BIGENDIAN)
 			if (sb.dma.sign) sb.chan->AddSamples_s16_nonnative(total>>1,sb.dma.buf.b16);
 			else sb.chan->AddSamples_s16u_nonnative(total>>1,(Bit16u *)sb.dma.buf.b16);
@@ -643,7 +653,7 @@ static void SuppressDMATransfer(uint32_t size)
 {
 	if (sb.dma.left < size)
 		size = sb.dma.left;
-	const Bitu read = sb.dma.chan->Read(size, sb.dma.buf.b8);
+	const uint32_t read = sb.dma.chan->Read(size, sb.dma.buf.b8);
 	sb.dma.left-=read;
 	if (!sb.dma.left) {
 		if (sb.dma.mode >= DSP_DMA_16) SB_RaiseIRQ(SB_IRQ_16);
@@ -657,7 +667,8 @@ static void SuppressDMATransfer(uint32_t size)
 		}
 	}
 	if (sb.dma.left) {
-		Bitu bigger=(sb.dma.left > sb.dma.min) ? sb.dma.min : sb.dma.left;
+		const uint32_t bigger = (sb.dma.left > sb.dma.min) ? sb.dma.min
+		                                                   : sb.dma.left;
 		double delay = (bigger * 1000.0) / sb.dma.rate;
 		PIC_AddEvent(SuppressDMATransfer, delay, bigger);
 	}
@@ -667,7 +678,8 @@ static void FlushRemainingDMATransfer()
 {
 	if (!sb.dma.left) return;
 	if (!sb.speaker && sb.type!=SBT_16) {
-		Bitu bigger=(sb.dma.left > sb.dma.min) ? sb.dma.min : sb.dma.left;
+		const uint32_t bigger = (sb.dma.left > sb.dma.min) ? sb.dma.min
+		                                                   : sb.dma.left;
 		double delay = (bigger * 1000.0) / sb.dma.rate;
 		PIC_AddEvent(SuppressDMATransfer, delay, bigger);
 		LOG(LOG_SB,LOG_NORMAL)("%s: Silent DMA Transfer scheduling IRQ in %.3f milliseconds",
@@ -691,8 +703,9 @@ static void DSP_RaiseIRQEvent(uint32_t /*val*/)
 	SB_RaiseIRQ(SB_IRQ_8);
 }
 
-static void DSP_DoDMATransfer(const DMA_MODES mode, Bitu freq, bool autoinit, bool stereo) {
-	//Fill up before changing state?
+static void DSP_DoDMATransfer(const DMA_MODES mode, uint32_t freq, bool autoinit, bool stereo)
+{
+	// Fill up before changing state?
 	sb.chan->FillUp();
 
 	//Starting a new transfer will clear any active irqs?
@@ -757,8 +770,9 @@ static void DSP_PrepareDMA_Old(DMA_MODES mode,bool autoinit,bool sign) {
 	DSP_DoDMATransfer(mode,sb.freq / (sb.mixer.stereo ? 2 : 1), autoinit, sb.mixer.stereo);
 }
 
-static void DSP_PrepareDMA_New(DMA_MODES mode,Bitu length,bool autoinit,bool stereo) {
-	Bitu freq=sb.freq;
+static void DSP_PrepareDMA_New(DMA_MODES mode, uint32_t length, bool autoinit, bool stereo)
+{
+	const auto freq = sb.freq;
 
 	//equal length if data format and dma channel are both 16-bit or 8-bit
 	if (mode==DSP_DMA_16) {
@@ -788,10 +802,9 @@ static void DSP_PrepareDMA_New(DMA_MODES mode,Bitu length,bool autoinit,bool ste
 	DSP_DoDMATransfer(mode,freq,autoinit,stereo);
 }
 
-
 static void DSP_AddData(Bit8u val) {
 	if (sb.dsp.out.used<DSP_BUFSIZE) {
-		Bitu start=sb.dsp.out.used+sb.dsp.out.pos;
+		auto start = sb.dsp.out.used + sb.dsp.out.pos;
 		if (start>=DSP_BUFSIZE) start-=DSP_BUFSIZE;
 		sb.dsp.out.data[start]=val;
 		sb.dsp.out.used++;
@@ -879,8 +892,9 @@ static void DSP_ADC_CallBack(DmaChannel * /*chan*/, DMAEvent event) {
 	ch->Register_Callback(0);
 }
 
-static void DSP_ChangeRate(Bitu freq) {
-	if (sb.freq!=freq && sb.dma.mode!=DSP_DMA_NONE) {
+static void DSP_ChangeRate(uint32_t freq)
+{
+	if (sb.freq != freq && sb.dma.mode != DSP_DMA_NONE) {
 		sb.chan->FillUp();
 		sb.chan->SetFreq(freq / (sb.mixer.stereo ? 2 : 1));
 		sb.dma.rate=(freq*sb.dma.mul) >> SB_SH;
@@ -959,7 +973,7 @@ static void DSP_DoCommand(void) {
 		//Directly write to left?
 		sb.dma.left = 1 + sb.dsp.in.data[0] + (sb.dsp.in.data[1] << 8);
 		sb.dma.sign=false;
-		LOG(LOG_SB,LOG_ERROR)("DSP:Faked ADC for %d bytes",sb.dma.left);
+		LOG(LOG_SB,LOG_ERROR)("DSP:Faked ADC for %u bytes",sb.dma.left);
 		GetDMAChannel(sb.hw.dma8)->Register_Callback(DSP_ADC_CallBack);
 		break;
 	case 0x14:	/* Singe Cycle 8-Bit DMA DAC */
@@ -1097,11 +1111,12 @@ static void DSP_DoCommand(void) {
 	case 0xe2:	/* Weird DMA identification write routine */
 		{
 			LOG(LOG_SB,LOG_NORMAL)("DSP Function 0xe2");
-			for (Bitu i = 0; i < 8; i++)
-				if ((sb.dsp.in.data[0] >> i) & 0x01) sb.e2.value += E2_incr_table[sb.e2.count % 4][i];
-			 sb.e2.value += E2_incr_table[sb.e2.count % 4][8];
-			 sb.e2.count++;
-			 GetDMAChannel(sb.hw.dma8)->Register_Callback(DSP_E2_DMA_CallBack);
+		        for (uint8_t i = 0; i < 8; i++)
+			        if ((sb.dsp.in.data[0] >> i) & 0x01)
+				        sb.e2.value += E2_incr_table[sb.e2.count % 4][i];
+		        sb.e2.value += E2_incr_table[sb.e2.count % 4][8];
+		        sb.e2.count++;
+		        GetDMAChannel(sb.hw.dma8)->Register_Callback(DSP_E2_DMA_CallBack);
 		}
 		break;
 	case 0xe3: /* DSP Copyright */
@@ -1239,7 +1254,7 @@ static float calc_vol(Bit8u amount) {
 		db *= 2.0f;
 		if (count > 20) db -= 1.0f;
 	}
-	return (float) pow (10.0f,-0.05f * db);
+	return powf(10.0f, -0.05f * db);
 }
 static void CTMIXER_UpdateVolumes(void) {
 	if (!sb.mixer.enabled) return;
@@ -1537,15 +1552,12 @@ static Bit8u CTMIXER_Read(void) {
 	return ret;
 }
 
-
-static Bitu read_sb(Bitu port,Bitu /*iolen*/) {
-	switch (port-sb.hw.base) {
-	case MIXER_INDEX:
-		return sb.mixer.index;
-	case MIXER_DATA:
-		return CTMIXER_Read();
-	case DSP_READ_DATA:
-		return DSP_ReadData();
+static uint8_t read_sb(io_port_t port, io_width_t)
+{
+	switch (port - sb.hw.base) {
+	case MIXER_INDEX: return sb.mixer.index;
+	case MIXER_DATA: return CTMIXER_Read();
+	case DSP_READ_DATA: return DSP_ReadData();
 	case DSP_READ_STATUS:
 		//TODO See for high speed dma :)
 		if (sb.irq.pending_8bit)  {
@@ -1577,33 +1589,26 @@ static Bitu read_sb(Bitu port,Bitu /*iolen*/) {
 	return 0xff;
 }
 
-static void write_sb(Bitu port,Bitu val,Bitu /*iolen*/) {
-	Bit8u val8=(Bit8u)(val&0xff);
-	switch (port-sb.hw.base) {
-	case DSP_RESET:
-		DSP_DoReset(val8);
-		break;
-	case DSP_WRITE_DATA:
-		DSP_DoWrite(val8);
-		break;
-	case MIXER_INDEX:
-		sb.mixer.index=val8;
-		break;
-	case MIXER_DATA:
-		CTMIXER_Write(val8);
-		break;
-	default:
-		LOG(LOG_SB,LOG_NORMAL)("Unhandled write to SB Port %4X",port);
-		break;
+static void write_sb(io_port_t port, uint8_t val, io_width_t)
+{
+	Bit8u val8 = (Bit8u)(val & 0xff);
+	switch (port - sb.hw.base) {
+	case DSP_RESET: DSP_DoReset(val8); break;
+	case DSP_WRITE_DATA: DSP_DoWrite(val8); break;
+	case MIXER_INDEX: sb.mixer.index = val8; break;
+	case MIXER_DATA: CTMIXER_Write(val8); break;
+	default: LOG(LOG_SB, LOG_NORMAL)("Unhandled write to SB Port %4X", port); break;
 	}
 }
 
-static void adlib_gusforward(Bitu /*port*/,Bitu val,Bitu /*iolen*/) {
-	adlib_commandreg=(Bit8u)(val&0xff);
+static void adlib_gusforward(io_port_t, uint8_t val, io_width_t)
+{
+	adlib_commandreg = (Bit8u)(val & 0xff);
 }
 
-bool SB_Get_Address(Bitu& sbaddr, Bitu& sbirq, Bitu& sbdma) {
-	sbaddr=0;
+bool SB_Get_Address(uint16_t &sbaddr, uint8_t &sbirq, uint8_t &sbdma)
+{
+	sbaddr = 0;
 	sbirq =0;
 	sbdma =0;
 	if (sb.type == SBT_NONE) return false;
@@ -1615,7 +1620,8 @@ bool SB_Get_Address(Bitu& sbaddr, Bitu& sbirq, Bitu& sbdma) {
 	}
 }
 
-static void SBLASTER_CallBack(Bitu len) {
+static void SBLASTER_CallBack(uint32_t len)
+{
 	switch (sb.mode) {
 	case MODE_NONE:
 	case MODE_DMA_PAUSE:
@@ -1706,17 +1712,13 @@ public:
 	          MixerChan{},
 	          oplmode(OPL_none)
 	{
-		Bitu i;
 		Section_prop * section=static_cast<Section_prop *>(configuration);
 
 		sb.hw.base=section->Get_hex("sbbase");
-		sb.hw.irq=section->Get_int("irq");
-		Bitu dma8bit=section->Get_int("dma");
-		if (dma8bit>0xff) dma8bit=0xff;
-		sb.hw.dma8=(Bit8u)(dma8bit&0xff);
-		Bitu dma16bit=section->Get_int("hdma");
-		if (dma16bit>0xff) dma16bit=0xff;
-		sb.hw.dma16=(Bit8u)(dma16bit&0xff);
+
+		sb.hw.irq = static_cast<uint8_t>(section->Get_int("irq"));
+		sb.hw.dma8 = static_cast<uint8_t>(section->Get_int("dma"));
+		sb.hw.dma16 = static_cast<uint8_t>(section->Get_int("hdma"));
 
 		sb.mixer.enabled=section->Get_bool("sbmixer");
 		sb.mixer.stereo=false;
@@ -1724,11 +1726,9 @@ public:
 		Find_Type_And_Opl(section,sb.type,oplmode);
 
 		switch (oplmode) {
-		case OPL_none:
-			WriteHandler[0].Install(0x388,adlib_gusforward,IO_MB);
-			break;
+		case OPL_none: WriteHandler[0].Install(0x388, adlib_gusforward, io_width_t::byte); break;
 		case OPL_cms:
-			WriteHandler[0].Install(0x388,adlib_gusforward,IO_MB);
+			WriteHandler[0].Install(0x388, adlib_gusforward, io_width_t::byte);
 			CMS_Init(section);
 			break;
 		case OPL_opl2:
@@ -1747,29 +1747,44 @@ public:
 		sb.dsp.out.lastval=0xaa;
 		sb.dma.chan=NULL;
 
-		for (i=4;i<=0xf;i++) {
-			if (i==8 || i==9) continue;
-			//Disable mixer ports for lower soundblaster
-			if ((sb.type==SBT_1 || sb.type==SBT_2) && (i==4 || i==5)) continue;
-			ReadHandler[i].Install(sb.hw.base+i,read_sb,IO_MB);
-			WriteHandler[i].Install(sb.hw.base+i,write_sb,IO_MB);
+		for (uint8_t i = 4; i <= 0xf; ++i) {
+			if (i == 8 || i == 9)
+				continue;
+			// Disable mixer ports for lower soundblaster
+			if ((sb.type == SBT_1 || sb.type == SBT_2) && (i == 4 || i == 5))
+				continue;
+			ReadHandler[i].Install(sb.hw.base + i, read_sb, io_width_t::byte);
+			WriteHandler[i].Install(sb.hw.base + i, write_sb, io_width_t::byte);
 		}
-		for (i=0;i<256;i++) ASP_regs[i] = 0;
+		for (uint16_t i = 0; i < 256; ++i)
+			ASP_regs[i] = 0;
 		ASP_regs[5] = 0x01;
 		ASP_regs[9] = 0xf8;
 
 		DSP_Reset();
 		CTMIXER_Reset();
 
-		// Create set blaster line
-		ostringstream temp;
-		temp << "@SET BLASTER=A" << setw(3) << hex << sb.hw.base << dec
-		     << " I" << (Bitu)sb.hw.irq
-		     << " D" << (Bitu)sb.hw.dma8;
-		if (sb.type == SBT_16)
-			temp << " H" << (Bitu)sb.hw.dma16;
-		temp << " T" << static_cast<unsigned int>(sb.type) << ends;
-		autoexecline.Install(temp.str());
+		// Ensure our port and addresses will fit in our format widths.
+		// The config selection controls their actual values, so this is
+		// a maximum-limit.
+		assert(sb.hw.base < 0xfff);
+		assert(sb.hw.irq <= 12);
+		assert(sb.hw.dma8 < 10);
+
+		char set_blaster[] = "@SET BLASTER=AHHH II DD HH TT";
+		if (sb.type == SBT_16) {
+			assert(sb.hw.dma16 < 10);
+			safe_sprintf(set_blaster, "@SET BLASTER=A%x I%u D%u H%u T%d",
+			             sb.hw.base, sb.hw.irq, sb.hw.dma8, sb.hw.dma16,
+			             static_cast<int>(sb.type));
+		} else {
+			safe_sprintf(set_blaster, "@SET BLASTER=A%x I%u D%u T%d",
+			             sb.hw.base, sb.hw.irq, sb.hw.dma8,
+			             static_cast<int>(sb.type));
+		}
+
+		LOG_MSG("%s: %s", CardType(), set_blaster);
+		autoexecline.Install(set_blaster);
 
 		/* Soundblaster midi interface */
 		if (!MIDI_Available()) sb.midi = false;

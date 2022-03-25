@@ -21,6 +21,8 @@
 #include <cassert>
 #include <cstring>
 
+#include "logging.h"
+#include "../ints/int10.h"
 #include "pic.h"
 #include "support.h"
 #include "video.h"
@@ -31,6 +33,7 @@ SVGA_Driver svga;
 Bit32u CGA_2_Table[16];
 Bit32u CGA_4_Table[256];
 Bit32u CGA_4_HiRes_Table[256];
+uint32_t CGA_16_Table[256];
 int CGA_Composite_Table[1024];
 Bit32u TXT_Font_Table[16];
 Bit32u TXT_FG_Table[16];
@@ -39,6 +42,15 @@ Bit32u ExpandTable[256];
 Bit32u Expand16Table[4][16];
 Bit32u FillTable[16];
 Bit32u ColorTable[16];
+
+void VGA_LogInitialization(const char* adapter_name, const char* ram_type) {
+	const auto mem_in_kib = vga.vmemsize / 1024;
+	LOG_INFO("VIDEO: Initialized %s with %d %s of %s",
+	         adapter_name,
+	         mem_in_kib < 1024 ? mem_in_kib : mem_in_kib / 1024,
+	         mem_in_kib < 1024 ? "KiB" : "MiB",
+			ram_type);
+}
 
 void VGA_SetModeNow(VGAModes mode) {
 	if (vga.mode == mode) return;
@@ -83,6 +95,7 @@ void VGA_DetermineMode(void) {
 	case 1:VGA_SetMode(M_LIN8);break;
 	case 3:VGA_SetMode(M_LIN15);break;
 	case 5:VGA_SetMode(M_LIN16);break;
+	case 7: VGA_SetMode(M_LIN24); break;
 	case 13:VGA_SetMode(M_LIN32);break;
 	}
 }
@@ -98,43 +111,61 @@ void VGA_StartResize(Bitu delay /*=50*/) {
 	}
 }
 
-void VGA_SetClock(Bitu which,Bitu target) {
+void VGA_SetClock(const Bitu which, const uint32_t desired_clock)
+{
 	if (svga.set_clock) {
-		svga.set_clock(which, target);
+		svga.set_clock(which, desired_clock);
 		return;
 	}
-	struct{
-		Bitu n,m;
-		Bits err;
-	} best;
-	best.err=target;
-	best.m=1;
-	best.n=1;
-	Bitu n,r;
-	Bits m;
 
-	for (r = 0; r <= 3; r++) {
-		Bitu f_vco = target * (1 << r);
-		if (MIN_VCO <= f_vco && f_vco < MAX_VCO) break;
-    }
-	for (n=1;n<=31;n++) {
-		m=(target * (n + 2) * (1 << r) + (S3_CLOCK_REF/2)) / S3_CLOCK_REF - 2;
-		if (0 <= m && m <= 127)	{
-			Bitu temp_target = S3_CLOCK(m,n,r);
-			Bits err = target - temp_target;
-			if (err < 0) err = -err;
-			if (err < best.err) {
-				best.err = err;
-				best.m = m;
-				best.n = n;
-			}
-		}
+	// Is this mode using a clock-doubling flag?
+	const auto mode_flags = CurMode ? CurMode->special : 0;
+	const auto has_doubler = mode_flags & (VGA_PIXEL_DOUBLE | VGA_DOUBLE_CLOCK);
+	const auto clock_scale = has_doubler ? 2 : 1;
+
+	// Ensure the target clock is within the S3's clock range
+	const auto clock = clamp(static_cast<int>(desired_clock * clock_scale),
+	                         S3_CLOCK_REF, S3_MAX_CLOCK);
+
+	// The clk parameters (r, n, m) will be populated with those that find a
+	// clock closest to the desired_clock clock.
+	VGA_S3::clk_t best_clk;
+	auto best_error = clock;
+
+	uint8_t r = 0;
+	for (r = 0; r <= 3; ++r) {
+		// Is r out of bounds?
+		const auto f_vco = clock * (1 << r);
+		if (MIN_VCO <= f_vco && f_vco <= MAX_VCO)
+			break;
 	}
-	/* Program the s3 clock chip */
+	for (uint8_t n = 1; n <= 31; ++n) {
+		// Is m out of bounds?
+		const auto m = (clock * (n + 2) * (1 << r) + (S3_CLOCK_REF / 2)) /
+		                       S3_CLOCK_REF - 2;
+		if (m > 127)
+			continue;
+
+		// Do the parameters produce a clock further away than
+		// the best combination?
+		const auto candidate_clock = S3_CLOCK(m, n, r);
+		const auto error = abs(candidate_clock - clock);
+		if (error >= best_error)
+			continue;
+
+		// Save the improved clock paramaters
+		best_error = error;
+		best_clk.r = r;
+		best_clk.m = static_cast<uint8_t>(m);
+		best_clk.n = n;
+	}
+	// LOG_MSG("VGA: Clock[%lu] r=%u, n=%u, m=%u (desired_clock = %u, actual = %u KHz",
+	//         which, best_clk.r, best_clk.n, best_clk.m, desired_clock,
+	//         S3_CLOCK(best_clk.m, best_clk.n, best_clk.r));
+
+	// Save the best clock and then program the S3 chip.
 	assert(which < ARRAY_LEN(vga.s3.clk));
-	vga.s3.clk[which].m = best.m;
-	vga.s3.clk[which].r = r;
-	vga.s3.clk[which].n = best.n;
+	vga.s3.clk[which] = best_clk;
 	VGA_StartResize();
 }
 

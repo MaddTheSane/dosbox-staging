@@ -9,7 +9,10 @@ jobs:
     env:
       debfile: pvs-studio-7.14.50353.142-amd64.deb
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout repository and submodules
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
 
       - run:  sudo apt-get update
 
@@ -28,10 +31,11 @@ jobs:
         if:    steps.cache-pvs.outputs.cache-hit != 'true'
         run:   wget "https://files.viva64.com/${debfile}" -O "pvs-package/pvs.deb"
 
-      - name: Install packages
+      - name: Install dependencies
         run: |
           set -xeu
           sudo apt-get install -y strace $(cat .github/packages/ubuntu-20.04-apt.txt)
+          sudo pip3 install --upgrade meson ninja
           sudo dpkg -i "pvs-package/pvs.deb"
           pvs-studio-analyzer credentials "${{ secrets.PvsStudioName }}" "${{ secrets.PvsStudioKey }}"
 
@@ -107,7 +111,7 @@ jobs:
 
       - name: Summarize report
         env:
-          MAX_BUGS: 317
+          MAX_BUGS: 282
         run: |
           echo "Full report is included in build Artifacts"
           echo

@@ -67,7 +67,7 @@ void DOS_Shell::InputCommand(char * line) {
 
 	std::list<std::string>::iterator it_history = l_history.begin(), it_completion = l_completion.begin();
 
-	while (size && !exit_requested) {
+	while (size && !shutdown_requested) {
 		dos.echo=false;
 		
 		//--Modified 2012-08-19 by Alun Bestor to let Boxer inject its own input
@@ -508,7 +508,7 @@ bool DOS_Shell::Execute(char * name,char * args) {
 	const char *extension = strrchr(fullname, '.');
 	if (!extension) {
 		// Check if the result will fit in the parameters.
-		if (strlen(fullname) > (DOS_PATHLENGTH - 1))
+		if (safe_strlen(fullname) > (DOS_PATHLENGTH - 1))
 			return false;
 
 		// Try to add .COM, .EXE and .BAT extensions to the filename
@@ -564,7 +564,8 @@ bool DOS_Shell::Execute(char * name,char * args) {
 		block.Clear();
 		//Add a filename
 		RealPt file_name=RealMakeSeg(ss,reg_sp+0x20);
-		MEM_BlockWrite(Real2Phys(file_name),fullname,(Bitu)(strlen(fullname)+1));
+		MEM_BlockWrite(Real2Phys(file_name), fullname,
+		               (Bitu)(safe_strlen(fullname) + 1));
 
 		/* HACK: Store full commandline for mount and imgmount */
 		full_arguments.assign(line);
@@ -573,7 +574,8 @@ bool DOS_Shell::Execute(char * name,char * args) {
 		CommandTail cmdtail;
 		cmdtail.count = 0;
 		memset(&cmdtail.buffer,0,127); //Else some part of the string is unitialized (valgrind)
-		if (strlen(line)>126) line[126]=0;
+		if (safe_strlen(line) > 126)
+			line[126] = 0;
 		cmdtail.count=(Bit8u)strlen(line);
 		memcpy(cmdtail.buffer,line,strlen(line));
 		cmdtail.buffer[strlen(line)]=0xd;
@@ -706,7 +708,7 @@ const char *DOS_Shell::Which(const char *name) const
 
 
 		/* check entry */
-		if(size_t len = strlen(path)){
+		if (size_t len = safe_strlen(path)) {
 			if(len >= (DOS_PATHLENGTH - 2)) continue;
 
 			if(path[len - 1] != '\\') {

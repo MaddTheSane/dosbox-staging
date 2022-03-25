@@ -110,8 +110,10 @@ static void RENDER_StartLineHandler(const void * s) {
 		const Bitu *src = (Bitu*)s;
 		Bitu *cache = (Bitu*)(render.scale.cacheRead);
 		for (Bits x=render.src.start;x>0;) {
-			if (GCC_UNLIKELY(src[0] != cache[0])) {
-				if (!GFX_StartUpdate( render.scale.outWrite, render.scale.outPitch )) {
+			const auto src_ptr = reinterpret_cast<const uint8_t *>(src);
+			const auto src_val = read_unaligned_size_t(src_ptr);
+			if (GCC_UNLIKELY(src_val != cache[0])) {
+				if (!GFX_StartUpdate(render.scale.outWrite, render.scale.outPitch)) {
 					RENDER_DrawLine = RENDER_EmptyLineHandler;
 					return;
 				}
@@ -227,7 +229,7 @@ void RENDER_EndUpdate( bool abort ) {
 			fps /= fps_skip;
 		}
 		CAPTURE_AddImage(render.src.width, render.src.height, render.src.bpp,
-		                 pitch, flags, fps, (Bit8u *)&scalerSourceCache,
+		                 pitch, flags, static_cast<float>(fps), (Bit8u *)&scalerSourceCache,
 		                 (Bit8u *)&render.pal.rgb);
 	}
 	if ( render.scale.outWrite ) {
@@ -420,11 +422,16 @@ forcenormal:
 			gfx_flags |= GFX_LOVE_16;
 			gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
 			break;
+	case 24:
+		render.src.start = (render.src.width * 3) / sizeof(Bitu);
+		gfx_flags |= GFX_LOVE_32;
+		gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
+		break;
 	case 32:
-			render.src.start = ( render.src.width * 4) / sizeof(Bitu);
-			gfx_flags |= GFX_LOVE_32;
-			gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
-			break;
+		render.src.start = (render.src.width * 4) / sizeof(Bitu);
+		gfx_flags |= GFX_LOVE_32;
+		gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
+		break;
 	}
 	gfx_flags=GFX_GetBestMode(gfx_flags);
 	if (gfx_flags & GFX_UNITY_SCALE &&
@@ -511,7 +518,7 @@ forcenormal:
 	switch (render.src.bpp) {
 	case 8:
 		render.scale.lineHandler = (*lineBlock)[0][render.scale.outMode];
-		render.scale.linePalHandler = (*lineBlock)[4][render.scale.outMode];
+		render.scale.linePalHandler = (*lineBlock)[5][render.scale.outMode];
 		render.scale.inMode = scalerMode8;
 		render.scale.cachePitch = render.src.width * 1;
 		break;
@@ -527,8 +534,14 @@ forcenormal:
 		render.scale.inMode = scalerMode16;
 		render.scale.cachePitch = render.src.width * 2;
 		break;
-	case 32:
+	case 24:
 		render.scale.lineHandler = (*lineBlock)[3][render.scale.outMode];
+		render.scale.linePalHandler = 0;
+		render.scale.inMode = scalerMode32;
+		render.scale.cachePitch = render.src.width * 3;
+		break;
+	case 32:
+		render.scale.lineHandler = (*lineBlock)[4][render.scale.outMode];
 		render.scale.linePalHandler = 0;
 		render.scale.inMode = scalerMode32;
 		render.scale.cachePitch = render.src.width * 4;

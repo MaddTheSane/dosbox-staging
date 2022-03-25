@@ -292,6 +292,9 @@ typedef		int32_t		Bit32s;
 typedef		uint64_t	Bit64u;
 typedef		int64_t		Bit64s;
 
+#define HAVE_SYS_ICACHE_INVALIDATE 1
+#define HAVE_BUILTIN_AVAILABLE 1
+
 //I'd rather map these to NSUinteger and NSInteger respectively, which would give the exact same result, but that would mean importing Obj-C headers into a C++ context and the compiler would shit itself
 #if defined(__LP64__)
 #define sBit32t

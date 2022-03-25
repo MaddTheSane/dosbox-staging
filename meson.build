@@ -1,8 +1,8 @@
 project('dosbox-staging', 'c', 'cpp',
         version : '0.78.0',
         license : 'GPL-2.0-or-later',
-        default_options : ['cpp_std=c++14', 'b_ndebug=if-release', 'b_staticpic=false'],
-        meson_version : '>= 0.51.0')
+        default_options : ['cpp_std=c++17', 'warning_level=3', 'b_ndebug=if-release', 'b_staticpic=false'],
+        meson_version : '>= 0.54.2')
 
 # After increasing the minimum-required meson version, make the following
 # improvements:
@@ -14,9 +14,6 @@ project('dosbox-staging', 'c', 'cpp',
 
 
 # compiler flags
-#
-# Warnings enabled below are our baseline; use '-Dwarning_level=3' to
-# turn on more.  The default level is 1 (meson turns on -Wall).
 #
 cc = meson.get_compiler('c')
 cxx = meson.get_compiler('cpp')
@@ -83,6 +80,10 @@ endif
 
 if cc.has_function('__builtin_available')
   conf_data.set10('HAVE_BUILTIN_AVAILABLE', true)
+endif
+
+if cc.has_function('__builtin___clear_cache')
+  conf_data.set10('HAVE_BUILTIN_CLEAR_CACHE', true)
 endif
 
 if cc.has_function('mprotect', prefix : '#include <sys/mman.h>')
@@ -179,6 +180,7 @@ static_libs_list = get_option('try_static_libs')
 msg = 'You can disable this dependency with: -D@0@=false'
 
 optional_dep  = dependency('', required : false)
+dl_dep        = cc.find_library('dl', required : false)
 atomic_dep    = cxx.find_library('atomic', required : false)
 opus_dep      = dependency('opusfile',
                            static : ('opusfile' in static_libs_list))
@@ -292,12 +294,19 @@ endif
 
 # include directories
 #
-incdir = include_directories('include', '.')
+incdir = include_directories(
+           'include',
+           '.',
+           'submodules/loguru',
+         )
 
 
-# bundled dependencies
+# bundled dependencies, in dependency-order
 #
-subdir('src/libs/decoders')
+subdir('src/libs/loguru')
+libloguru_dep = declare_dependency(link_with : libloguru)
+
+subdir('src/libs/decoders') # depends on libloguru_dep
 subdir('src/libs/nuked')
 subdir('src/libs/ppscale')
 subdir('src/libs/residfp')
@@ -306,7 +315,6 @@ libdecoders_dep = declare_dependency(link_with : libdecoders)
 libnuked_dep    = declare_dependency(link_with : libnuked)
 libppscale_dep  = declare_dependency(link_with : libppscale)
 libresidfp_dep  = declare_dependency(link_with : libresidfp)
-
 
 # internal libs
 #

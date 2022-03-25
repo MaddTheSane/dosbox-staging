@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ClCompile Include="..\src\cpu\callback.cpp">
@@ -161,6 +161,9 @@
       <Filter>src\hardware</Filter>
     </ClCompile>
     <ClCompile Include="..\src\hardware\iohandler.cpp">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\iohandler_containers.cpp">
       <Filter>src\hardware</Filter>
     </ClCompile>
     <ClCompile Include="..\src\hardware\ipx.cpp">
@@ -480,6 +483,9 @@
     </ClCompile>
     <ClCompile Include="..\src\misc\pacer.cpp">
       <Filter>src\misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\submodules\loguru\loguru.cpp">
+      <Filter>submodules\loguru</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -911,6 +917,12 @@
     </ClInclude>
     <ClInclude Include="..\src\libs\residfp\WaveformGenerator.h">
       <Filter>src\libs\residfp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\cpu\core_dyn_x86\risc_x64.h">
+      <Filter>src\cpu\core_dyn_x86</Filter>
+    </ClInclude>
+    <ClInclude Include="..\submodules\loguru\loguru.hpp">
+      <Filter>submodules\loguru</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

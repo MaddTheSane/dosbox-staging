@@ -657,8 +657,8 @@ public:
 	}
 };
 
-extern void XGA_Write(Bitu port, Bitu val, Bitu len);
-extern Bitu XGA_Read(Bitu port, Bitu len);
+extern void XGA_Write(io_port_t port, uint32_t val, io_width_t width);
+extern uint32_t XGA_Read(io_port_t port, io_width_t width);
 
 class VGA_MMIO_Handler final : public PageHandler {
 public:
@@ -667,28 +667,28 @@ public:
 	}
 	void writeb(PhysPt addr,Bitu val) {
 		Bitu port = PAGING_GetPhysicalAddress(addr) & 0xffff;
-		XGA_Write(port, val, 1);
+		XGA_Write(port, val, io_width_t::byte);
 	}
 	void writew(PhysPt addr,Bitu val) {
 		Bitu port = PAGING_GetPhysicalAddress(addr) & 0xffff;
-		XGA_Write(port, val, 2);
+		XGA_Write(port, val, io_width_t::word);
 	}
 	void writed(PhysPt addr,Bitu val) {
 		Bitu port = PAGING_GetPhysicalAddress(addr) & 0xffff;
-		XGA_Write(port, val, 4);
+		XGA_Write(port, val, io_width_t::dword);
 	}
 
 	Bitu readb(PhysPt addr) {
 		Bitu port = PAGING_GetPhysicalAddress(addr) & 0xffff;
-		return XGA_Read(port, 1);
+		return XGA_Read(port, io_width_t::byte);
 	}
 	Bitu readw(PhysPt addr) {
 		Bitu port = PAGING_GetPhysicalAddress(addr) & 0xffff;
-		return XGA_Read(port, 2);
+		return XGA_Read(port, io_width_t::word);
 	}
 	Bitu readd(PhysPt addr) {
 		Bitu port = PAGING_GetPhysicalAddress(addr) & 0xffff;
-		return XGA_Read(port, 4);
+		return XGA_Read(port, io_width_t::dword);
 	}
 };
 
@@ -848,6 +848,7 @@ void VGA_SetupHandlers(void) {
 		break;	
 	case M_LIN15:
 	case M_LIN16:
+	case M_LIN24:
 	case M_LIN32:
 #ifdef VGA_LFB_MAPPED
 		newHandler = &vgaph.map;
@@ -936,7 +937,7 @@ void VGA_StartUpdateLFB(void) {
 #else
 	vga.lfb.handler = &vgaph.lfbchanges;
 #endif
-	MEM_SetLFB(vga.s3.la_window << 4 ,vga.vmemsize/4096, vga.lfb.handler, &vgaph.mmio);
+	MEM_SetLFB(vga.lfb.page, vga.vmemsize / 4096, vga.lfb.handler, &vgaph.mmio);
 }
 
 static void VGA_Memory_ShutDown(Section * /*sec*/) {

@@ -45,7 +45,7 @@ jobs:
           - name: GCC, +debugger
             os: ubuntu-20.04
             build_flags: -Denable_debugger=normal
-            max_warnings: 77
+            max_warnings: 0
 
           - name: GCC, -dyn-x86
             os: ubuntu-20.04
@@ -55,32 +55,32 @@ jobs:
           - name: GCC, -dyn-x86, +debugger
             os: ubuntu-20.04
             build_flags: -Ddynamic_core=dynrec -Denable_debugger=normal
-            max_warnings: 113
+            max_warnings: 0
 
           - name: GCC, -network
             os: ubuntu-20.04
             build_flags: -Duse_sdl2_net=false
             max_warnings: 0
 
-          - name: GCC, warning_level=3
-            os: ubuntu-20.04
-            build_flags: -Dwarning_level=3
-            max_warnings: 52
-
           - name: GCC, minimum build
             os: ubuntu-20.04
             build_flags: --wrap-mode=nofallback -Dunit_tests=disabled -Duse_fluidsynth=false -Duse_sdl2_net=false -Duse_opengl=false -Duse_fluidsynth=false -Duse_mt32emu=false -Duse_png=false -Duse_alsa=false
             min_dependencies: true
-            max_warnings: -1
+            max_warnings: 0
 
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout repository and submodules
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
       - run:  sudo apt-get update
 
       - name: Install dependencies (minimum set)
         if:   matrix.conf.min_dependencies
         run: |
-          sudo apt-get install -y build-essential ccache meson libsdl2-dev libopusfile-dev
+          sudo apt-get install -y build-essential ccache libsdl2-dev libopusfile-dev python3-setuptools
+          sudo pip3 install --upgrade meson ninja
 
       - name: Install dependencies
         if:   matrix.conf.min_dependencies != true
@@ -88,12 +88,7 @@ jobs:
           sudo apt-get install -y \
             ${{ matrix.conf.packages }} \
             $(cat ./.github/packages/${{ matrix.conf.os }}-apt.txt)
-
-      - name: Install Meson via pip3
-        if:   matrix.conf.os != 'ubuntu-20.04'
-        run: |
-          sudo apt-get install python3-setuptools
-          sudo pip3 install meson ninja
+          sudo pip3 install --upgrade meson ninja
 
       - name:  Prepare compiler cache
         id:    prep-ccache
@@ -109,9 +104,9 @@ jobs:
         id:    cache-ccache
         with:
           path: ${{ steps.prep-ccache.outputs.dir }}
-          key:  ccache-${{ matrix.conf.os }}-${{ steps.prep-ccache.outputs.name_hash }}-${{ steps.prep-ccache.outputs.today }}
+          key:  ccache-${{ matrix.conf.os }}-${{ steps.prep-ccache.outputs.name_hash }}-${{ steps.prep-ccache.outputs.today }}-1
           restore-keys: |
-            ccache-${{ matrix.conf.os }}-${{ steps.prep-ccache.outputs.name_hash }}-${{ steps.prep-ccache.outputs.yesterday }}
+            ccache-${{ matrix.conf.os }}-${{ steps.prep-ccache.outputs.name_hash }}-${{ steps.prep-ccache.outputs.yesterday }}-1
 
       - name:  Cache subprojects
         uses:  actions/cache@v2
@@ -146,20 +141,18 @@ jobs:
     runs-on: ubuntu-18.04
     if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier', github.actor) == false
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout repository and submodules
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
 
       - run:  sudo apt-get update
 
-      - name: Install C++ compiler and libraries
+      - name: Install dependencies
         run: |
           sudo apt-get install -y tree \
             $(cat ./.github/packages/ubuntu-18.04-apt.txt)
-
-      - name: Install Meson via pip3
-        if:   matrix.conf.os != 'ubuntu-20.04'
-        run: |
-          sudo apt-get install python3-setuptools
-          sudo pip3 install meson ninja
+          sudo pip3 install --upgrade meson ninja
 
       - name:  Prepare compiler cache
         id:    prep-ccache
@@ -174,9 +167,9 @@ jobs:
         id:    cache-ccache
         with:
           path: ${{ steps.prep-ccache.outputs.dir }}
-          key:  ccache-linux-release-${{ steps.prep-ccache.outputs.today }}
+          key:  ccache-linux-release-${{ steps.prep-ccache.outputs.today }}-1
           restore-keys: |
-            ccache-linux-release-${{ steps.prep-ccache.outputs.yesterday }}
+            ccache-linux-release-${{ steps.prep-ccache.outputs.yesterday }}-1
 
       - name:  Cache subprojects
         uses:  actions/cache@v2

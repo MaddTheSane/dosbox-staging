@@ -29,9 +29,9 @@
 
 int sdl_main(int argc, char *argv[]);
 
-// The exit_requested bool is a conditional break in the parse-loop and
+// The shutdown_requested bool is a conditional break in the parse-loop and
 // machine-loop. Set it to true to gracefully quit in expected circumstances.
-extern bool exit_requested;
+extern bool shutdown_requested;
 
 // The E_Exit function throws an exception to quit. Call it in unexpected
 // circumstances.
@@ -75,7 +75,6 @@ enum SVGACards {
 
 extern SVGACards svgaCard;
 extern MachineType machine;
-extern bool SDLNetInited;
 extern bool mono_cga;
 
 #define IS_TANDY_ARCH ((machine==MCH_TANDY) || (machine==MCH_PCJR))

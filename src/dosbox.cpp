@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <unistd.h>
 
 #include <functional>
@@ -64,7 +65,7 @@ void NE2K_Init(Section* sec);
 #endif
 
 Config * control;
-bool exit_requested = false;
+bool shutdown_requested = false;
 MachineType machine;
 SVGACards svgaCard;
 
@@ -140,8 +141,6 @@ void SHELL_Init(void);
 void INT10_Init(Section*);
 
 static LoopHandler * loop;
-
-bool SDLNetInited;
 
 static std::function<void(int)> delay_fn = Delay;
 static int ticksRemain;
@@ -346,7 +345,7 @@ void DOSBOX_SetNormalLoop() {
 void DOSBOX_RunMachine()
 {
 	Bitu ret = 0;
-	while (ret == 0 && !exit_requested) {
+	while (ret == 0 && !shutdown_requested) {
         //--Modified 2011-09-25 by Alun Bestor to bracket iterations of the run loop
         //with our own callbacks. We pass along the contextInfo parameter so that
         //Boxer knows which iteration of the runloop is running (in case of nested runloops).
@@ -408,21 +407,46 @@ static void DOSBOX_RealInit(Section * sec) {
 	if      (mtype == "cga")      { machine = MCH_CGA; mono_cga = false; }
 	else if (mtype == "cga_mono") { machine = MCH_CGA; mono_cga = true; }
 	else if (mtype == "tandy")    { machine = MCH_TANDY; }
-	else if (mtype == "pcjr")     { machine = MCH_PCJR; }
-	else if (mtype == "hercules") { machine = MCH_HERC; }
-	else if (mtype == "ega")      { machine = MCH_EGA; }
-//	else if (mtype == "vga")          { svgaCard = SVGA_S3Trio; }
-	else if (mtype == "svga_s3")       { svgaCard = SVGA_S3Trio; }
-	else if (mtype == "vesa_nolfb")   { svgaCard = SVGA_S3Trio; int10.vesa_nolfb = true;}
-	else if (mtype == "vesa_oldvbe")   { svgaCard = SVGA_S3Trio; int10.vesa_oldvbe = true;}
-	else if (mtype == "svga_et4000")   { svgaCard = SVGA_TsengET4K; }
-	else if (mtype == "svga_et3000")   { svgaCard = SVGA_TsengET3K; }
-//	else if (mtype == "vga_pvga1a")   { svgaCard = SVGA_ParadisePVGA1A; }
-	else if (mtype == "svga_paradise") { svgaCard = SVGA_ParadisePVGA1A; }
-	else if (mtype == "vgaonly")      { svgaCard = SVGA_None; }
-	else E_Exit("DOSBOX:Unknown machine type %s",mtype.c_str());
-}
+	else if (mtype == "pcjr")     { machine = MCH_PCJR;
+	} else if (mtype == "hercules") {
+		machine = MCH_HERC;
+	} else if (mtype == "ega") {
+		machine = MCH_EGA;
+	} else if (mtype == "svga_s3") {
+		svgaCard = SVGA_S3Trio;
+	} else if (mtype == "vesa_nolfb") {
+		svgaCard = SVGA_S3Trio;
+		int10.vesa_nolfb = true;
+	} else if (mtype == "vesa_oldvbe") {
+		svgaCard = SVGA_S3Trio;
+		int10.vesa_oldvbe = true;
+	} else if (mtype == "svga_et4000") {
+		svgaCard = SVGA_TsengET4K;
+	} else if (mtype == "svga_et3000") {
+		svgaCard = SVGA_TsengET3K;
+	} else if (mtype == "svga_paradise") {
+		svgaCard = SVGA_ParadisePVGA1A;
+	} else if (mtype == "vgaonly") {
+		svgaCard = SVGA_None;
+	} else
+		E_Exit("DOSBOX:Unknown machine type %s", mtype.c_str());
 
+	// Convert the users video memory in either MB or KiB to bytes
+	const auto vmemsize_string = std::string(section->Get_string("vmemsize"));
+
+	// If auto, then default to 0 and let the adapter's setup rountine set
+	// the size
+	auto vmemsize = vmemsize_string == "auto" ? 0 : std::stoi(vmemsize_string);
+
+	// Scale up from MB-to-bytes or from KB-to-bytes
+	vmemsize *= (vmemsize <= 8) ? 1024 * 1024 : 1024;
+	vga.vmemsize = check_cast<uint32_t>(vmemsize);
+
+	if (std::string(section->Get_string("vesa_modes")) == "all")
+		int10.vesa_mode_preference = VESA_MODE_PREF::ALL;
+	else
+		int10.vesa_mode_preference = VESA_MODE_PREF::COMPATIBLE;
+}
 
 void DOSBOX_Init(void) {
 	Section_prop * secprop;
@@ -441,27 +465,31 @@ void DOSBOX_Init(void) {
 	constexpr auto only_at_start = Property::Changeable::OnlyAtStart;
 	constexpr auto when_idle = Property::Changeable::WhenIdle;
 
-	SDLNetInited = false;
-
 	// Some frequently used option sets
 	const char *rates[] = {"44100", "48000", "32000", "22050", "16000",
 	                       "11025", "8000",  "49716", 0};
 
 	/* Setup all the different modules making up DOSBox */
-	const char* machines[] = {
-		"hercules", "cga", "cga_mono", "tandy", "pcjr", "ega",
-		"vgaonly", "svga_s3", "svga_et3000", "svga_et4000",
-		"svga_paradise", "vesa_nolfb", "vesa_oldvbe", 0 };
-	secprop=control->AddSection_prop("dosbox",&DOSBOX_RealInit);
-	Pstring = secprop->Add_path("language",Property::Changeable::Always,"");
-	Pstring->Set_help("Select another language file.");
+	const char *machines[] = {"hercules",      "cga",
+	                          "cga_mono",      "tandy",
+	                          "pcjr",          "ega",
+	                          "vgaonly",       "svga_s3",
+	                          "svga_et3000",   "svga_et4000",
+	                          "svga_paradise", "vesa_nolfb",
+	                          "vesa_oldvbe",   0};
 
-	Pstring = secprop->Add_string("machine",Property::Changeable::OnlyAtStart,"svga_s3");
-	Pstring->Set_values(machines);
-	Pstring->Set_help("The type of machine DOSBox tries to emulate.");
+	secprop = control->AddSection_prop("dosbox", &DOSBOX_RealInit);
+	pstring = secprop->Add_path("language", Property::Changeable::Always, "");
+	pstring->Set_help("Select another language file.");
 
-	Pstring = secprop->Add_path("captures",Property::Changeable::Always,"capture");
-	Pstring->Set_help("Directory where things like wave, midi, screenshot get captured.");
+	pstring = secprop->Add_string("machine", Property::Changeable::OnlyAtStart,
+	                              "svga_s3");
+	pstring->Set_values(machines);
+	pstring->Set_help("The type of machine DOSBox tries to emulate.");
+	pstring = secprop->Add_path("captures", Property::Changeable::Always,
+	                            "capture");
+	pstring->Set_help(
+	        "Directory where things like wave, midi, screenshot get captured.");
 
 #if C_DEBUG
 	LOG_StartUp();
@@ -471,24 +499,45 @@ void DOSBOX_Init(void) {
 	secprop->AddInitFunction(&PAGING_Init);//done
 	secprop->AddInitFunction(&MEM_Init);//done
 	secprop->AddInitFunction(&HARDWARE_Init);//done
-	Pint = secprop->Add_int("memsize", Property::Changeable::WhenIdle,16);
-	Pint->SetMinMax(1,63);
-	Pint->Set_help(
-		"Amount of memory DOSBox has in megabytes.\n"
-		"This value is best left at its default to avoid problems with some games,\n"
-		"though few games might require a higher value.\n"
-		"There is generally no speed advantage when raising this value.");
+	pint = secprop->Add_int("memsize", Property::Changeable::WhenIdle, 16);
+	pint->SetMinMax(1, 63);
+	pint->Set_help(
+	        "Amount of memory DOSBox has in megabytes.\n"
+	        "This value is best left at its default to avoid problems with some games,\n"
+	        "though few games might require a higher value.\n"
+	        "There is generally no speed advantage when raising this value.");
+
+	const char *vmemsize_choices[] = {
+	        "auto",
+	        "1",    "2",    "4",    "8", // MiB
+	        "256", "512",  "1024", "2048", "4096", "8192", 0, // KiB
+	};
+	pstring = secprop->Add_string("vmemsize", only_at_start, "auto");
+	pstring->Set_values(vmemsize_choices);
+	pstring->Set_help(
+	        "Video memory in MiB (1-8) or KiB (256 to 8192). 'auto' uses the default per video adapter.");
+
+	const char *vesa_modes_choices[] = {"compatible", "all", 0};
+	Pstring = secprop->Add_string("vesa_modes", only_at_start, "compatible");
+	Pstring->Set_values(vesa_modes_choices);
+	Pstring->Set_help(
+	        "Controls the selection of VESA 1.2 and 2.0 modes offered:\n"
+	        "  compatible   A tailored selection that maximizes game compatibility.\n"
+	        "               This is recommended along with 4 or 8 MB of video memory.\n"
+	        "  all          Offers all modes for a given video memory size, however\n"
+	        "               some games may not use them properly (flickering) or may need\n"
+	        "               more system memory (mem = ) to use them.");
+
 	secprop->AddInitFunction(&CALLBACK_Init);
 	secprop->AddInitFunction(&PIC_Init);//done
 	secprop->AddInitFunction(&PROGRAMS_Init);
 	secprop->AddInitFunction(&TIMER_Init);//done
 	secprop->AddInitFunction(&CMOS_Init);//done
 
-	const char *verbosity_choices[] = {"high",  "medium",
-	                                   "low",   "splash_only",
-	                                   "quiet", "auto",
-	                                   0};
-	Pstring = secprop->Add_string("startup_verbosity", only_at_start, "high");
+	const char *verbosity_choices[] = {
+	        "auto", "high", "medium", "low", "splash_only", "quiet", 0,
+	};
+	Pstring = secprop->Add_string("startup_verbosity", only_at_start, "auto");
 	Pstring->Set_values(verbosity_choices);
 	Pstring->Set_help(
 	        "Controls verbosity prior to displaying the program:\n"
@@ -500,10 +549,10 @@ void DOSBOX_Init(void) {
 	        "splash_only |  yes   |   no    |    no\n"
 	        "auto        | 'low' if exec or dir is passed, otherwise 'high'");
 
-	secprop=control->AddSection_prop("render",&RENDER_Init,true);
-	Pint = secprop->Add_int("frameskip",Property::Changeable::Always,0);
-	Pint->SetMinMax(0,10);
-	Pint->Set_help("How many frames DOSBox skips before drawing one.");
+	secprop = control->AddSection_prop("render", &RENDER_Init, true);
+	pint = secprop->Add_int("frameskip", Property::Changeable::Always, 0);
+	pint->SetMinMax(0, 10);
+	pint->Set_help("How many frames DOSBox skips before drawing one.");
 
 	Pbool = secprop->Add_bool("aspect", Property::Changeable::Always, true);
 	Pbool->Set_help("Scales the vertical resolution to produce a 4:3 display aspect\n"
@@ -557,6 +606,10 @@ void DOSBOX_Init(void) {
 	                  "crt-easymode-flat, crt-fakelottes-flat, rgb2x, rgb3x,\n"
 	                  "scan2x, scan3x, tv2x, tv3x, sharp (default).");
 #endif
+
+	// Add the [composite] conf block after [render]
+	assert(control);
+	VGA_AddCompositeSettings(*control);
 
 	secprop=control->AddSection_prop("cpu",&CPU_Init,true);//done
 	const char* cores[] = { "auto",

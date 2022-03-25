@@ -12,10 +12,10 @@ jobs:
         conf:
           - name: MSVC 32-bit
             arch: x86
-            max_warnings: 272
+            max_warnings: 266
           - name: MSVC 64-bit
             arch: x64
-            max_warnings: 1896
+            max_warnings: 1633
     steps:
       - name:  Backup existing vcpkg installation
         shell: pwsh
@@ -34,22 +34,18 @@ jobs:
         id:   cache-vcpkg
         with:
           path: c:\vcpkg
-          key: vcpkg-${{ matrix.conf.arch }}-${{ steps.prep-vcpkg.outputs.year_and_week }}-1
+          key: vcpkg-${{ matrix.conf.arch }}-${{ steps.prep-vcpkg.outputs.year_and_week }}-2
 
       - name:  Install new packages using vcpkg
         if:    steps.cache-vcpkg.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          c:
-          cd \
-          rm -R vcpkg
-          git clone https://github.com/Microsoft/vcpkg.git
-          cd vcpkg
-          git checkout 4b317d797e0fb3ca0cfa1b47f2c6741284fe5f5c
-          .\bootstrap-vcpkg.bat
+          rm -R c:\vcpkg
+          mv c:\vcpkg-bak c:\vcpkg
           vcpkg install --triplet ${{ matrix.conf.arch }}-windows libpng sdl2 sdl2-net libmt32emu opusfile fluidsynth gtest
           if (-not $?) { throw "vcpkg failed to install library dependencies" }
-          rm -R buildtrees\fluidsynth\src\*.clean\sf2
+          rm -R c:\vcpkg\buildtrees
+          rm -R c:\vcpkg\packages
 
       - name:  Integrate packages
         shell: pwsh
@@ -57,7 +53,11 @@ jobs:
           vcpkg integrate install
           if (-not $?) { throw "vcpkg failed to integrate packages" }
 
-      - uses:  actions/checkout@v2
+      - name: Checkout repository and submodules
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
       - name:  Log environment
         shell: pwsh
         run:   .\scripts\log-env.ps1
@@ -118,7 +118,7 @@ jobs:
         uses: actions/cache@v2
         with:
           path: c:\vcpkg
-          key: vcpkg-${{ matrix.conf.arch }}-${{ steps.prep-vcpkg.outputs.year_and_week }}-1
+          key: vcpkg-${{ matrix.conf.arch }}-${{ steps.prep-vcpkg.outputs.year_and_week }}-2
 
       - name:  Integrate packages
         shell: pwsh
@@ -126,7 +126,11 @@ jobs:
           vcpkg integrate install
           if (-not $?) { throw "vcpkg failed to integrate packages" }
 
-      - uses:  actions/checkout@v2
+      - name: Checkout repository and submodules
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
       - name:  Log environment
         shell: pwsh
         run:   .\scripts\log-env.ps1
@@ -204,7 +208,7 @@ jobs:
           ls -l "$VC_REDIST_PATH"
 
           # Include the necessary dlls from one of available versions
-          readonly VC_REDIST_VERSION="14.29.30036"
+          readonly VC_REDIST_VERSION="14.29.30133"
           readonly VC_REDIST_DIR="$VC_REDIST_PATH/$VC_REDIST_VERSION/${{ matrix.conf.arch }}/Microsoft.VC142.CRT"
           cp "$VC_REDIST_DIR/msvcp140.dll"       dest/
           cp "$VC_REDIST_DIR/vcruntime140.dll"   dest/

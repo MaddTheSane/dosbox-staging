@@ -64,7 +64,7 @@ void DEBUG_ShowMsg(char const* format,...) {
 	buf[sizeof(buf) - 1] = '\0';
 
 	/* Add newline if not present */
-	size_t len = strlen(buf);
+	size_t len = safe_strlen(buf);
 	if(buf[len - 1] != '\n' && len + 1 < sizeof(buf) ) strcat(buf,"\n");
 
 	if (debuglog) {
@@ -282,7 +282,7 @@ void DBGUI_StartUp(void) {
 	nodelay(dbg.win_main,true);
 	keypad(dbg.win_main,true);
 	#ifndef WIN32
-	printf("\e[8;50;80t");
+	printf("\033[8;50;80t");
 	fflush(NULL);
 	resizeterm(50,80);
 	touchwin(dbg.win_main);

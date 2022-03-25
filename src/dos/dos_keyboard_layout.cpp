@@ -31,6 +31,7 @@
 #include "dos_inc.h"
 
 #include "dos_codepages.h"
+#include "dos_keyboard_layout.h"
 #include "dos_keyboard_layout_data.h"
 
 #if defined (WIN32)
@@ -1205,7 +1206,7 @@ public:
 			WORD cur_kb_subID  = 0;
 			char layoutID_string[KL_NAMELENGTH];
 			if (GetKeyboardLayoutName(layoutID_string)) {
-				if (strlen(layoutID_string) == 8) {
+				if (safe_strlen(layoutID_string) == 8) {
 					int cur_kb_layout_by_name = ConvHexWord((char*)&layoutID_string[4]);
 					layoutID_string[4] = 0;
 					int subID = ConvHexWord((char*)&layoutID_string[0]);
@@ -1370,7 +1371,7 @@ public:
 		} */
 		if (loaded_layout->read_keyboard_file(layoutname, dos.loaded_codepage)) {
 			if (strncmp(layoutname,"auto",4)) {
-				LOG_MSG("Error loading keyboard layout %s",layoutname);
+				LOG_ERR("Error loading keyboard layout %s",layoutname);
 			}
 		} else {
 			const char* lcode = loaded_layout->main_language_code();
