@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2022       The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -24,6 +25,7 @@
 #include <string.h>
 #include <tuple>
 
+#include "../../capture/capture.h"
 #include "inout.h"
 #include "pic.h"
 #include "setup.h"
@@ -36,6 +38,7 @@
 #include "serialdummy.h"
 #include "softmodem.h"
 #include "nullmodem.h"
+#include "serialmouse.h"
 
 #include "cpu.h"
 
@@ -140,8 +143,9 @@ static uint8_t SERIAL_Read(io_port_t port, io_width_t)
 #endif
 	return retval;
 }
-static void SERIAL_Write(io_port_t port, uint8_t val, io_width_t)
+static void SERIAL_Write(io_port_t port, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	uint32_t i;
 	const uint8_t offset_type = static_cast<uint8_t>(port) & 0x7;
 	switch(port&0xff8) {
@@ -151,7 +155,7 @@ static void SERIAL_Write(io_port_t port, uint8_t val, io_width_t)
 		case 0x2e8: i=3; break;
 		default: return;
 	}
-	if(serialports[i]==0) return;
+	if(serialports[i]==nullptr) return;
 	
 #if SERIAL_DEBUG
 		const char* const dbgtext[]={"THR","IER","FCR",
@@ -222,7 +226,7 @@ void CSerial::changeLineProperties() {
 static void Serial_EventHandler(uint32_t val)
 {
 	const uint32_t serclassid = val & 0x3;
-	if (serialports[serclassid] != 0) {
+	if (serialports[serclassid] != nullptr) {
 		const auto event_type = static_cast<uint16_t>(val >> 2);
 		serialports[serclassid]->handleEvent(event_type);
 	}
@@ -1142,10 +1146,10 @@ CSerial::CSerial(const uint8_t port_idx, CommandLine *cmd)
 
 
 	if(dbg_serialtraffic|dbg_modemcontrol|dbg_register|dbg_interrupt|dbg_aux)
-		debugfp=OpenCaptureFile("serlog",".serlog.txt");
-	else debugfp=0;
+		debugfp=CAPTURE_CreateFile(CaptureType::SerialLog);
+	else debugfp=nullptr;
 
-	if(debugfp == 0) {
+	if(debugfp == nullptr) {
 		dbg_serialtraffic= 
 		dbg_modemcontrol= 
 		dbg_register=
@@ -1300,44 +1304,61 @@ public:
 		for (uint8_t i = 0; i < SERIAL_MAX_PORTS; ++i) {
 			// get the configuration property
 			s_property[6] = '1' + static_cast<char>(i);
-			Prop_multival* p = section->Get_multival(s_property);
+			PropMultiVal* p = section->GetMultiVal(s_property);
 			std::string type = p->GetSection()->Get_string("type");
-			CommandLine cmd(0,p->GetSection()->Get_string("parameters"));
+			CommandLine cmd("", p->GetSection()->Get_string("parameters"));
 			
 			// detect the type
 			if (type=="dummy") {
 				serialports[i] = new CSerialDummy (i, &cmd);
+				serialports[i]->serialType = SERIAL_PORT_TYPE::DUMMY;
+				cmd.GetStringRemain(serialports[i]->commandLineString);
 			}
-#ifdef DIRECTSERIAL_AVAILIBLE
-			else if (type=="directserial") {
+#ifdef C_DIRECTSERIAL
+			else if (type=="direct") {
 				serialports[i] = new CDirectSerial (i, &cmd);
-				if (!serialports[i]->InstallationSuccessful)  {
+				serialports[i]->serialType = SERIAL_PORT_TYPE::DIRECT;
+				cmd.GetStringRemain(serialports[i]->commandLineString);
+				if (!serialports[i]->InstallationSuccessful) {
 					// serial port name was wrong or already in use
 					delete serialports[i];
-					serialports[i] = NULL;
+					serialports[i] = nullptr;
 				}
 			}
 #endif
 #if C_MODEM
 			else if(type=="modem") {
 				serialports[i] = new CSerialModem (i, &cmd);
-				if (!serialports[i]->InstallationSuccessful)  {
+				serialports[i]->serialType = SERIAL_PORT_TYPE::MODEM;
+				cmd.GetStringRemain(serialports[i]->commandLineString);
+				if (!serialports[i]->InstallationSuccessful) {
 					delete serialports[i];
-					serialports[i] = NULL;
+					serialports[i] = nullptr;
 				}
 			}
 			else if(type=="nullmodem") {
 				serialports[i] = new CNullModem (i, &cmd);
-				if (!serialports[i]->InstallationSuccessful)  {
+				serialports[i]->serialType = SERIAL_PORT_TYPE::NULL_MODEM;
+				cmd.GetStringRemain(serialports[i]->commandLineString);
+				if (!serialports[i]->InstallationSuccessful) {
 					delete serialports[i];
-					serialports[i] = NULL;
+					serialports[i] = nullptr;
 				}
 			}
 #endif
+			else if(type=="mouse") {
+				serialports[i] = new CSerialMouse (i, &cmd);
+				serialports[i]->serialType = SERIAL_PORT_TYPE::MOUSE;
+				cmd.GetStringRemain(serialports[i]->commandLineString);
+				if (!serialports[i]->InstallationSuccessful) {
+					delete serialports[i];
+					serialports[i] = nullptr;
+				}
+			}
 			else if(type=="disabled") {
-				serialports[i] = NULL;
+				serialports[i] = nullptr;
 			} else {
-				serialports[i] = NULL;
+				serialports[i] = nullptr;
 				LOG_MSG("SERIAL: Port %" PRIu8 " invalid type \"%s\".",
 				        static_cast<uint8_t>(i + 1), type.c_str());
 			}
@@ -1351,7 +1372,7 @@ public:
 		for (uint8_t i = 0; i < SERIAL_MAX_PORTS; ++i) {
 			if (serialports[i]) {
 				delete serialports[i];
-				serialports[i] = 0;
+				serialports[i] = nullptr;
 			}
 		}
 #if C_MODEM
@@ -1366,11 +1387,16 @@ void SERIAL_Destroy(Section *sec)
 {
 	(void)sec; // unused, but required for API compliance
 	delete testSerialPortsBaseclass;
-	testSerialPortsBaseclass = NULL;
+	testSerialPortsBaseclass = nullptr;
 }
 
-void SERIAL_Init (Section * sec) {
+void SERIAL_Init (Section* sec)
+{
+	assert(sec);
+
 	delete testSerialPortsBaseclass;
-	testSerialPortsBaseclass = new SERIALPORTS (sec);
-	sec->AddDestroyFunction (&SERIAL_Destroy, true);
+	testSerialPortsBaseclass = new SERIALPORTS(sec);
+
+	constexpr auto changeable_at_runtime = true;
+	sec->AddDestroyFunction(&SERIAL_Destroy, changeable_at_runtime);
 }

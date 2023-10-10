@@ -2,7 +2,7 @@
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
  *  Copyright (C) 2020-2021  The DOSBox Staging Team
- *  Copyright (C) 2018-2021  Kevin R. Croft <krcroft@gmail.com>
+ *  Copyright (C) 2018-2021  kcgen <kcgen@users.noreply.github.com>
  *  Copyright (C) 2001-2017  Ryan C. Gordon <icculus@icculus.org>
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -39,8 +39,8 @@
 #  include <config.h>
 #endif
 
-#include "SDL.h"
-#include "SDL_thread.h"
+#include <SDL.h>
+#include <SDL_thread.h>
 #include "SDL_sound.h"
 
 #define __SDL_SOUND_INTERNAL__
@@ -55,9 +55,7 @@ typedef struct
 /* Supported decoder drivers... */
 extern const Sound_DecoderFunctions __Sound_DecoderFunctions_FLAC;
 extern const Sound_DecoderFunctions __Sound_DecoderFunctions_MP3;
-#ifdef USE_OPUS
 extern const Sound_DecoderFunctions __Sound_DecoderFunctions_OPUS;
-#endif
 extern const Sound_DecoderFunctions __Sound_DecoderFunctions_VORBIS;
 extern const Sound_DecoderFunctions __Sound_DecoderFunctions_WAV;
 
@@ -65,9 +63,7 @@ static decoder_element decoders[] =
 {
     { 0, &__Sound_DecoderFunctions_FLAC },
     { 0, &__Sound_DecoderFunctions_MP3 },
-#ifdef USE_OPUS
     { 0, &__Sound_DecoderFunctions_OPUS },
-#endif
     { 0, &__Sound_DecoderFunctions_VORBIS },
     { 0, &__Sound_DecoderFunctions_WAV },
     { 0, NULL }
@@ -156,6 +152,7 @@ int Sound_Quit(void)
     {
         Sound_Sample *sample = sample_list;
         Sound_FreeSample(sample); /* Updates sample_list. */
+        sample = NULL;
     }
 
     initialized = 0;

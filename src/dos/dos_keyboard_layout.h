@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2022  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -23,8 +23,11 @@
 
 #include "dosbox.h"
 
-Bitu DOS_SwitchKeyboardLayout(const char* new_layout, Bit32s& tried_cp);
-Bitu DOS_LoadKeyboardLayout(const char * layoutname, Bit32s codepage, const char * codepagefile);
-const char* DOS_GetLoadedLayout(void);
+enum KeyboardErrorCode : uint8_t;
+
+KeyboardErrorCode DOS_SwitchKeyboardLayout(const char *new_layout, int32_t &tried_cp);
+KeyboardErrorCode DOS_LoadKeyboardLayout(const char *layoutname, int32_t codepage, const char *codepagefile);
+KeyboardErrorCode DOS_LoadKeyboardLayoutFromLanguage(const char *language_pref);
+const char *DOS_GetLoadedLayout();
 
 #endif

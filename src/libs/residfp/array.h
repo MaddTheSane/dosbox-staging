@@ -21,13 +21,20 @@
 #ifndef ARRAY_H
 #define ARRAY_H
 
+
+#ifdef HAVE_CONFIG_H
+#  include "config.h"
+#endif
+
+#include <atomic>
+
 /**
  * Counter.
  */
 class counter
 {
 private:
-    unsigned int c;
+    std::atomic<unsigned int> c;
 
 public:
     counter() : c(1) {}
@@ -42,9 +49,10 @@ template<typename T>
 class matrix
 {
 private:
-    T* data;
-    counter* count;
-    const unsigned int x, y;
+    T* data = {};
+    counter* count = {};
+    const unsigned int x = 0;
+    const unsigned int y = 0;
 
 public:
     matrix(unsigned int x, unsigned int y) :
@@ -59,9 +67,9 @@ public:
         x(p.x),
         y(p.y) { count->increase(); }
 
-    ~matrix() { if (count->decrease() == 0) { delete count; delete [] data; } }
+    matrix<T> & operator=(const matrix<T>&) = delete; // block assignment operator
 
-    matrix &operator=(const matrix&) = delete; // prevent assignment
+    ~matrix() { if (count->decrease() == 0) { delete count; delete [] data; } }
 
     unsigned int length() const { return x * y; }
 

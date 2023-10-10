@@ -1,19 +1,21 @@
+# Building on Haiku
+
 Haiku builds can be created with Clang or GCC using the Meson buildsystem.
 
-## Build on Haiku
+## Build instructions
 
 Install dependencies:
 
 ``` shell
 pkgman install -y meson ccache libpng libsdl2_devel sdl2_net_devel \
                   libogg_devel opus_devel opusfile_devel gcc_syslibs_devel \
-                  opus_tools fluidsynth2_devel llvm_clang
+                  opus_tools fluidsynth2_devel llvm_clang speexdsp_devel
 ```
 
 Clone and enter the repository's directory:
 
 ``` shell
-git clone --recurse-submodules https://github.com/dosbox-staging/dosbox-staging.git
+git clone https://github.com/dosbox-staging/dosbox-staging.git
 cd dosbox-staging
 ```
 
@@ -40,5 +42,5 @@ texture_renderer = software
 core = normal
 ```
 
-The state of Haiku's GPU Hardware-acceleration is being discussed here:
-https://discuss.haiku-os.org/t/state-of-accelerated-opengl/4163
+The state of Haiku's GPU Hardware-acceleration is being discussed
+[here](https://discuss.haiku-os.org/t/state-of-accelerated-opengl/4163).

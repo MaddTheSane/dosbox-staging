@@ -1,6 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -24,10 +25,20 @@
 #include "programs.h"
 
 class IMGMOUNT final : public Program {
-    public:
-        void Run(void);
-};
+public:
+	IMGMOUNT()
+	{
+		AddMessages();
+		help_detail = {HELP_Filter::Common,
+		               HELP_Category::Dosbox,
+		               HELP_CmdType::Program,
+		               "IMGMOUNT"};
+	}
+	void ListImgMounts();
+	void Run() override;
 
-void IMGMOUNT_ProgramStart(Program **make);
+    private:
+        static void AddMessages();
+};
 
 #endif // DOSBOX_PROGRAM_IMGMOUNT_H

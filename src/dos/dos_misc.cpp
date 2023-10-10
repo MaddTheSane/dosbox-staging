@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2022-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -24,17 +25,19 @@
 #include "mem.h"
 #include "regs.h"
 
-static Bitu call_int2f,call_int2a;
+static callback_number_t call_int2f = 0;
+static callback_number_t call_int2a = 0;
 
 static std::list<MultiplexHandler*> Multiplex;
 typedef std::list<MultiplexHandler*>::iterator Multiplex_it;
 
-void DOS_AddMultiplexHandler(MultiplexHandler * handler) {
+void DOS_AddMultiplexHandler(MultiplexHandler* handler) {
 	Multiplex.push_front(handler);
 }
 
-void DOS_DelMultiplexHandler(MultiplexHandler * handler) {
-	for(Multiplex_it it =Multiplex.begin();it != Multiplex.end();it++) {
+void DOS_DeleteMultiplexHandler(MultiplexHandler* const handler)
+{
+	for (Multiplex_it it = Multiplex.begin(); it != Multiplex.end(); ++it) {
 		if(*it == handler) {
 			Multiplex.erase(it);
 			return;
@@ -43,9 +46,12 @@ void DOS_DelMultiplexHandler(MultiplexHandler * handler) {
 }
 
 static Bitu INT2F_Handler(void) {
-	for(Multiplex_it it = Multiplex.begin();it != Multiplex.end();it++)
-		if( (*it)() ) return CBRET_NONE;
-   
+	for (Multiplex_it it = Multiplex.begin(); it != Multiplex.end(); ++it) {
+		if ((*it)()) {
+			return CBRET_NONE;
+		}
+	}
+
 	LOG(LOG_DOSMISC,LOG_ERROR)("DOS:Multiplex Unhandled call %4X",reg_ax);
 	return CBRET_NONE;
 }
@@ -64,8 +70,8 @@ static bool DOS_MultiplexFunctions(void) {
 		if(reg_bx <= DOS_FILES) CALLBACK_SCF(false);
 		else CALLBACK_SCF(true);
 		if (reg_bx<16) {
-			RealPt sftrealpt=mem_readd(Real2Phys(dos_infoblock.GetPointer())+4);
-			PhysPt sftptr=Real2Phys(sftrealpt);
+			RealPt sftrealpt=mem_readd(RealToPhysical(dos_infoblock.GetPointer())+4);
+			PhysPt sftptr=RealToPhysical(sftrealpt);
 			Bitu sftofs=0x06+reg_bx*0x3b;
 
 			if (Files[reg_bx]) mem_writeb(sftptr+sftofs,Files[reg_bx]->refCtr);
@@ -73,7 +79,7 @@ static bool DOS_MultiplexFunctions(void) {
 
 			if (!Files[reg_bx]) return true;
 
-			Bit32u handle=RealHandle(reg_bx);
+			uint32_t handle=RealHandle(reg_bx);
 			if (handle>=DOS_FILES) {
 				mem_writew(sftptr+sftofs+0x02,0x02);	// file open mode
 				mem_writeb(sftptr+sftofs+0x04,0x00);	// file attribute
@@ -84,17 +90,17 @@ static bool DOS_MultiplexFunctions(void) {
 				mem_writew(sftptr+sftofs+0x11,0);		// size
 				mem_writew(sftptr+sftofs+0x15,0);		// current position
 			} else {
-				Bit8u drive=Files[reg_bx]->GetDrive();
+				uint8_t drive=Files[reg_bx]->GetDrive();
 
-				mem_writew(sftptr+sftofs+0x02,(Bit16u)(Files[reg_bx]->flags&3));	// file open mode
-				mem_writeb(sftptr+sftofs+0x04,(Bit8u)(Files[reg_bx]->attr));		// file attribute
+				mem_writew(sftptr+sftofs+0x02,(uint16_t)(Files[reg_bx]->flags&3));	// file open mode
+				mem_writeb(sftptr+sftofs+0x04,(uint8_t)(Files[reg_bx]->attr));		// file attribute
 				mem_writew(sftptr+sftofs+0x05,0x40|drive);							// device info word
 				mem_writed(sftptr+sftofs+0x07,RealMake(dos.tables.dpb,drive*9));	// dpb of the drive
 				mem_writew(sftptr+sftofs+0x0d,Files[reg_bx]->time);					// packed file time
 				mem_writew(sftptr+sftofs+0x0f,Files[reg_bx]->date);					// packed file date
-				Bit32u curpos=0;
+				uint32_t curpos=0;
 				Files[reg_bx]->Seek(&curpos,DOS_SEEK_CUR);
-				Bit32u endpos=0;
+				uint32_t endpos=0;
 				Files[reg_bx]->Seek(&endpos,DOS_SEEK_END);
 				mem_writed(sftptr+sftofs+0x11,endpos);		// size
 				mem_writed(sftptr+sftofs+0x15,curpos);		// current position
@@ -139,8 +145,8 @@ static bool DOS_MultiplexFunctions(void) {
 					mem_writeb((PhysPt)(sftptr+sftofs+0x20+i),' ');
 			}
 
-			SegSet16(es,RealSeg(sftrealpt));
-			reg_di=RealOff(sftrealpt+sftofs);
+			SegSet16(es,RealSegment(sftrealpt));
+			reg_di=RealOffset(sftrealpt+sftofs);
 			reg_ax=0xc000;
 
 		}

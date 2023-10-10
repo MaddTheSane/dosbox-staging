@@ -1,6 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -24,10 +25,18 @@
 #include "programs.h"
 
 class MEM final : public Program {
-    public:
-        void Run(void);
+public:
+	MEM()
+	{
+		AddMessages();
+		help_detail = {HELP_Filter::All,
+		               HELP_Category::Misc,
+		               HELP_CmdType::Program,
+		               "MEM"};
+	}
+	void Run(void) override;
+private:
+        static void AddMessages();
 };
-
-void MEM_ProgramStart(Program **make);
 
 #endif // DOSBOX_PROGRAM_MEM_H

@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -22,10 +23,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <array>
 
 #include "bios.h"
 #include "callback.h"
+#include "drives.h"
 #include "mem.h"
+#include "program_mount_common.h"
 #include "regs.h"
 #include "parport.h"
 #include "serialport.h"
@@ -33,56 +37,169 @@
 #include "string_utils.h"
 #include "support.h"
 
+#if defined(WIN32)
+#include <winsock2.h> // for gethostname
+#endif
+
 DOS_Block dos;
 DOS_InfoBlock dos_infoblock;
+uint16_t countryNo = 0;
+unsigned int result_errorcode = 0;
 
 #define DOS_COPYBUFSIZE 0x10000
-Bit8u dos_copybuf[DOS_COPYBUFSIZE];
+uint8_t dos_copybuf[DOS_COPYBUFSIZE];
 
-void DOS_SetError(Bit16u code) {
+void DOS_SetError(uint16_t code) {
 	dos.errorcode=code;
 }
 
-const Bit8u DOS_DATE_months[] = {
-	0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
-};
+typedef struct CountryInfo {
+	Country country_number;
+	uint8_t date_format;
+	uint8_t date_separator;
+	uint8_t time_format;
+	uint8_t time_separator;
+	uint8_t thousands_separator;
+	uint8_t decimal_separator;
+} CountryInfo;
 
-uint16_t DOS_PackTime(uint16_t hour, uint16_t min, uint16_t sec) noexcept
-{
-	const auto h_bits = 0b1111100000000000 & (hour << 11);
-	const auto m_bits = 0b0000011111100000 & (min << 5);
-	const auto s_bits = 0b0000000000011111 & (sec / 2);
-	const auto packed = h_bits | m_bits | s_bits;
-	return static_cast<uint16_t>(packed);
+static const CountryInfo& LookupCountryInfo(const uint16_t country_number) {
+
+	static constexpr uint8_t DATE_MDY   = 0;
+	static constexpr uint8_t DATE_DMY   = 1;
+	static constexpr uint8_t DATE_YMD   = 2;
+
+	static constexpr uint8_t TIME_12H   = 0;
+	static constexpr uint8_t TIME_24H   = 1;
+
+	static constexpr uint8_t SEP_SPACE  = 0x20; // ( )
+	static constexpr uint8_t SEP_APOST  = 0x27; // (')
+	static constexpr uint8_t SEP_COMMA  = 0x2c; // (,)
+	static constexpr uint8_t SEP_DASH   = 0x2d; // (-)
+	static constexpr uint8_t SEP_PERIOD = 0x2e; // (.)
+	static constexpr uint8_t SEP_SLASH  = 0x2f; // (/)
+	static constexpr uint8_t SEP_COLON  = 0x3a; // (:)
+
+	// Values here reflect the current KDE/Linux system settings - they will probably not produce 100% same
+	// result as old MS-DOS systems, but should at least provide reasonably consistent user experience with
+	// certain host operating systems.
+	static constexpr CountryInfo COUNTRY_INFO[]= {
+		//                        | Date fmt | Date separ | Time fmt | Time separ | 1000 separ | Dec separ  |
+	//	{ Country::None           , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_PERIOD }, // C
+		{ Country::United_States  , DATE_MDY , SEP_SLASH  , TIME_12H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // en_US
+		{ Country::Candian_French , DATE_YMD , SEP_DASH   , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // fr_CA
+		{ Country::Latin_America  , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // es_419
+		{ Country::Russia         , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // ru_RU
+		{ Country::Greece         , DATE_DMY , SEP_SLASH  , TIME_12H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // el_GR
+		{ Country::Netherlands    , DATE_DMY , SEP_DASH   , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // nl_NL
+		{ Country::Belgium        , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // fr_BE
+		{ Country::France         , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // fr_FR
+		{ Country::Spain          , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // es_ES
+		{ Country::Hungary        , DATE_YMD , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // hu_HU
+		{ Country::Yugoslavia     , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // sr_RS/sr_ME/hr_HR/sk_SK/bs_BA/mk_MK
+		{ Country::Italy          , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // it_IT
+		{ Country::Romania        , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // ro_RO
+		{ Country::Switzerland    , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_APOST  , SEP_PERIOD }, // ??_CH
+		{ Country::Czech_Slovak   , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // cs_CZ
+		{ Country::Austria        , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // de_AT
+		{ Country::United_Kingdom , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // en_GB
+		{ Country::Denmark        , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // da_DK
+		{ Country::Sweden         , DATE_YMD , SEP_DASH   , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // sv_SE
+		{ Country::Norway         , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // nn_NO
+		{ Country::Poland         , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // pl_PL
+		{ Country::Germany        , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // de_DE
+		{ Country::Argentina      , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // es_AR
+		{ Country::Brazil         , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // pt_BR
+		//                        | Date fmt | Date separ | Time fmt | Time separ | 1000 separ | Dec separ  |
+		{ Country::Malaysia       , DATE_DMY , SEP_SLASH  , TIME_12H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // ms_MY
+		{ Country::Australia      , DATE_DMY , SEP_SLASH  , TIME_12H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // en_AU
+		{ Country::Philippines    , DATE_DMY , SEP_SLASH  , TIME_12H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // fil_PH
+		{ Country::Singapore      , DATE_DMY , SEP_SLASH  , TIME_12H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // ms_SG
+		{ Country::Kazakhstan     , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // kk_KZ
+		{ Country::Japan          , DATE_YMD , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // ja_JP
+		{ Country::South_Korea    , DATE_YMD , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // ko_KR
+		{ Country::Vietnam        , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // vi_VN
+		{ Country::China          , DATE_YMD , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // zh_CN
+		{ Country::Turkey         , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // tr_TR
+		{ Country::India          , DATE_DMY , SEP_SLASH  , TIME_12H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // hi_IN
+		{ Country::Niger          , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // fr_NE
+		{ Country::Benin          , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // fr_BJ
+		{ Country::Nigeria        , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // en_NG
+		{ Country::Faeroe_Islands , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // fo_FO
+		{ Country::Portugal       , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // pt_PT
+		{ Country::Iceland        , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // is_IS
+		{ Country::Albania        , DATE_DMY , SEP_PERIOD , TIME_12H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // sq_AL
+		{ Country::Malta          , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // mt_MT
+		{ Country::Finland        , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // fi_FI
+		{ Country::Bulgaria       , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // bg_BG
+		{ Country::Lithuania      , DATE_YMD , SEP_DASH   , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // lt_LT
+		{ Country::Latvia         , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // lv_LV
+		{ Country::Estonia        , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // et_EE
+		{ Country::Armenia        , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // hy_AM
+		//                        | Date fmt | Date separ | Time fmt | Time separ | 1000 separ | Dec separ  |
+		{ Country::Belarus        , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // be_BY
+		{ Country::Ukraine        , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // uk_UA
+		{ Country::Serbia         , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // sr_RS
+		{ Country::Montenegro     , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // sr_ME
+		{ Country::Croatia        , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // hr_HR
+		{ Country::Slovenia       , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // sk_SK
+		{ Country::Bosnia         , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // bs_BA
+		{ Country::Macedonia      , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // mk_MK
+		{ Country::Taiwan         , DATE_YMD , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // zh_TW
+		{ Country::Arabic         , DATE_DMY , SEP_PERIOD , TIME_12H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // ar_??
+		{ Country::Israel         , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // he_IL
+		{ Country::Mongolia       , DATE_YMD , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_COMMA  , SEP_PERIOD }, // mn_MN
+		{ Country::Tadjikistan    , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // tg_TJ
+		{ Country::Turkmenistan   , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // tk_TM
+		{ Country::Azerbaijan     , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_PERIOD , SEP_COMMA  }, // az_AZ
+		{ Country::Georgia        , DATE_DMY , SEP_PERIOD , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // ka_GE
+		{ Country::Kyrgyzstan     , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // ky_KG
+		{ Country::Uzbekistan     , DATE_DMY , SEP_SLASH  , TIME_24H , SEP_COLON  , SEP_SPACE  , SEP_COMMA  }, // uz_UZ
+		//                        | Date fmt | Date separ | Time fmt | Time separ | 1000 separ | Dec separ  |
+	};
+
+	for (const auto& country : COUNTRY_INFO) {
+		if (static_cast<uint16_t>(country.country_number) == country_number)
+			return country;
+	}
+	return COUNTRY_INFO[0];
 }
 
-uint16_t DOS_PackTime(const struct tm &datetime) noexcept
+void DOS_SetCountry(uint16_t country_number)
 {
-	return DOS_PackTime(static_cast<uint16_t>(datetime.tm_hour),
-	                    static_cast<uint16_t>(datetime.tm_min),
-	                    static_cast<uint16_t>(datetime.tm_sec));
+	if (dos.tables.country == nullptr)
+		return;
+
+	const auto country_info = LookupCountryInfo(country_number);
+
+	dos.tables.country[DOS_DATE_FORMAT_OFS]         = country_info.date_format;
+	dos.tables.country[DOS_DATE_SEPARATOR_OFS]      = country_info.date_separator;
+	dos.tables.country[DOS_TIME_FORMAT_OFS]         = country_info.time_format;
+	dos.tables.country[DOS_TIME_SEPARATOR_OFS]      = country_info.time_separator;
+	dos.tables.country[DOS_THOUSANDS_SEPARATOR_OFS] = country_info.thousands_separator;
+	dos.tables.country[DOS_DECIMAL_SEPARATOR_OFS]   = country_info.decimal_separator;
 }
 
-uint16_t DOS_PackDate(uint16_t year, uint16_t mon, uint16_t day) noexcept
+uint16_t DOS_GetBiosTimePacked()
 {
-	const auto y_bits = 0b1111111000000000 & ((year - 1980) << 9);
-	const auto m_bits = 0b0000000111100000 & (mon << 5);
-	const auto d_bits = 0b0000000000011111 & day;
-	const auto packed = y_bits | m_bits | d_bits;
-	return static_cast<uint16_t>(packed);
+	const auto ticks   = mem_readd(BIOS_TIMER);
+	const auto seconds = (ticks * 10) / 182;
+	const auto hour    = static_cast<uint16_t>(seconds / 3600);
+	const auto min     = static_cast<uint16_t>((seconds % 3600) / 60);
+	const auto sec     = static_cast<uint16_t>(seconds % 60);
+
+	return DOS_PackTime(hour, min, sec);
 }
 
-uint16_t DOS_PackDate(const struct tm &datetime) noexcept
+uint16_t DOS_GetBiosDatePacked()
 {
-	return DOS_PackDate(static_cast<uint16_t>(datetime.tm_year + 1900),
-	                    static_cast<uint16_t>(datetime.tm_mon + 1),
-	                    static_cast<uint16_t>(datetime.tm_mday));
+	return DOS_PackDate(dos.date.year, dos.date.month, dos.date.day);
 }
 
 static void DOS_AddDays(Bitu days)
 {
 	dos.date.day += days;
-	Bit8u monthlimit = DOS_DATE_months[dos.date.month];
+	uint8_t monthlimit = DOS_DATE_months[dos.date.month];
 
 	if(dos.date.day > monthlimit) {
 		if((dos.date.year %4 == 0) && (dos.date.month==2)) {
@@ -104,10 +221,10 @@ static void DOS_AddDays(Bitu days)
 	}
 }
 
-static Bit16u DOS_GetAmount(void) {
-	Bit16u amount = reg_cx;
+static uint16_t DOS_GetAmount(void) {
+	uint16_t amount = reg_cx;
 	if (amount > 0xfff1) {
-		Bit16u overflow = (amount & 0xf) + (reg_dx & 0xf);
+		uint16_t overflow = (amount & 0xf) + (reg_dx & 0xf);
 		if (overflow > 0x10) {
 			amount -= (overflow & 0xf);
 			LOG(LOG_DOSMISC,LOG_WARN)("DOS:0x%X:Amount reduced from %X to %X",reg_ah,reg_cx,amount);
@@ -156,6 +273,16 @@ static Bitu DOS_21Handler(void) {
 	if (((reg_ah != 0x50) && (reg_ah != 0x51) && (reg_ah != 0x62) && (reg_ah != 0x64)) && (reg_ah<0x6c)) {
 		DOS_PSP psp(dos.psp());
 		psp.SetStack(RealMake(SegValue(ss),reg_sp-18));
+		/* Save registers */
+		real_writew(SegValue(ss),reg_sp-18,reg_ax);
+		real_writew(SegValue(ss),reg_sp-16,reg_bx);
+		real_writew(SegValue(ss),reg_sp-14,reg_cx);
+		real_writew(SegValue(ss),reg_sp-12,reg_dx);
+		real_writew(SegValue(ss),reg_sp-10,reg_si);
+		real_writew(SegValue(ss),reg_sp- 8,reg_di);
+		real_writew(SegValue(ss),reg_sp- 6,reg_bp);
+		real_writew(SegValue(ss),reg_sp- 4,SegValue(ds));
+		real_writew(SegValue(ss),reg_sp- 2,SegValue(es));
 	}
 
 	char name1[DOSNAMEBUF+2+DOS_NAMELENGTH_ASCII];
@@ -165,11 +292,11 @@ static Bitu DOS_21Handler(void) {
 
 	switch (reg_ah) {
 	case 0x00:		/* Terminate Program */
-		DOS_Terminate(mem_readw(SegPhys(ss)+reg_sp+2),false,0);
+		DOS_Terminate(real_readw(SegValue(ss),reg_sp+2),false,0);
 		break;
 	case 0x01:		/* Read character from STDIN, with echo */
 		{	
-			Bit8u c;Bit16u n=1;
+			uint8_t c;uint16_t n=1;
 			dos.echo=true;
 			DOS_ReadFile(STDIN,&c,&n);
 			reg_al=c;
@@ -178,7 +305,7 @@ static Bitu DOS_21Handler(void) {
 		break;
 	case 0x02:		/* Write character to STDOUT */
 		{
-			Bit8u c=reg_dl;Bit16u n=1;
+			uint8_t c=reg_dl;uint16_t n=1;
 			DOS_WriteFile(STDOUT,&c,&n);
 			//Not in the official specs, but happens nonetheless. (last written character)
 			reg_al=(c==9)?0x20:c; //strangely, tab conversion to spaces is reflected here
@@ -186,9 +313,9 @@ static Bitu DOS_21Handler(void) {
 		break;
 	case 0x03:		/* Read character from STDAUX */
 		{
-			Bit16u port = real_readw(0x40,0);
+			uint16_t port = real_readw(0x40,0);
 			if(port!=0 && serialports[0]) {
-				Bit8u status;
+				uint8_t status;
 				// RTS/DTR on
 				IO_WriteB(port+4,0x3);
 				serialports[0]->Getchar(&reg_al, &status, true, 0xFFFFFFFF);
@@ -197,7 +324,7 @@ static Bitu DOS_21Handler(void) {
 		break;
 	case 0x04:		/* Write Character to STDAUX */
 		{
-			Bit16u port = real_readw(0x40,0);
+			uint16_t port = real_readw(0x40,0);
 			if(port!=0 && serialports[0]) {
 				// RTS/DTR on
 				IO_WriteB(port+4,0x3);
@@ -233,7 +360,7 @@ static Bitu DOS_21Handler(void) {
 					CALLBACK_SZF(true);
 					break;
 				}
-				Bit8u c;Bit16u n=1;
+				uint8_t c;uint16_t n=1;
 				DOS_ReadFile(STDIN,&c,&n);
 				reg_al=c;
 				CALLBACK_SZF(false);
@@ -241,7 +368,7 @@ static Bitu DOS_21Handler(void) {
 			}
 		default:
 			{
-				Bit8u c = reg_dl;Bit16u n = 1;
+				uint8_t c = reg_dl;uint16_t n = 1;
 				dos.direct_output=true;
 				DOS_WriteFile(STDOUT,&c,&n);
 				dos.direct_output=false;
@@ -250,23 +377,17 @@ static Bitu DOS_21Handler(void) {
 			break;
 		};
 		break;
-	case 0x07:		/* Character Input, without echo */
-		{
-				Bit8u c;Bit16u n=1;
-				DOS_ReadFile (STDIN,&c,&n);
-				reg_al=c;
-				break;
-		};
+	case 0x07:              /* Character Input, without echo */
 	case 0x08:		/* Direct Character Input, without echo (checks for breaks officially :)*/
 		{
-				Bit8u c;Bit16u n=1;
+				uint8_t c;uint16_t n=1;
 				DOS_ReadFile (STDIN,&c,&n);
 				reg_al=c;
 				break;
 		};
 	case 0x09:		/* Write string to STDOUT */
 		{	
-			Bit8u c;Bit16u n=1;
+			uint8_t c;uint16_t n=1;
 			PhysPt buf=SegPhys(ds)+reg_dx;
 			while ((c=mem_readb(buf++))!='$') {
 				DOS_WriteFile(STDOUT,&c,&n);
@@ -278,12 +399,16 @@ static Bitu DOS_21Handler(void) {
 		{
 			//TODO ADD Break checkin in STDIN but can't care that much for it
 			PhysPt data=SegPhys(ds)+reg_dx;
-			Bit8u free=mem_readb(data);
-			Bit8u read=0;Bit8u c;Bit16u n=1;
+			uint8_t free=mem_readb(data);
+			uint8_t read=0;uint8_t c;uint16_t n=1;
 			if (!free) break;
 			free--;
 			for(;;) {
 				DOS_ReadFile(STDIN,&c,&n);
+				// gracefully exit potentially endless loop
+				if (shutdown_requested) {
+					break;
+				}
 				if (n == 0)				// End of file
 					E_Exit("DOS:0x0a:Redirected input reached EOF");
 				if (c == 10)			// Line feed
@@ -299,7 +424,7 @@ static Bitu DOS_21Handler(void) {
 					continue;
 				}
 				if (read == free && c != 13) {		// Keyboard buffer full
-					Bit8u bell = 7;
+					uint8_t bell = 7;
 					DOS_WriteFile(STDOUT, &bell, &n);
 					continue;
 				}
@@ -322,11 +447,17 @@ static Bitu DOS_21Handler(void) {
 	case 0x0c:		/* Flush Buffer and read STDIN call */
 		{
 			/* flush buffer if STDIN is CON */
-			Bit8u handle=RealHandle(STDIN);
+			uint8_t handle=RealHandle(STDIN);
 			if (handle!=0xFF && Files[handle] && Files[handle]->IsName("CON")) {
-				Bit8u c;Bit16u n;
+				uint8_t c;uint16_t n;
 				while (DOS_GetSTDINStatus()) {
-					n=1;	DOS_ReadFile(STDIN,&c,&n);
+					n=1;
+					DOS_ReadFile(STDIN,&c,&n);
+
+					// gracefully exit potentially endless loop
+					if (shutdown_requested) {
+						break;
+					}
 				}
 			}
 			switch (reg_al) {
@@ -336,7 +467,7 @@ static Bitu DOS_21Handler(void) {
 			case 0x8:
 			case 0xa:
 				{ 
-					Bit8u oldah=reg_ah;
+					uint8_t oldah=reg_ah;
 					reg_ah=reg_al;
 					DOS_21Handler();
 					reg_ah=oldah;
@@ -414,14 +545,14 @@ static Bitu DOS_21Handler(void) {
 		break;
 	case 0x21:		/* Read random record from FCB */
 		{
-			Bit16u toread=1;
+			uint16_t toread=1;
 			reg_al = DOS_FCBRandomRead(SegValue(ds),reg_dx,&toread,true);
 		}
 		LOG(LOG_FCB,LOG_NORMAL)("DOS:0x21 FCB-Random read used, result:al=%d",reg_al);
 		break;
 	case 0x22:		/* Write random record to FCB */
 		{
-			Bit16u towrite=1;
+			uint16_t towrite=1;
 			reg_al=DOS_FCBRandomWrite(SegValue(ds),reg_dx,&towrite,true);
 		}
 		LOG(LOG_FCB,LOG_NORMAL)("DOS:0x22 FCB-Random write used, result:al=%d",reg_al);
@@ -443,7 +574,7 @@ static Bitu DOS_21Handler(void) {
 		break;
 	case 0x29:		/* Parse filename into FCB */
 		{   
-			Bit8u difference;
+			uint8_t difference;
 			char string[1024];
 			MEM_StrCopy(SegPhys(ds)+reg_si,string,1023); // 1024 toasts the stack
 			reg_al=FCB_Parsename(SegValue(es),reg_di,reg_al ,string, &difference);
@@ -479,12 +610,9 @@ static Bitu DOS_21Handler(void) {
 		}
 		break;
 	case 0x2b:		/* Set System Date */
-		if (reg_cx<1980) { reg_al=0xff;break;}
-		if ((reg_dh>12) || (reg_dh==0))	{ reg_al=0xff;break;}
-		if (reg_dl==0) { reg_al=0xff;break;}
- 		if (reg_dl>DOS_DATE_months[reg_dh]) {
-			if(!((reg_dh==2)&&(reg_cx%4 == 0)&&(reg_dl==29))) // february pass
-			{ reg_al=0xff;break; }
+		if (!is_date_valid(reg_cx, reg_dh, reg_dl)) {
+			reg_al = 0xff;
+			break;
 		}
 		dos.date.year=reg_cx;
 		dos.date.month=reg_dh;
@@ -501,13 +629,13 @@ static Bitu DOS_21Handler(void) {
 		if(time_start<=ticks) ticks-=time_start;
 		Bitu time=(Bitu)((100.0/((double)PIT_TICK_RATE/65536.0)) * (double)ticks);
 
-		reg_dl=(Bit8u)((Bitu)time % 100); // 1/100 seconds
+		reg_dl=(uint8_t)((Bitu)time % 100); // 1/100 seconds
 		time/=100;
-		reg_dh=(Bit8u)((Bitu)time % 60); // seconds
+		reg_dh=(uint8_t)((Bitu)time % 60); // seconds
 		time/=60;
-		reg_cl=(Bit8u)((Bitu)time % 60); // minutes
+		reg_cl=(uint8_t)((Bitu)time % 60); // minutes
 		time/=60;
-		reg_ch=(Bit8u)((Bitu)time % 24); // hours
+		reg_ch=(uint8_t)((Bitu)time % 24); // hours
 
 		//Simulate DOS overhead for timing-sensitive games
         //Robomaze 2
@@ -515,13 +643,23 @@ static Bitu DOS_21Handler(void) {
 		break;
 	}
 	case 0x2d:		/* Set System Time */
-		LOG(LOG_DOSMISC,LOG_ERROR)("DOS:Set System Time not supported");
-		//Check input parameters nonetheless
-		if( reg_ch > 23 || reg_cl > 59 || reg_dh > 59 || reg_dl > 99 )
-			reg_al = 0xff; 
+		if (!is_time_valid(reg_ch, reg_cl, reg_dh) || reg_dl > 99)
+			reg_al = 0xff;
 		else { //Allow time to be set to zero. Restore the orginal time for all other parameters. (QuickBasic)
 			if (reg_cx == 0 && reg_dx == 0) {time_start = mem_readd(BIOS_TIMER);LOG_MSG("Warning: game messes with DOS time!");}
 			else time_start = 0;
+			// Original IBM PC used ~1.19MHz crystal for timer,
+			// because at 1.19MHz, 2^16 ticks is ~1 hour, making it
+			// easy to count hours and days. More precisely:
+			//
+			// clock updates at 1193180/65536 ticks per second.
+			// ticks per second ??? 18.2
+			// ticks per hour   ??? 65543
+			// ticks per day    ??? 1573040
+			constexpr uint64_t ticks_per_day = 1573040;
+			const auto seconds = reg_ch * 3600 + reg_cl * 60 + reg_dh;
+			const auto ticks = ticks_per_day * seconds / (24 * 3600);
+			mem_writed(BIOS_TIMER, check_cast<uint32_t>(ticks));
 			reg_al = 0;
 		}
 		break;
@@ -529,19 +667,28 @@ static Bitu DOS_21Handler(void) {
 		dos.verify=(reg_al==1);
 		break;
 	case 0x2f:		/* Get Disk Transfer Area */
-		SegSet16(es,RealSeg(dos.dta()));
-		reg_bx=RealOff(dos.dta());
+		SegSet16(es,RealSegment(dos.dta()));
+		reg_bx=RealOffset(dos.dta());
 		break;
-	case 0x30:		/* Get DOS Version */
-		if (reg_al==0) reg_bh=0xFF;		/* Fake Microsoft DOS */
-		if (reg_al==1) reg_bh=0x10;		/* DOS is in HMA */
-		reg_al=dos.version.major;
-		reg_ah=dos.version.minor;
-		/* Serialnumber */
-		reg_bl=0x00;
-		reg_cx=0x0000;
+	case 0x30: /* Get DOS Version */
+		{
+			if (reg_al == 0) {
+				reg_bh = 0xff; // 0xff for MS-DOS, 0x00 for PC-DOS
+			}
+			if (reg_al == 1) {
+				reg_bh = 0x10; // DOS is in HMA
+			}
+			DOS_PSP psp(dos.psp());
+			// Prior to MS-DOS 5.0 version number was hardcoded,
+			// later DOS releases used values from PSP, for SETVER
+			reg_al = psp.GetVersionMajor();
+			reg_ah = psp.GetVersionMinor();
+			// Serial number
+			reg_bl = 0x00;
+			reg_cx = 0x0000;
+		}
 		break;
-	case 0x31:		/* Terminate and stay resident */
+	case 0x31: /* Terminate and stay resident */
 		// Important: This service does not set the carry flag!
 		DOS_ResizeMemory(dos.psp(),&reg_dx);
 		DOS_Terminate(dos.psp(),true,reg_al);
@@ -549,7 +696,7 @@ static Bitu DOS_21Handler(void) {
 	case 0x1f: /* Get drive parameter block for default drive */
 	case 0x32: /* Get drive parameter block for specific drive */
 		{	/* Officially a dpb should be returned as well. The disk detection part is implemented */
-			Bit8u drive=reg_dl;
+			uint8_t drive=reg_dl;
 			if (!drive || reg_ah==0x1f) drive = DOS_GetDefaultDrive();
 			else drive--;
 			if (drive < DOS_DRIVES && Drives[drive] && !Drives[drive]->isRemovable()) {
@@ -562,56 +709,71 @@ static Bitu DOS_21Handler(void) {
 			}
 		}
 		break;
-	case 0x33:		/* Extended Break Checking */
+	case 0x33: /* Extended Break Checking */
 		switch (reg_al) {
-			case 0:reg_dl=dos.breakcheck;break;			/* Get the breakcheck flag */
-			case 1:dos.breakcheck=(reg_dl>0);break;		/* Set the breakcheck flag */
-			case 2:{bool old=dos.breakcheck;dos.breakcheck=(reg_dl>0);reg_dl=old;}break;
-			case 3: /* Get cpsw */
-				/* Fallthrough */
+			case 0: reg_dl = dos.breakcheck;       break; /* Get the breakcheck flag */
+			case 1: dos.breakcheck = (reg_dl > 0); break; /* Set the breakcheck flag */
+			case 2:
+				{
+					const bool old = dos.breakcheck;
+					dos.breakcheck = (reg_dl > 0);
+					reg_dl = old;
+				}
+				break;
+			case 3: /* Get cpsw - fallthrough*/
 			case 4: /* Set cpsw */
 				LOG(LOG_DOSMISC,LOG_ERROR)("Someone playing with cpsw %x",reg_ax);
 				break;
-			case 5:reg_dl=3;break;//TODO should be z						/* Always boot from c: :) */
-			case 6:											/* Get true version number */
-				reg_bl=dos.version.major;
-				reg_bh=dos.version.minor;
-				reg_dl=dos.version.revision;
-				reg_dh=0x10;								/* Dos in HMA */
+			case 5: reg_dl = 3; break; // TODO should be z  /* Always boot from c: :) */
+		        case 6: // Get true version number, not affected by SETVER
+				{
+					DOS_PSP psp(dos.psp());
+					reg_bl = dos.version.major;
+					reg_bh = dos.version.minor;
+					reg_dl = dos.version.revision;
+					reg_dh = 0x10; // DOS in HMA
+				}
 				break;
-			default:
-				LOG(LOG_DOSMISC,LOG_ERROR)("Weird 0x33 call %2X",reg_al);
-				reg_al =0xff;
+		        default:
+				LOG(LOG_DOSMISC, LOG_ERROR)("Weird 0x33 call %2X", reg_al);
+				reg_al = 0xff;
 				break;
 		}
 		break;
-	case 0x34:		/* Get INDos Flag */
-		SegSet16(es,DOS_SDA_SEG);
-		reg_bx=DOS_SDA_OFS + 0x01;
+	case 0x34: /* Get INDos Flag */
+		SegSet16(es, DOS_SDA_SEG);
+		reg_bx = DOS_SDA_OFS + 0x01;
 		break;
-	case 0x35:		/* Get interrupt vector */
-		reg_bx=real_readw(0,((Bit16u)reg_al)*4);
-		SegSet16(es,real_readw(0,((Bit16u)reg_al)*4+2));
+	case 0x35: /* Get interrupt vector */
+		reg_bx = real_readw(0, ((uint16_t)reg_al) * 4);
+		SegSet16(es, real_readw(0, ((uint16_t)reg_al) * 4 + 2));
 		break;
-	case 0x36:		/* Get Free Disk Space */
+	case 0x36: /* Get Free Disk Space */
 		{
-			Bit16u bytes,clusters,free;
-			Bit8u sectors;
-			if (DOS_GetFreeDiskSpace(reg_dl,&bytes,&sectors,&clusters,&free)) {
-				reg_ax=sectors;
-				reg_bx=free;
-				reg_cx=bytes;
-				reg_dx=clusters;
+			uint16_t bytes    = 0;
+			uint16_t clusters = 0;
+			uint16_t free     = 0;
+			uint8_t  sectors  = 0;
+			if (DOS_GetFreeDiskSpace(reg_dl, &bytes, &sectors,
+			                         &clusters, &free)) {
+				reg_ax = sectors;
+				reg_bx = free;
+				reg_cx = bytes;
+				reg_dx = clusters;
 			} else {
-				Bit8u drive=reg_dl;
-				if (drive==0) drive=DOS_GetDefaultDrive();
-				else drive--;
-				if (drive<2) {
+				[[maybe_unused]] uint8_t drive = reg_dl;
+				if (drive == 0) {
+					drive = DOS_GetDefaultDrive();
+				} else {
+					--drive;
+				}
+				/*
+				if (drive < 2) {
 					// floppy drive, non-present drivesdisks issue floppy check through int24
 					// (critical error handler); needed for Mixed up Mother Goose (hook)
-//					CALLBACK_RunRealInt(0x24);
-				}
-				reg_ax=0xffff;	// invalid drive specified
+					CALLBACK_RunRealInt(0x24);
+				} */
+				reg_ax = 0xffff; // invalid drive specified
 			}
 		}
 		break;
@@ -629,17 +791,18 @@ static Bitu DOS_21Handler(void) {
 		};
 		LOG(LOG_MISC,LOG_ERROR)("DOS:0x37:Call for not supported switchchar");
 		break;
-	case 0x38:					/* Set Country Code */	
-		if (reg_al==0) {		/* Get country specidic information */
-			PhysPt dest = SegPhys(ds)+reg_dx;
-			MEM_BlockWrite(dest,dos.tables.country,0x18);
+	case 0x38:                 /* Set Country Code */
+		if (reg_al == 0) { /* Get country specific information */
+			PhysPt dest = SegPhys(ds) + reg_dx;
+			MEM_BlockWrite(dest, dos.tables.country, 0x18);
 			reg_ax = reg_bx = 0x01;
 			CALLBACK_SCF(false);
-			break;
-		} else {				/* Set country code */
-			LOG(LOG_MISC,LOG_ERROR)("DOS:Setting country code not supported");
+		} else { /* Set country code */
+			countryNo = reg_al == 0xff ? reg_bx : reg_al;
+			DOS_SetCountry(countryNo);
+			reg_ax = 0;
+			CALLBACK_SCF(false);
 		}
-		CALLBACK_SCF(true);
 		break;
 	case 0x39:		/* MKDIR Create directory */
 		MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
@@ -674,7 +837,7 @@ static Bitu DOS_21Handler(void) {
 		break;
 	case 0x3c:		/* CREATE Create of truncate file */
 		MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
-		if (DOS_CreateFile(name1,reg_cx,&reg_ax)) {
+		if (DOS_CreateFile(name1, reg_cl, &reg_ax)) {
 			CALLBACK_SCF(false);
 		} else {
 			reg_ax=dos.errorcode;
@@ -701,7 +864,7 @@ static Bitu DOS_21Handler(void) {
 		break;
 	case 0x3f:		/* READ Read from file or device */
 		{ 
-			Bit16u toread=DOS_GetAmount();
+			uint16_t toread=DOS_GetAmount();
 			dos.echo=true;
 			if (DOS_ReadFile(reg_bx,dos_copybuf,&toread)) {
 				MEM_BlockWrite(SegPhys(ds)+reg_dx,dos_copybuf,toread);
@@ -717,7 +880,7 @@ static Bitu DOS_21Handler(void) {
 		}
 	case 0x40:					/* WRITE Write to file or device */
 		{
-			Bit16u towrite=DOS_GetAmount();
+			uint16_t towrite=DOS_GetAmount();
 			MEM_BlockRead(SegPhys(ds)+reg_dx,dos_copybuf,towrite);
 			if (DOS_WriteFile(reg_bx,dos_copybuf,&towrite)) {
 				reg_ax=towrite;
@@ -740,10 +903,10 @@ static Bitu DOS_21Handler(void) {
 		break;
 	case 0x42:					/* LSEEK Set current file position */
 		{
-			Bit32u pos=(reg_cx<<16) + reg_dx;
+			uint32_t pos=(reg_cx<<16) + reg_dx;
 			if (DOS_SeekFile(reg_bx,&pos,reg_al)) {
-				reg_dx=(Bit16u)(pos >> 16);
-				reg_ax=(Bit16u)(pos & 0xFFFF);
+				reg_dx=(uint16_t)(pos >> 16);
+				reg_ax=(uint16_t)(pos & 0xFFFF);
 				CALLBACK_SCF(false);
 			} else {
 				reg_ax=dos.errorcode;
@@ -756,20 +919,19 @@ static Bitu DOS_21Handler(void) {
 		switch (reg_al) {
 		case 0x00:				/* Get */
 			{
-				Bit16u attr_val=reg_cx;
-				if (DOS_GetFileAttr(name1,&attr_val)) {
-					reg_cx=attr_val;
-					reg_ax=attr_val; /* Undocumented */   
-					CALLBACK_SCF(false);
-				} else {
-					CALLBACK_SCF(true);
+			        FatAttributeFlags attr_val = reg_cl;
+			        if (DOS_GetFileAttr(name1, &attr_val)) {
+				        reg_cx = attr_val._data;
+				        reg_ax = attr_val._data; // Undocumented
+				        CALLBACK_SCF(false);
+			        } else {
+				        CALLBACK_SCF(true);
 					reg_ax=dos.errorcode;
-				}
-				break;
+			        }
+			        break;
 			};
 		case 0x01:				/* Set */
-			LOG(LOG_MISC,LOG_ERROR)("DOS:Set File Attributes for %s not supported",name1);
-			if (DOS_SetFileAttr(name1,reg_cx)) {
+			if (DOS_SetFileAttr(name1, reg_cl)) {
 				reg_ax=0x202;	/* ax destroyed */
 				CALLBACK_SCF(false);
 			} else {
@@ -821,7 +983,7 @@ static Bitu DOS_21Handler(void) {
 		break;
 	case 0x48:					/* Allocate memory */
 		{
-			Bit16u size=reg_bx;Bit16u seg;
+			uint16_t size=reg_bx;uint16_t seg;
 			if (DOS_AllocateMemory(&seg,&size)) {
 				reg_ax=seg;
 				CALLBACK_SCF(false);
@@ -842,7 +1004,7 @@ static Bitu DOS_21Handler(void) {
 		break;
 	case 0x4a:					/* Resize memory block */
 		{
-			Bit16u size=reg_bx;
+			uint16_t size=reg_bx;
 			if (DOS_ResizeMemory(SegValue(es),&size)) {
 				reg_ax=SegValue(es);
 				CALLBACK_SCF(false);
@@ -854,7 +1016,8 @@ static Bitu DOS_21Handler(void) {
 			break;
 		}
 	case 0x4b:					/* EXEC Load and/or execute program */
-		{ 
+		{
+			result_errorcode = 0;
 			MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
 			LOG(LOG_EXEC,LOG_ERROR)("Execute %s %d",name1,reg_al);
 			if (!DOS_Execute(name1,SegPhys(es)+reg_bx,reg_al)) {
@@ -866,10 +1029,13 @@ static Bitu DOS_21Handler(void) {
 //TODO Check for use of execution state AL=5
 	case 0x4c:					/* EXIT Terminate with return code */
 		DOS_Terminate(dos.psp(),false,reg_al);
+		if (result_errorcode)
+			dos.return_code = result_errorcode;
 		break;
 	case 0x4d:					/* Get Return code */
 		reg_al=dos.return_code;/* Officially read from SDA and clear when read */
 		reg_ah=dos.return_mode;
+		CALLBACK_SCF(false);
 		break;
 	case 0x4e:					/* FINDFIRST Find first matching file */
 		MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
@@ -894,16 +1060,14 @@ static Bitu DOS_21Handler(void) {
 	case 0x50:					/* Set current PSP */
 		dos.psp(reg_bx);
 		break;
-	case 0x51:					/* Get current PSP */
-		reg_bx=dos.psp();
-		break;
+	// case 0x51: Get current PSP, co-located with case 0x62
 	case 0x52: {				/* Get list of lists */
-		Bit8u count=2; // floppy drives always counted
+		uint8_t count=2; // floppy drives always counted
 		while (count<DOS_DRIVES && Drives[count] && !Drives[count]->isRemovable()) count++;
 		dos_infoblock.SetBlockDevices(count);
 		RealPt addr=dos_infoblock.GetPointer();
-		SegSet16(es,RealSeg(addr));
-		reg_bx=RealOff(addr);
+		SegSet16(es,RealSegment(addr));
+		reg_bx=RealOffset(addr);
 		LOG(LOG_DOSMISC,LOG_NORMAL)("Call is made for list of lists - let's hope for the best");
 		break; }
 //TODO Think hard how shit this is gonna be
@@ -945,13 +1109,14 @@ static Bitu DOS_21Handler(void) {
 				CALLBACK_SCF(true);
 			}
 		} else {
-			LOG(LOG_DOSMISC,LOG_ERROR)("DOS:57:Unsupported subtion %X",reg_al);
+			LOG(LOG_DOSMISC,LOG_ERROR)("DOS:57:Unsupported subfunction %X",reg_al);
 		}
 		break;
 	case 0x58:					/* Get/Set Memory allocation strategy */
 		switch (reg_al) {
 		case 0:					/* Get Strategy */
 			reg_ax=DOS_GetMemAllocStrategy();
+			CALLBACK_SCF(false);
 			break;
 		case 1:					/* Set Strategy */
 			if (DOS_SetMemAllocStrategy(reg_bx)) CALLBACK_SCF(false);
@@ -986,10 +1151,11 @@ static Bitu DOS_21Handler(void) {
 		}
 		reg_bl=1;	//Retry retry retry
 		reg_ch = 0;     // Unknown error locus
+		CALLBACK_SCF(false); //undocumented
 		break;
 	case 0x5a:					/* Create temporary file */
 		{
-			Bit16u handle;
+			uint16_t handle;
 			MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
 			if (DOS_CreateTempFile(name1,&handle)) {
 				reg_ax=handle;
@@ -1004,7 +1170,7 @@ static Bitu DOS_21Handler(void) {
 	case 0x5b:					/* Create new file */
 		{
 			MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
-			Bit16u handle;
+			uint16_t handle;
 			if (DOS_OpenFile(name1,0,&handle)) {
 				DOS_CloseFile(handle);
 				DOS_SetError(DOSERR_FILE_ALREADY_EXISTS);
@@ -1012,7 +1178,7 @@ static Bitu DOS_21Handler(void) {
 				CALLBACK_SCF(true);
 				break;
 			}
-			if (DOS_CreateFile(name1,reg_cx,&handle)) {
+			if (DOS_CreateFile(name1, reg_cl, &handle)) {
 				reg_ax=handle;
 				CALLBACK_SCF(false);
 			} else {
@@ -1032,30 +1198,50 @@ static Bitu DOS_21Handler(void) {
 			reg_si = DOS_SDA_OFS;
 			reg_cx = 0x80;  // swap if in dos
 			reg_dx = 0x1a;  // swap always
+			CALLBACK_SCF(false);
 			LOG(LOG_DOSMISC,LOG_ERROR)("Get SDA, Let's hope for the best!");
+		} else {
+			LOG(LOG_DOSMISC,LOG_ERROR)("DOS:5D:Unsupported subfunction %X",reg_al);
 		}
 		break;
-	case 0x5f:					/* Network redirection */
-		reg_ax=0x0001;		//Failing it
+	case 0x5e:             /* Network and printer functions */
+		if (!reg_al) { // Get machine name
+			int result = gethostname(name1, DOSNAMEBUF);
+			if (!result) {
+				strcat(name1, "               ");
+				name1[15] = 0;
+				MEM_BlockWrite(SegPhys(ds) + reg_dx, name1, 16);
+				reg_cx = 0x1ff;
+				CALLBACK_SCF(false);
+				break;
+			}
+		}
+		reg_al = 1;
+		CALLBACK_SCF(true);
+		break;
+	case 0x5f:               /* Network redirection */
+		reg_ax = 0x0001; // Failing it
 		CALLBACK_SCF(true);
 		break; 
 	case 0x60:					/* Canonicalize filename or path */
 		MEM_StrCopy(SegPhys(ds)+reg_si,name1,DOSNAMEBUF);
 		if (DOS_Canonicalize(name1,name2)) {
-				MEM_BlockWrite(SegPhys(es)+reg_di,name2,(Bitu)(safe_strlen(name2)+1));	
-				CALLBACK_SCF(false);
-			} else {
-				reg_ax=dos.errorcode;
-				CALLBACK_SCF(true);
-			}
-			break;
-	case 0x62:					/* Get Current PSP Address */
+			MEM_BlockWrite(SegPhys(es)+reg_di,name2,(Bitu)(strlen(name2)+1));	
+			CALLBACK_SCF(false);
+		} else {
+			reg_ax=dos.errorcode;
+			CALLBACK_SCF(true);
+		}
+		break;
+
+	case 0x51: /* Get Current PSP */
+	case 0x62: /* Get Current PSP Address */
 		reg_bx=dos.psp();
 		break;
 	case 0x63:					/* DOUBLE BYTE CHARACTER SET */
 		if(reg_al == 0) {
-			SegSet16(ds,RealSeg(dos.tables.dbcs));
-			reg_si=RealOff(dos.tables.dbcs);		
+			SegSet16(ds,RealSegment(dos.tables.dbcs));
+			reg_si=RealOffset(dos.tables.dbcs);		
 			reg_al = 0;
 			CALLBACK_SCF(false); //undocumented
 		} else reg_al = 0xff; //Doesn't officially touch carry flag
@@ -1116,7 +1302,7 @@ static Bitu DOS_21Handler(void) {
 				{
 					int in  = reg_dl;
 					int out = toupper(in);
-					reg_dl  = (Bit8u)out;
+					reg_dl  = (uint8_t)out;
 				}
 				CALLBACK_SCF(false);
 				break;
@@ -1132,7 +1318,7 @@ static Bitu DOS_21Handler(void) {
 					dos_copybuf[len] = 0;
 					//No upcase as String(0x21) might be multiple asciz strings
 					for (Bitu count = 0; count < len;count++)
-						dos_copybuf[count] = (Bit8u)toupper(*reinterpret_cast<unsigned char*>(dos_copybuf+count));
+						dos_copybuf[count] = (uint8_t)toupper(*reinterpret_cast<unsigned char*>(dos_copybuf+count));
 					MEM_BlockWrite(data,dos_copybuf,len);
 				}
 				CALLBACK_SCF(false);
@@ -1159,8 +1345,10 @@ static Bitu DOS_21Handler(void) {
 			CALLBACK_SCF(false);
 			break;
 		};
-	case 0x68:                  /* FFLUSH Commit file */
+	case 0x6a:					/* Same as commit file */
+	case 0x68:					/* FFLUSH Commit file */
 		if(DOS_FlushFile(reg_bl)) {
+			reg_ah = 0x68;
 			CALLBACK_SCF(false);
 		} else {
 			reg_ax = dos.errorcode;
@@ -1169,7 +1357,7 @@ static Bitu DOS_21Handler(void) {
 		break;
 	case 0x69:					/* Get/Set disk serial number */
 		{
-			Bit16u old_cx=reg_cx;
+			uint16_t old_cx=reg_cx;
 			switch(reg_al)		{
 			case 0x00:				/* Get */
 				LOG(LOG_DOSMISC,LOG_WARN)("DOS:Get Disk serial number");
@@ -1190,7 +1378,8 @@ static Bitu DOS_21Handler(void) {
 		} 
 	case 0x6c:					/* Extended Open/Create */
 		MEM_StrCopy(SegPhys(ds)+reg_si,name1,DOSNAMEBUF);
-		if (DOS_OpenFileExtended(name1,reg_bx,reg_cx,reg_dx,&reg_ax,&reg_cx)) {
+		if (DOS_OpenFileExtended(name1, reg_bx, reg_cl, reg_dx,
+		                         &reg_ax, &reg_cx)) {
 			CALLBACK_SCF(false);
 		} else {
 			reg_ax=dos.errorcode;
@@ -1212,7 +1401,6 @@ static Bitu DOS_21Handler(void) {
 	case 0x6b:		            /* NULL Function */
 	case 0x61:		            /* UNUSED */
 	case 0xEF:                  /* Used in Ancient Art Of War CGA */
-	case 0x5e:					/* More Network Functions */
 	default:
 		if (reg_ah < 0x6d) LOG(LOG_DOSMISC,LOG_ERROR)("DOS:Unhandled call %02X al=%02X. Set al to default of 0",reg_ah,reg_al); //Less errors. above 0x6c the functions are simply always skipped, only al is zeroed, all other registers untouched
 		reg_al=0x00; /* default value */
@@ -1230,22 +1418,63 @@ static Bitu DOS_20Handler(void) {
 
 static Bitu DOS_27Handler(void) {
 	// Terminate & stay resident
-	Bit16u para = (reg_dx/16)+((reg_dx % 16)>0);
-	Bit16u psp = dos.psp(); //mem_readw(SegPhys(ss)+reg_sp+2);
+	uint16_t para = (reg_dx/16)+((reg_dx % 16)>0);
+	uint16_t psp = dos.psp(); //mem_readw(SegPhys(ss)+reg_sp+2);
 	if (DOS_ResizeMemory(psp,&para)) DOS_Terminate(psp,true,0);
 	return CBRET_NONE;
 }
 
-static Bitu DOS_25Handler(void) {
+static uint16_t DOS_SectorAccess(const bool read)
+{
+	const auto drive = dynamic_cast<fatDrive*>(Drives.at(reg_al));
+	assert(drive);
+
+	auto bufferSeg = SegValue(ds);
+	auto bufferOff = reg_bx;
+	auto sectorCnt = reg_cx;
+	auto sectorNum = static_cast<uint32_t>(reg_dx) + drive->partSectOff;
+	auto sectorEnd = drive->getSectorCount() + drive->partSectOff;
+
+	if (sectorCnt == 0xffff) { // large partition form
+		bufferSeg = real_readw(SegValue(ds), reg_bx + 8);
+		bufferOff = real_readw(SegValue(ds), reg_bx + 6);
+		sectorCnt = real_readw(SegValue(ds), reg_bx + 4);
+		sectorNum = real_readd(SegValue(ds), reg_bx + 0) + drive->partSectOff;
+	} else if (sectorEnd > 0xffff)
+		return 0x0207; // must use large partition form
+
+	uint8_t sectorBuf[512];
+	while (sectorCnt--) {
+		if (sectorNum >= sectorEnd)
+			return 0x0408; // sector not found
+		if (read) {
+			if (drive->readSector(sectorNum++, &sectorBuf))
+				return 0x0408;
+			for (const auto& sectorVal : sectorBuf)
+				real_writeb(bufferSeg, bufferOff++, sectorVal);
+		} else {
+			for (auto &sectorVal : sectorBuf)
+				sectorVal = real_readb(bufferSeg, bufferOff++);
+			if (drive->writeSector(sectorNum++, &sectorBuf))
+				return 0x0408;
+		}
+	}
+	return 0;
+}
+
+static Bitu DOS_25Handler(void)
+{
 	if (reg_al >= DOS_DRIVES || !Drives[reg_al] || Drives[reg_al]->isRemovable()) {
 		reg_ax = 0x8002;
 		SETFLAGBIT(CF,true);
+	} else if (Drives[reg_al]->GetType() == DosDriveType::Fat) {
+		reg_ax = DOS_SectorAccess(true);
+		SETFLAGBIT(CF, reg_ax != 0);
 	} else {
 		if (reg_cx == 1 && reg_dx == 0) {
 			if (reg_al >= 2) {
-				PhysPt ptr = PhysMake(SegValue(ds),reg_bx);
 				// write some BPB data into buffer for MicroProse installers
-				mem_writew(ptr+0x1c,0x3f); // hidden sectors
+				real_writew(SegValue(ds), reg_bx + 0x1c, 0x3f); // hidden sectors
 			}
 		} else {
 			LOG(LOG_DOSMISC,LOG_NORMAL)("int 25 called but not as disk detection drive %u",reg_al);
@@ -1256,10 +1485,13 @@ static Bitu DOS_25Handler(void) {
     return CBRET_NONE;
 }
 static Bitu DOS_26Handler(void) {
-	LOG(LOG_DOSMISC,LOG_NORMAL)("int 26 called: hope for the best!");
+	LOG(LOG_DOSMISC, LOG_NORMAL)("int 26 called: hope for the best!");
 	if (reg_al >= DOS_DRIVES || !Drives[reg_al] || Drives[reg_al]->isRemovable()) {	
 		reg_ax = 0x8002;
 		SETFLAGBIT(CF,true);
+	} else if (Drives[reg_al]->GetType() == DosDriveType::Fat) {
+		reg_ax = DOS_SectorAccess(false);
+		SETFLAGBIT(CF, reg_ax != 0);
 	} else {
 		SETFLAGBIT(CF,false);
 		reg_ax = 0;
@@ -1267,11 +1499,37 @@ static Bitu DOS_26Handler(void) {
     return CBRET_NONE;
 }
 
+constexpr uint8_t code_ctrl_c = 0x03;
+constexpr uint8_t code_esc    = 0x1b;
+
+bool DOS_IsCancelRequest()
+{
+	if (shutdown_requested)
+		return true;
+
+	CALLBACK_Idle();
+	while (!(Files[STDIN]->GetInformation() & (1 << 6))) {
+		// A key is waiting, read it
+		uint16_t count = 1;
+		uint8_t code   = 0;
+		DOS_ReadFile(STDIN, &code, &count);
+
+		// Check if user requested to cancel
+		if (shutdown_requested || count == 0 ||
+			code == 'q' || code == 'Q' ||
+		    code == code_ctrl_c || code == code_esc)
+			return true;
+	}
+
+	// Return control if no key pressed
+	return shutdown_requested;
+}
+
 DOS_Version DOS_ParseVersion(const char *word, const char *args)
 {
 	DOS_Version new_version = {5, 0, 0}; // Default to 5.0
-	assert(word != NULL && args != NULL);
-	if (*word && !*args && (strchr(word, '.') != 0)) {
+	assert(word != nullptr && args != nullptr);
+	if (*word && !*args && (strchr(word, '.') != nullptr)) {
 		// Allow usual syntax: ver set 7.1
 		const char *p = strchr(word, '.');
 		p++;
@@ -1335,10 +1593,10 @@ public:
 		callback[4].Install(DOS_27Handler,CB_IRET,"DOS Int 27");
 		callback[4].Set_RealVec(0x27);
 
-		callback[5].Install(NULL,CB_IRET,"DOS Int 28");
+		callback[5].Install(nullptr,CB_IRET,"DOS Int 28");
 		callback[5].Set_RealVec(0x28);
 
-		callback[6].Install(NULL,CB_INT29,"CON Output Int 29");
+		callback[6].Install(nullptr,CB_INT29,"CON Output Int 29");
 		callback[6].Set_RealVec(0x29);
 		// pseudocode for CB_INT29:
 		//	push ax
@@ -1347,6 +1605,7 @@ public:
 		//	pop ax
 		//	iret
 
+		AddMountTypeMessages();
 		DOS_SetupFiles();								/* Setup system File tables */
 		DOS_SetupDevices();							/* Setup dos devices */
 		DOS_SetupTables();
@@ -1363,7 +1622,7 @@ public:
 
 		const Section_prop* section = static_cast<Section_prop*>(configuration);
 		char *args = const_cast<char *>(section->Get_string("ver"));
-		const char* word = StripWord(args);
+		const char* word = strip_word(args);
 		const auto new_version = DOS_ParseVersion(word, args);
 		if (new_version.major || new_version.minor) {
 			dos.version.major = new_version.major;
@@ -1371,20 +1630,14 @@ public:
 		}
 	}
 	~DOS(){
-		//--Modified 2009-12-20 by Alun Bestor to properly clear the devices list on shutdown.
-		//We could also do this with Files, but DOS_SetupFiles() already does this.
-		Bit16u i;
-		for (i=0;i<DOS_DEVICES;i++) if (Devices[i])
-		{
-			delete Devices[i];
-			Devices[i] = 0;
-		}
-		for (i=0;i<DOS_DRIVES;i++) if (Drives[i])
-		{
-			delete Drives[i];
-			Drives[i] = 0;
-		}
-		//--End of modifications
+		// Clear the driver pointers. The actual objects are managed by
+		// the drive manager class.
+		Drives.fill(nullptr);
+
+		// de-init devices, this allows DOSBox to cleanly re-initialize
+		// without throwing an inevitable `DOS: Too many devices added`
+		// exception
+		DOS_ShutDownDevices();
 	}
 };
 
@@ -1394,8 +1647,10 @@ void DOS_ShutDown(Section* /*sec*/) {
 	delete test;
 }
 
-void DOS_Init(Section* sec) {
+void DOS_Init(Section* sec)
+{
+	assert(sec);
 	test = new DOS(sec);
-	/* shutdown function */
-	sec->AddDestroyFunction(&DOS_ShutDown,false);
+
+	sec->AddDestroyFunction(&DOS_ShutDown);
 }

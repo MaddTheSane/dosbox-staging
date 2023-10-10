@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -31,8 +32,8 @@
 #include "lazyflags.h"
 #include "support.h"
 
-Bitu DEBUG_EnableDebugger(void);
-extern void GFX_SetTitle(Bit32s cycles ,int frameskip,bool paused);
+extern void GFX_RefreshTitle();
+extern void GFX_SetTitle(const int32_t cycles, const bool paused = false);
 
 #if 1
 #undef LOG
@@ -44,25 +45,25 @@ extern void GFX_SetTitle(Bit32s cycles ,int frameskip,bool paused);
 #endif
 #endif
 
-CPU_Regs cpu_regs;
-CPUBlock cpu;
-Segments Segs;
+CPU_Regs cpu_regs = {};
+CPUBlock cpu = {};
+Segments Segs = {};
 
-Bit32s CPU_Cycles = 0;
-Bit32s CPU_CycleLeft = 3000;
-Bit32s CPU_CycleMax = 3000;
-Bit32s CPU_OldCycleMax = 3000;
-Bit32s CPU_CyclePercUsed = 100;
-Bit32s CPU_CycleLimit = -1;
-Bit32s CPU_CycleUp = 0;
-Bit32s CPU_CycleDown = 0;
-Bit64s CPU_IODelayRemoved = 0;
+int32_t CPU_Cycles = 0;
+int32_t CPU_CycleLeft = 3000;
+int32_t CPU_CycleMax = 3000;
+int32_t CPU_OldCycleMax = 3000;
+int32_t CPU_CyclePercUsed = 100;
+int32_t CPU_CycleLimit = -1;
+int32_t CPU_CycleUp = 0;
+int32_t CPU_CycleDown = 0;
+int64_t CPU_IODelayRemoved = 0;
 CPU_Decoder * cpudecoder;
 bool CPU_CycleAutoAdjust = false;
 bool CPU_SkipCycleAutoAdjust = false;
 Bitu CPU_AutoDetermineMode = 0;
 
-Bitu CPU_ArchitectureType = CPU_ARCHTYPE_MIXED;
+ArchitectureType CPU_ArchitectureType = ArchitectureType::Mixed;
 
 Bitu CPU_extflags_toggle=0;	// ID and AC flags may be toggled depending on emulated CPU architecture
 
@@ -120,14 +121,14 @@ void CPU_Core_Dynrec_Cache_Close(void);
 
 void Descriptor::Load(PhysPt address) {
 	cpu.mpl=0;
-	Bit32u* data = (Bit32u*)&saved;
+	uint32_t* data = (uint32_t*)&saved;
 	*data	  = mem_readd(address);
 	*(data+1) = mem_readd(address+4);
 	cpu.mpl=3;
 }
 void Descriptor:: Save(PhysPt address) {
 	cpu.mpl=0;
-	Bit32u* data = (Bit32u*)&saved;
+	uint32_t* data = (uint32_t*)&saved;
 	mem_writed(address,*data);
 	mem_writed(address+4,*(data+1));
 	cpu.mpl=03;
@@ -135,13 +136,13 @@ void Descriptor:: Save(PhysPt address) {
 
 
 void CPU_Push16(Bitu value) {
-	Bit32u new_esp=(reg_esp&cpu.stack.notmask)|((reg_esp-2)&cpu.stack.mask);
+	uint32_t new_esp=(reg_esp&cpu.stack.notmask)|((reg_esp-2)&cpu.stack.mask);
 	mem_writew(SegPhys(ss) + (new_esp & cpu.stack.mask) ,value);
 	reg_esp=new_esp;
 }
 
 void CPU_Push32(Bitu value) {
-	Bit32u new_esp=(reg_esp&cpu.stack.notmask)|((reg_esp-4)&cpu.stack.mask);
+	uint32_t new_esp=(reg_esp&cpu.stack.notmask)|((reg_esp-4)&cpu.stack.mask);
 	mem_writed(SegPhys(ss) + (new_esp & cpu.stack.mask) ,value);
 	reg_esp=new_esp;
 }
@@ -158,25 +159,29 @@ Bitu CPU_Pop32(void) {
 	return val;
 }
 
-PhysPt SelBase(Bitu sel) {
-	if (cpu.cr0 & CR0_PROTECTION) {
-		Descriptor desc;
-		cpu.gdt.GetDescriptor(sel,desc);
-		return desc.GetBase();
-	} else {
-		return sel<<4;
-	}
-}
-
-
-void CPU_SetFlags(Bitu word,Bitu mask) {
-	mask|=CPU_extflags_toggle;	// ID-flag and AC-flag can be toggled on CPUID-supporting CPUs
+void CPU_SetFlags(const uint32_t word, uint32_t mask)
+{
+	mask |= CPU_extflags_toggle; // ID-flag and AC-flag can be toggled on
+	                             // CPUID-supporting CPUs
 	reg_flags=(reg_flags & ~mask)|(word & mask)|2;
 	cpu.direction=1-((reg_flags & FLAG_DF) >> 9);
 }
 
-bool CPU_PrepareException(Bitu which,Bitu error) {
-	cpu.exception.which=which;
+void CPU_SetFlagsd(const uint32_t word)
+{
+	const auto mask = cpu.cpl ? FMASK_NORMAL : FMASK_ALL;
+	CPU_SetFlags(word, mask);
+}
+
+void CPU_SetFlagsw(const uint32_t word)
+{
+	const auto mask = (cpu.cpl ? FMASK_NORMAL : FMASK_ALL) & 0xffff;
+	CPU_SetFlags(word, mask);
+}
+
+bool CPU_PrepareException(Bitu which, Bitu error)
+{
+	cpu.exception.which = which;
 	cpu.exception.error=error;
 	return true;
 }
@@ -282,7 +287,7 @@ public:
 
 	Bitu Get_back(void) {
 		cpu.mpl=0;
-		Bit16u backlink=mem_readw(base);
+		uint16_t backlink=mem_readw(base);
 		cpu.mpl=3;
 		return backlink;
 	}
@@ -382,14 +387,18 @@ bool CPU_SwitchTask(Bitu new_tss_selector,TSwitchType tstype,Bitu old_eip) {
 		new_ldt=mem_readw(new_tss.base+offsetof(TSS_32,ldt));
 	} else {
 		E_Exit("286 task switch");
+		/*
+		Dead code after exit
+		--------------------
 		new_cr3=0;
 		new_eip=0;
 		new_eflags=0;
 		new_eax=0;	new_ecx=0;	new_edx=0;	new_ebx=0;
 		new_esp=0;	new_ebp=0;	new_edi=0;	new_esi=0;
 
-		new_es=0;	new_cs=0;	new_ss=0;	new_ds=0;	new_fs=0;	new_gs=0;
-		new_ldt=0;
+		new_es=0;	new_cs=0;	new_ss=0;	new_ds=0;
+		new_fs=0;	new_gs=0; new_ldt=0;
+		*/
 	}
 
 	/* Check if we need to clear busy bit of old TASK */
@@ -397,7 +406,7 @@ bool CPU_SwitchTask(Bitu new_tss_selector,TSwitchType tstype,Bitu old_eip) {
 		cpu_tss.desc.SetBusy(false);
 		cpu_tss.SaveSelector();
 	}
-	Bit32u old_flags = reg_flags;
+	uint32_t old_flags = reg_flags;
 	if (tstype==TSwitch_IRET) old_flags &= (~FLAG_NT);
 
 	/* Save current context in current TSS */
@@ -426,11 +435,9 @@ bool CPU_SwitchTask(Bitu new_tss_selector,TSwitchType tstype,Bitu old_eip) {
 
 	/* Setup a back link to the old TSS in new TSS */
 	if (tstype==TSwitch_CALL_INT) {
-		if (new_tss.is386) {
-			mem_writed(new_tss.base+offsetof(TSS_32,back),cpu_tss.selector);
-		} else {
-			mem_writew(new_tss.base+offsetof(TSS_16,back),cpu_tss.selector);
-		}
+		assert(new_tss.is386);
+		mem_writed(new_tss.base + offsetof(TSS_32, back), cpu_tss.selector);
+
 		/* And make the new task's eflag have the nested task bit */
 		new_eflags|=FLAG_NT;
 	}
@@ -455,22 +462,17 @@ bool CPU_SwitchTask(Bitu new_tss_selector,TSwitchType tstype,Bitu old_eip) {
 		PAGING_SetDirBase(new_cr3);
 
 		/* Load new context */
-		if (new_tss.is386) {
-			reg_eip=new_eip;
-			CPU_SetFlags(new_eflags,FMASK_ALL | FLAG_VM);
-			reg_eax=new_eax;
-			reg_ecx=new_ecx;
-			reg_edx=new_edx;
-			reg_ebx=new_ebx;
-			reg_esp=new_esp;
-			reg_ebp=new_ebp;
-			reg_edi=new_edi;
-			reg_esi=new_esi;
-
-//			new_cs=mem_readw(new_tss.base+offsetof(TSS_32,cs));
-		} else {
-			E_Exit("286 task switch");
-		}
+		assert(new_tss.is386);
+		reg_eip = new_eip;
+		CPU_SetFlags(new_eflags, FMASK_ALL | FLAG_VM);
+		reg_eax = new_eax;
+		reg_ecx = new_ecx;
+		reg_edx = new_edx;
+		reg_ebx = new_ebx;
+		reg_esp = new_esp;
+		reg_ebp = new_ebp;
+		reg_edi = new_edi;
+		reg_esi = new_esi;
 	}
 	/* Load the new selectors */
 	if (reg_flags & FLAG_VM) {
@@ -500,8 +502,7 @@ doconforming:
 			cpu.code.big=cs_desc.Big()>0;
 			Segs.val[cs]=new_cs;
 			break;
-		default:
-			E_Exit("Task switch CS Type %" sBitfs(u),cs_desc.Type());
+		default: E_Exit("Task switch CS Type 0x%x", cs_desc.Type());
 		}
 	}
 	CPU_SetSegGeneral(es,new_es);
@@ -538,7 +539,7 @@ doexception:
 	return CPU_PrepareException(EXCEPTION_GP,0);
 }
 
-void CPU_DebugException(Bit32u triggers,Bitu oldeip) {
+void CPU_DebugException(uint32_t triggers,Bitu oldeip) {
 	cpu.drx[6] = (cpu.drx[6] & 0xFFFF1FF0) | triggers;
 	CPU_Interrupt(EXCEPTION_DB,CPU_INT_EXCEPTION,oldeip);
 }
@@ -549,7 +550,7 @@ void CPU_Exception(Bitu which,Bitu error ) {
 	CPU_Interrupt(which,CPU_INT_EXCEPTION | ((which>=8) ? CPU_INT_HAS_ERROR : 0),reg_eip);
 }
 
-Bit8u lastint;
+uint8_t lastint;
 void CPU_Interrupt(Bitu num,Bitu type,Bitu oldeip) {
 	if (num == EXCEPTION_DB && (type&CPU_INT_EXCEPTION) == 0) {
 		CPU_DebugException(0,oldeip); // DR6 bits need updating
@@ -708,7 +709,7 @@ void CPU_Interrupt(Bitu num,Bitu type,Bitu oldeip) {
 					} 
 					if (cs_dpl!=cpu.cpl)
 						E_Exit("Non-conforming intra privilege INT with DPL!=CPL");
-					FALLTHROUGH;
+					[[fallthrough]];
 				case DESC_CODE_N_C_A:	case DESC_CODE_N_C_NA:
 				case DESC_CODE_R_C_A:	case DESC_CODE_R_C_NA:
 					/* Prepare stack for gate to same priviledge */
@@ -733,8 +734,9 @@ do_interrupt:
 					}
 					break;		
 				default:
-					E_Exit("INT:Gate Selector points to illegal descriptor with type %" sBitfs(x),cs_desc.Type());
-				}
+				        E_Exit("INT:Gate Selector points to illegal descriptor with type 0x%x",
+				               cs_desc.Type());
+			        }
 
 				Segs.val[cs]=(gate_sel&0xfffc) | cpu.cpl;
 				Segs.phys[cs]=cs_desc.GetBase();
@@ -763,7 +765,8 @@ do_interrupt:
 			}
 			return;
 		default:
-			E_Exit("Illegal descriptor type %" sBitfs(X) " for int %" sBitfs(X),gate.Type(),num);
+			E_Exit("Illegal descriptor type 0x%x for int %" sBitfs(X),
+			       gate.Type(), num);
 		}
 	}
 	assert(1);
@@ -793,26 +796,26 @@ void CPU_IRET(bool use32,Bitu oldeip) {
 				return;
 			} else {
 				if (use32) {
-					Bit32u new_eip=mem_readd(SegPhys(ss) + (reg_esp & cpu.stack.mask));
-					Bit32u tempesp=(reg_esp&cpu.stack.notmask)|((reg_esp+4)&cpu.stack.mask);
-					Bit32u new_cs=mem_readd(SegPhys(ss) + (tempesp & cpu.stack.mask));
+					uint32_t new_eip=mem_readd(SegPhys(ss) + (reg_esp & cpu.stack.mask));
+					uint32_t tempesp=(reg_esp&cpu.stack.notmask)|((reg_esp+4)&cpu.stack.mask);
+					uint32_t new_cs=mem_readd(SegPhys(ss) + (tempesp & cpu.stack.mask));
 					tempesp=(tempesp&cpu.stack.notmask)|((tempesp+4)&cpu.stack.mask);
-					Bit32u new_flags=mem_readd(SegPhys(ss) + (tempesp & cpu.stack.mask));
+					uint32_t new_flags=mem_readd(SegPhys(ss) + (tempesp & cpu.stack.mask));
 					reg_esp=(tempesp&cpu.stack.notmask)|((tempesp+4)&cpu.stack.mask);
 
 					reg_eip=new_eip;
-					SegSet16(cs,(Bit16u)(new_cs&0xffff));
+					SegSet16(cs,(uint16_t)(new_cs&0xffff));
 					/* IOPL can not be modified in v86 mode by IRET */
 					CPU_SetFlags(new_flags,FMASK_NORMAL|FLAG_NT);
 				} else {
-					Bit16u new_eip=mem_readw(SegPhys(ss) + (reg_esp & cpu.stack.mask));
-					Bit32u tempesp=(reg_esp&cpu.stack.notmask)|((reg_esp+2)&cpu.stack.mask);
-					Bit16u new_cs=mem_readw(SegPhys(ss) + (tempesp & cpu.stack.mask));
+					uint16_t new_eip=mem_readw(SegPhys(ss) + (reg_esp & cpu.stack.mask));
+					uint32_t tempesp=(reg_esp&cpu.stack.notmask)|((reg_esp+2)&cpu.stack.mask);
+					uint16_t new_cs=mem_readw(SegPhys(ss) + (tempesp & cpu.stack.mask));
 					tempesp=(tempesp&cpu.stack.notmask)|((tempesp+2)&cpu.stack.mask);
-					Bit16u new_flags=mem_readw(SegPhys(ss) + (tempesp & cpu.stack.mask));
+					uint16_t new_flags=mem_readw(SegPhys(ss) + (tempesp & cpu.stack.mask));
 					reg_esp=(tempesp&cpu.stack.notmask)|((tempesp+2)&cpu.stack.mask);
 
-					reg_eip=(Bit32u)new_eip;
+					reg_eip=(uint32_t)new_eip;
 					SegSet16(cs,new_cs);
 					/* IOPL can not be modified in v86 mode by IRET */
 					CPU_SetFlags(new_flags,FMASK_NORMAL|FLAG_NT);
@@ -836,7 +839,7 @@ void CPU_IRET(bool use32,Bitu oldeip) {
 			return;
 		}
 		Bitu n_cs_sel,n_eip,n_flags;
-		Bit32u tempesp;
+		uint32_t tempesp;
 		if (use32) {
 			n_eip=mem_readd(SegPhys(ss) + (reg_esp & cpu.stack.mask));
 			tempesp=(reg_esp&cpu.stack.notmask)|((reg_esp+4)&cpu.stack.mask);
@@ -910,7 +913,8 @@ void CPU_IRET(bool use32,Bitu oldeip) {
 				EXCEPTION_GP,n_cs_sel & 0xfffc)
 			break;
 		default:
-			E_Exit("IRET:Illegal descriptor type %" sBitfs(X), n_cs_desc.Type());
+			E_Exit("IRET:Illegal descriptor type 0x%x",
+			       n_cs_desc.Type());
 		}
 		CPU_CHECK_COND(!n_cs_desc.saved.seg.p,
 			"IRET with nonpresent code segment",
@@ -1067,7 +1071,7 @@ CODE_jmp:
 			CPU_SwitchTask(selector,TSwitch_JMP,oldeip);
 			break;
 		default:
-			E_Exit("JMP Illegal descriptor type %" sBitfs(X),desc.Type());
+			E_Exit("JMP Illegal descriptor type 0x%x", desc.Type());
 		}
 	}
 	assert(1);
@@ -1230,7 +1234,7 @@ call_code:
 						}
 
 						cpu.cpl = n_cs_desc.DPL();
-						Bit16u oldcs    = SegValue(cs);
+						uint16_t oldcs    = SegValue(cs);
 						/* Switch to new CS:EIP */
 						Segs.phys[cs]	= n_cs_desc.GetBase();
 						Segs.val[cs]	= (n_cs_sel & 0xfffc) | cpu.cpl;
@@ -1259,7 +1263,7 @@ call_code:
 						break;		
 					} else if (n_cs_dpl > cpu.cpl)
 						E_Exit("CALL:GATE:CS DPL>CPL");		// or #GP(sel)
-					FALLTHROUGH;
+					[[fallthrough]];
 				case DESC_CODE_N_C_A:case DESC_CODE_N_C_NA:
 				case DESC_CODE_R_C_A:case DESC_CODE_R_C_NA:
 					// zrdx extender
@@ -1304,14 +1308,14 @@ call_code:
 			CPU_Exception(EXCEPTION_GP,selector & 0xfffc);
 			return;
 		default:
-			E_Exit("CALL:Descriptor type %" sBitfs(x) " unsupported",call.Type());
+			E_Exit("CALL:Descriptor type 0x%x unsupported", call.Type());
 		}
 	}
 	assert(1);
 }
 
 
-void CPU_RET(bool use32,Bitu bytes, MAYBE_UNUSED Bitu oldeip) {
+void CPU_RET(bool use32,Bitu bytes, [[maybe_unused]] Bitu oldeip) {
 	if (!cpu.pmode || (reg_flags & FLAG_VM)) {
 		Bitu new_ip,new_cs;
 		if (!use32) {
@@ -1362,7 +1366,8 @@ void CPU_RET(bool use32,Bitu bytes, MAYBE_UNUSED Bitu oldeip) {
 					EXCEPTION_GP,selector & 0xfffc)
 				break;
 			default:
-				E_Exit("RET from illegal descriptor type %" sBitfs(X),desc.Type());
+				E_Exit("RET from illegal descriptor type 0x%x",
+				       desc.Type());
 			}
 RET_same_level:
 			if (!desc.saved.seg.p) {
@@ -1407,7 +1412,8 @@ RET_same_level:
 					EXCEPTION_GP,selector & 0xfffc)
 				break;
 			default:
-				E_Exit("RET from illegal descriptor type %" sBitfs(X),desc.Type());		// or #GP(selector)
+				E_Exit("RET from illegal descriptor type 0x%x",
+				       desc.Type()); // or #GP(selector)
 			}
 
 			CPU_CHECK_COND(!desc.saved.seg.p,
@@ -1481,7 +1487,6 @@ RET_same_level:
 		LOG(LOG_CPU,LOG_NORMAL)("Prot ret %X:%X",selector,offset);
 		return;
 	}
-	assert(1);
 }
 
 
@@ -1576,14 +1581,14 @@ void CPU_SET_CRX(Bitu cr,Bitu value) {
 					CPU_CycleLeft=0;
 					CPU_Cycles=0;
 					CPU_OldCycleMax=CPU_CycleMax;
-					GFX_SetTitle(CPU_CyclePercUsed,-1,false);
-					if(!printed_cycles_auto_info) {
+				        GFX_SetTitle(CPU_CyclePercUsed);
+				        if(!printed_cycles_auto_info) {
 						printed_cycles_auto_info = true;
 						LOG_MSG("DOSBox has switched to max cycles, because of the setting: cycles=auto.\nIf the game runs too fast, try a fixed cycles amount in DOSBox's options.");
 					}
 				} else {
-					GFX_SetTitle(-1,-1,false);
-				}
+				        GFX_RefreshTitle();
+			        }
 #if (C_DYNAMIC_X86)
 				if (CPU_AutoDetermineMode&CPU_AUTODETERMINE_CORE) {
 					CPU_Core_Dyn_X86_Cache_Init(true);
@@ -1620,7 +1625,7 @@ bool CPU_WRITE_CRX(Bitu cr,Bitu value) {
 	/* Check if privileged to access control registers */
 	if (cpu.pmode && (cpu.cpl>0)) return CPU_PrepareException(EXCEPTION_GP,0);
 	if ((cr==1) || (cr>4)) return CPU_PrepareException(EXCEPTION_UD,0);
-	if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) {
+	if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) {
 		if (cr==4) return CPU_PrepareException(EXCEPTION_UD,0);
 	}
 	CPU_SET_CRX(cr,value);
@@ -1630,8 +1635,8 @@ bool CPU_WRITE_CRX(Bitu cr,Bitu value) {
 Bitu CPU_GET_CRX(Bitu cr) {
 	switch (cr) {
 	case 0:
-		if (CPU_ArchitectureType>=CPU_ARCHTYPE_PENTIUMSLOW) return cpu.cr0;
-		else if (CPU_ArchitectureType>=CPU_ARCHTYPE_486OLDSLOW) return (cpu.cr0 & 0xe005003f);
+		if (CPU_ArchitectureType>=ArchitectureType::PentiumSlow) return cpu.cr0;
+		else if (CPU_ArchitectureType>=ArchitectureType::Intel486OldSlow) return (cpu.cr0 & 0xe005003f);
 		else return (cpu.cr0 | 0x7ffffff0);
 	case 2:
 		return paging.cr2;
@@ -1644,7 +1649,7 @@ Bitu CPU_GET_CRX(Bitu cr) {
 	return 0;
 }
 
-bool CPU_READ_CRX(Bitu cr,Bit32u & retvalue) {
+bool CPU_READ_CRX(Bitu cr,uint32_t & retvalue) {
 	/* Check if privileged to access control registers */
 	if (cpu.pmode && (cpu.cpl>0)) return CPU_PrepareException(EXCEPTION_GP,0);
 	if ((cr==1) || (cr>4)) return CPU_PrepareException(EXCEPTION_UD,0);
@@ -1669,7 +1674,7 @@ bool CPU_WRITE_DRX(Bitu dr,Bitu value) {
 		break;
 	case 5:
 	case 7:
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMSLOW) {
+		if (CPU_ArchitectureType<ArchitectureType::PentiumSlow) {
 			cpu.drx[7]=(value|0x400) & 0xffff2fff;
 		} else {
 			cpu.drx[7]=(value|0x400);
@@ -1682,7 +1687,7 @@ bool CPU_WRITE_DRX(Bitu dr,Bitu value) {
 	return false;
 }
 
-bool CPU_READ_DRX(Bitu dr,Bit32u & retvalue) {
+bool CPU_READ_DRX(Bitu dr,uint32_t & retvalue) {
 	/* Check if privileged to access control registers */
 	if (cpu.pmode && (cpu.cpl>0)) return CPU_PrepareException(EXCEPTION_GP,0);
 	switch (dr) {
@@ -1724,7 +1729,7 @@ bool CPU_WRITE_TRX(Bitu tr,Bitu value) {
 	return CPU_PrepareException(EXCEPTION_UD,0);
 }
 
-bool CPU_READ_TRX(Bitu tr,Bit32u & retvalue) {
+bool CPU_READ_TRX(Bitu tr,uint32_t & retvalue) {
 	/* Check if privileged to access control registers */
 	if (cpu.pmode && (cpu.cpl>0)) return CPU_PrepareException(EXCEPTION_GP,0);
 	switch (tr) {
@@ -1789,7 +1794,7 @@ void CPU_LAR(Bitu selector,Bitu & ar) {
 				case DESC_CODE_R_NC_A:		case DESC_CODE_R_NC_NA:
 					if (desc.DPL()<cpu.cpl || desc.DPL()<rpl)
 						break;
-					FALLTHROUGH;
+					[[fallthrough]];
 
 				case DESC_CODE_N_C_A:	case DESC_CODE_N_C_NA:
 				case DESC_CODE_R_C_A:	case DESC_CODE_R_C_NA:
@@ -1827,7 +1832,7 @@ void CPU_LSL(Bitu selector,Bitu & limit) {
 				case DESC_CODE_R_NC_A:		case DESC_CODE_R_NC_NA:
 					if (desc.DPL()<cpu.cpl || desc.DPL()<rpl)
 						break;
-					FALLTHROUGH;
+					[[fallthrough]];
 				case DESC_CODE_N_C_A:	case DESC_CODE_N_C_NA:
 				case DESC_CODE_R_C_A:	case DESC_CODE_R_C_NA:
 					limit=desc.GetLimit();
@@ -1997,14 +2002,14 @@ bool CPU_PopSeg(SegNames seg,bool use32) {
 	Bitu val=mem_readw(SegPhys(ss) + (reg_esp & cpu.stack.mask));
 	Bitu addsp = use32 ? 0x04 : 0x02;
 	//Calcullate this beforehande since the stack mask might change
-	Bit32u new_esp  = (reg_esp&cpu.stack.notmask) | ((reg_esp + addsp)&cpu.stack.mask);
+	uint32_t new_esp  = (reg_esp&cpu.stack.notmask) | ((reg_esp + addsp)&cpu.stack.mask);
 	if (CPU_SetSegGeneral(seg,val)) return true;
 	reg_esp = new_esp;
 	return false;
 }
 
 bool CPU_CPUID(void) {
-	if (CPU_ArchitectureType<CPU_ARCHTYPE_486NEWSLOW) return false;
+	if (CPU_ArchitectureType<ArchitectureType::Intel486NewSlow) return false;
 	switch (reg_eax) {
 	case 0:	/* Vendor ID String and maximum level? */
 		reg_eax=1;  /* Maximum level */ 
@@ -2013,8 +2018,8 @@ bool CPU_CPUID(void) {
 		reg_ecx='n' | ('t' << 8) | ('e' << 16) | ('l'<< 24); 
 		break;
 	case 1: // Get processor type/family/model/stepping and feature flags
-		if ((CPU_ArchitectureType == CPU_ARCHTYPE_486NEWSLOW) ||
-		    (CPU_ArchitectureType == CPU_ARCHTYPE_MIXED)) {
+		if ((CPU_ArchitectureType == ArchitectureType::Intel486NewSlow) ||
+		    (CPU_ArchitectureType == ArchitectureType::Mixed)) {
 #if (C_FPU)
 			reg_eax = 0x402; // Intel 486DX
 			reg_edx = 0x1;   // FPU
@@ -2024,7 +2029,7 @@ bool CPU_CPUID(void) {
 #endif
 			reg_ebx = 0;     // Not supported
 			reg_ecx = 0;     // No features
-		} else if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUMSLOW) {
+		} else if (CPU_ArchitectureType == ArchitectureType::PentiumSlow) {
 #if (C_FPU)
 			reg_eax = 0x517; // Intel Pentium P5 60/66 MHz D1-step
 			reg_edx = 0x11;  // FPU + Time Stamp Counter (RDTSC)
@@ -2080,7 +2085,7 @@ void CPU_ENTER(bool use32,Bitu bytes,Bitu level) {
 	if (!use32) {
 		sp_index-=2;
 		mem_writew(SegPhys(ss)+sp_index,reg_bp);
-		reg_bp=(Bit16u)(reg_esp-2);
+		reg_bp=(uint16_t)(reg_esp-2);
 		if (level) {
 			for (Bitu i=1;i<level;i++) {	
 				sp_index-=2;bp_index-=2;
@@ -2112,13 +2117,15 @@ static void CPU_CycleIncrease(bool pressed) {
 		CPU_CyclePercUsed+=5;
 		if (CPU_CyclePercUsed>105) CPU_CyclePercUsed=105;
 		LOG_MSG("CPU speed: max %d percent.",CPU_CyclePercUsed);
-		GFX_SetTitle(CPU_CyclePercUsed,-1,false);
+		GFX_SetTitle(CPU_CyclePercUsed);
 	} else {
-		Bit32s old_cycles=CPU_CycleMax;
+		int32_t old_cycles=CPU_CycleMax;
 		if (CPU_CycleUp < 100) {
-			CPU_CycleMax = (Bit32s)(CPU_CycleMax * (1 + (float)CPU_CycleUp / 100.0));
+			CPU_CycleMax = (int32_t)(CPU_CycleMax *
+			                        (1 + static_cast<float>(CPU_CycleUp) /
+			                                     100.0f));
 		} else {
-			CPU_CycleMax = (Bit32s)(CPU_CycleMax + CPU_CycleUp);
+			CPU_CycleMax = CPU_CycleMax + CPU_CycleUp;
 		}
 	    
 		CPU_CycleLeft=0;CPU_Cycles=0;
@@ -2127,7 +2134,7 @@ static void CPU_CycleIncrease(bool pressed) {
 			LOG_MSG("CPU speed: fixed %d cycles. If you need more than 20000, try core=dynamic in DOSBox's options.",CPU_CycleMax);
 		else
 			LOG_MSG("CPU speed: fixed %d cycles.",CPU_CycleMax);
-		GFX_SetTitle(CPU_CycleMax,-1,false);
+		GFX_SetTitle(CPU_CycleMax);
 	}
 }
 
@@ -2140,17 +2147,19 @@ static void CPU_CycleDecrease(bool pressed) {
 			LOG_MSG("CPU speed: max %d percent. If the game runs too fast, try a fixed cycles amount in DOSBox's options.",CPU_CyclePercUsed);
 		else
 			LOG_MSG("CPU speed: max %d percent.",CPU_CyclePercUsed);
-		GFX_SetTitle(CPU_CyclePercUsed,-1,false);
+		GFX_SetTitle(CPU_CyclePercUsed);
 	} else {
 		if (CPU_CycleDown < 100) {
-			CPU_CycleMax = (Bit32s)(CPU_CycleMax / (1 + (float)CPU_CycleDown / 100.0));
+			CPU_CycleMax = (int32_t)(CPU_CycleMax /
+			                        (1 + static_cast<float>(CPU_CycleDown) /
+			                                     100.0f));
 		} else {
-			CPU_CycleMax = (Bit32s)(CPU_CycleMax - CPU_CycleDown);
+			CPU_CycleMax = CPU_CycleMax - CPU_CycleDown;
 		}
 		CPU_CycleLeft=0;CPU_Cycles=0;
 		if (CPU_CycleMax <= 0) CPU_CycleMax=1;
 		LOG_MSG("CPU speed: fixed %d cycles.",CPU_CycleMax);
-		GFX_SetTitle(CPU_CycleMax,-1,false);
+		GFX_SetTitle(CPU_CycleMax);
 	}
 }
 
@@ -2168,8 +2177,8 @@ void CPU_Disable_SkipAutoAdjust(void) {
 }
 
 
-extern int ticksDone;
-extern int ticksScheduled;
+extern int64_t ticksDone;
+extern int64_t ticksScheduled;
 
 void CPU_Reset_AutoAdjust(void) {
 	CPU_IODelayRemoved = 0;
@@ -2219,7 +2228,7 @@ public:
 			cpu.drx[i]=0;
 			cpu.trx[i]=0;
 		}
-		if (CPU_ArchitectureType==CPU_ARCHTYPE_PENTIUMSLOW) {
+		if (CPU_ArchitectureType==ArchitectureType::PentiumSlow) {
 			cpu.drx[6]=0xffff0ff0;
 		} else {
 			cpu.drx[6]=0xffff1ff0;
@@ -2253,80 +2262,75 @@ public:
 		CPU_Cycles=0;
 		CPU_SkipCycleAutoAdjust=false;
 
-		Prop_multival* p = section->Get_multival("cycles");
+		// Sets the value if the string in within the min and max values
+		auto set_if_in_range = [](const std::string &str, int &value,
+		                          const int min_value = 1,
+		                          const int max_value = 0) {
+			std::istringstream stream(str);
+			int v = 0;
+			stream >> v;
+			const bool within_min = (v >= min_value);
+			const bool within_max = (!max_value || v <= max_value);
+			if (within_min && within_max)
+				value = v;
+		};
+
+		PropMultiVal *p = section->GetMultiVal("cycles");
 		std::string type = p->GetSection()->Get_string("type");
-		std::string str ;
-		CommandLine cmd(0,p->GetSection()->Get_string("parameters"));
-		if (type=="max") {
-			CPU_CycleMax=0;
-			CPU_CyclePercUsed=100;
-			CPU_CycleAutoAdjust=true;
-			CPU_CycleLimit=-1;
-			for (Bitu cmdnum=1; cmdnum<=cmd.GetCount(); cmdnum++) {
-				if (cmd.FindCommand(cmdnum,str)) {
-					if (str.find('%')==str.length()-1) {
-						str.erase(str.find('%'));
-						int percval=0;
-						std::istringstream stream(str);
-						stream >> percval;
-						if ((percval>0) && (percval<=105)) CPU_CyclePercUsed=(Bit32s)percval;
-					} else if (str=="limit") {
-						cmdnum++;
-						if (cmd.FindCommand(cmdnum,str)) {
-							int cyclimit=0;
-							std::istringstream stream(str);
-							stream >> cyclimit;
-							if (cyclimit>0) CPU_CycleLimit=cyclimit;
+		std::string str;
+		CommandLine cmd("", p->GetSection()->Get_string("parameters"));
+
+		constexpr auto min_percent = 0;
+		constexpr auto max_percent = 105;
+
+		if (type == "max") {
+			CPU_CycleMax = 0;
+			CPU_CyclePercUsed = 100;
+			CPU_CycleAutoAdjust = true;
+			CPU_CycleLimit = -1;
+			for (unsigned int cmdnum = 1; cmdnum <= cmd.GetCount(); ++cmdnum) {
+				if (cmd.FindCommand(cmdnum, str)) {
+					if (str.back() == '%') {
+						str.pop_back();
+						set_if_in_range(str, CPU_CyclePercUsed, min_percent, max_percent);
+					} else if (str == "limit") {
+						++cmdnum;
+						if (cmd.FindCommand(cmdnum, str)) {
+							set_if_in_range(str, CPU_CycleLimit);
 						}
 					}
 				}
 			}
 		} else {
-			if (type=="auto") {
-				CPU_AutoDetermineMode|=CPU_AUTODETERMINE_CYCLES;
-				CPU_CycleMax=3000;
-				CPU_OldCycleMax=3000;
-				CPU_CyclePercUsed=100;
-				for (Bitu cmdnum=0; cmdnum<=cmd.GetCount(); cmdnum++) {
-					if (cmd.FindCommand(cmdnum,str)) {
-						if (str.find('%')==str.length()-1) {
-							str.erase(str.find('%'));
-							int percval=0;
-							std::istringstream stream(str);
-							stream >> percval;
-							if ((percval>0) && (percval<=105)) CPU_CyclePercUsed=(Bit32s)percval;
-						} else if (str=="limit") {
-							cmdnum++;
-							if (cmd.FindCommand(cmdnum,str)) {
-								int cyclimit=0;
-								std::istringstream stream(str);
-								stream >> cyclimit;
-								if (cyclimit>0) CPU_CycleLimit=cyclimit;
+			if (type == "auto") {
+				CPU_AutoDetermineMode |= CPU_AUTODETERMINE_CYCLES;
+				CPU_CycleMax = 3000;
+				CPU_OldCycleMax = 3000;
+				CPU_CyclePercUsed = 100;
+				for (unsigned int cmdnum = 0; cmdnum <= cmd.GetCount(); ++cmdnum) {
+					if (cmd.FindCommand(cmdnum, str)) {
+						if (str.back() == '%') {
+							str.pop_back();
+							set_if_in_range(str, CPU_CyclePercUsed, min_percent, max_percent);
+						} else if (str == "limit") {
+							++cmdnum;
+							if (cmd.FindCommand(cmdnum, str)) {
+								set_if_in_range(str, CPU_CycleLimit);
 							}
 						} else {
-							int rmdval=0;
-							std::istringstream stream(str);
-							stream >> rmdval;
-							if (rmdval>0) {
-								CPU_CycleMax=(Bit32s)rmdval;
-								CPU_OldCycleMax=(Bit32s)rmdval;
-							}
+							set_if_in_range(str, CPU_CycleMax);
+							set_if_in_range(str, CPU_OldCycleMax);
 						}
 					}
 				}
-			} else if(type =="fixed") {
-				cmd.FindCommand(1,str);
-				int rmdval=0;
-				std::istringstream stream(str);
-				stream >> rmdval;
-				CPU_CycleMax=(Bit32s)rmdval;
+			} else if (type == "fixed") {
+				if (cmd.FindCommand(1, str)) {
+					set_if_in_range(str, CPU_CycleMax);
+				}
 			} else {
-				std::istringstream stream(type);
-				int rmdval=0;
-				stream >> rmdval;
-				if(rmdval) CPU_CycleMax=(Bit32s)rmdval;
+				set_if_in_range(type, CPU_CycleMax);
 			}
-			CPU_CycleAutoAdjust=false;
+			CPU_CycleAutoAdjust = false;
 		}
 
 		CPU_CycleUp=section->Get_int("cycleup");
@@ -2366,14 +2370,14 @@ public:
 		CPU_Core_Dynrec_Cache_Init( core == "dynamic" );
 #endif
 
-		CPU_ArchitectureType = CPU_ARCHTYPE_MIXED;
+		CPU_ArchitectureType = ArchitectureType::Mixed;
 		std::string cputype(section->Get_string("cputype"));
 		if (cputype == "auto") {
-			CPU_ArchitectureType = CPU_ARCHTYPE_MIXED;
+			CPU_ArchitectureType = ArchitectureType::Mixed;
 		} else if (cputype == "386") {
-			CPU_ArchitectureType = CPU_ARCHTYPE_386FAST;
+			CPU_ArchitectureType = ArchitectureType::Intel386Fast;
 		} else if (cputype == "386_prefetch") {
-			CPU_ArchitectureType = CPU_ARCHTYPE_386FAST;
+			CPU_ArchitectureType = ArchitectureType::Intel386Fast;
 			if (core == "normal") {
 				cpudecoder=&CPU_Core_Prefetch_Run;
 				CPU_PrefetchQueueSize = 16;
@@ -2385,11 +2389,11 @@ public:
 				E_Exit("prefetch queue emulation requires the normal core setting.");
 			}
 		} else if (cputype == "386_slow") {
-			CPU_ArchitectureType = CPU_ARCHTYPE_386SLOW;
+			CPU_ArchitectureType = ArchitectureType::Intel386Slow;
 		} else if (cputype == "486_slow") {
-			CPU_ArchitectureType = CPU_ARCHTYPE_486NEWSLOW;
+			CPU_ArchitectureType = ArchitectureType::Intel486OldSlow;
 		} else if (cputype == "486_prefetch") {
-			CPU_ArchitectureType = CPU_ARCHTYPE_486NEWSLOW;
+			CPU_ArchitectureType = ArchitectureType::Intel486NewSlow;
 			if (core == "normal") {
 				cpudecoder=&CPU_Core_Prefetch_Run;
 				CPU_PrefetchQueueSize = 32;
@@ -2401,26 +2405,29 @@ public:
 				E_Exit("prefetch queue emulation requires the normal core setting.");
 			}
 		} else if (cputype == "pentium_slow") {
-			CPU_ArchitectureType = CPU_ARCHTYPE_PENTIUMSLOW;
+			CPU_ArchitectureType = ArchitectureType::PentiumSlow;
 		}
 
-		if (CPU_ArchitectureType>=CPU_ARCHTYPE_486NEWSLOW) CPU_extflags_toggle=(FLAG_ID|FLAG_AC);
-		else if (CPU_ArchitectureType>=CPU_ARCHTYPE_486OLDSLOW) CPU_extflags_toggle=(FLAG_AC);
+		if (CPU_ArchitectureType>=ArchitectureType::Intel486NewSlow) CPU_extflags_toggle=(FLAG_ID|FLAG_AC);
+		else if (CPU_ArchitectureType>=ArchitectureType::Intel486OldSlow) CPU_extflags_toggle=(FLAG_AC);
 		else CPU_extflags_toggle=0;
 
 
 		if(CPU_CycleMax <= 0) CPU_CycleMax = 3000;
 		if(CPU_CycleUp <= 0)   CPU_CycleUp = 500;
 		if(CPU_CycleDown <= 0) CPU_CycleDown = 20;
-		if (CPU_CycleAutoAdjust) GFX_SetTitle(CPU_CyclePercUsed,-1,false);
-		else GFX_SetTitle(CPU_CycleMax,-1,false);
+		if (CPU_CycleAutoAdjust) {
+			GFX_SetTitle(CPU_CyclePercUsed);
+		} else {
+			GFX_SetTitle(CPU_CycleMax);
+		}
 		return true;
 	}
 };
 
 static CPU * test;
 
-void CPU_ShutDown(MAYBE_UNUSED Section* sec) {
+void CPU_ShutDown([[maybe_unused]] Section* sec) {
 #if (C_DYNAMIC_X86)
 	CPU_Core_Dyn_X86_Cache_Close();
 #elif (C_DYNREC)
@@ -2429,9 +2436,15 @@ void CPU_ShutDown(MAYBE_UNUSED Section* sec) {
 	delete test;
 }
 
-void CPU_Init(Section* sec) {
-	test = new CPU(sec);
-	sec->AddDestroyFunction(&CPU_ShutDown,true);
+void CPU_Init(Section* sec)
+{
+	assert(sec);
+
+	test = new (std::nothrow) CPU(sec);
+
+	constexpr auto changeable_at_runtime = true;
+	sec->AddDestroyFunction(&CPU_ShutDown, changeable_at_runtime);
 }
+
 //initialize static members
 bool CPU::inited=false;

@@ -1,4 +1,7 @@
 /*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -18,64 +21,139 @@
 
 #include "dosbox.h"
 
+#include <clocale>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
-#include <unordered_map>
-#include <string>
+#include <map>
 
+#include "std_filesystem.h"
+#include <string>
+#include <unordered_map>
+
+#include "ansi_code_markup.h"
+#include "checks.h"
 #include "control.h"
 #include "cross.h"
 #include "fs_utils.h"
-#include "string_utils.h"
 #include "setup.h"
+#include "string_utils.h"
 #include "support.h"
 
 #define LINE_IN_MAXLEN 2048
 
-static std::unordered_map<std::string, std::string> messages;
+CHECK_NARROWING();
+
+static const char *msg_not_found = "Message not Found!\n";
+
+class Message {
+private:
+	std::string markup_msg = {};
+	std::string rendered_msg = {};
+
+	std::map<uint16_t, std::string> rendered_msg_by_codepage = {};
+
+	const char *CachedRenderString(const std::string &msg,
+	                               std::map<uint16_t, std::string> &output_msg_by_codepage)
+	{
+		assert(msg.length());
+		const uint16_t cp = get_utf8_code_page();
+		if (output_msg_by_codepage[cp].empty()) {
+			if (!utf8_to_dos(msg,
+			                 output_msg_by_codepage[cp],
+			                 UnicodeFallback::Box,
+			                 cp)) {
+				LOG_WARNING("LANG: Problem converting UTF8 string '%s' to DOS code page",
+				            msg.c_str());
+			}
+			assert(output_msg_by_codepage[cp].length());
+		}
+
+		return output_msg_by_codepage[cp].c_str();
+	}
+
+public:
+	Message() = delete;
+	Message(const char *markup)
+	{
+		Set(markup);
+	}
+
+	const char *GetRaw()
+	{
+		assert(markup_msg.length());
+		return markup_msg.c_str();
+	}
+
+	const char *GetRendered()
+	{
+		assert(markup_msg.length());
+		if (rendered_msg.empty())
+			rendered_msg = convert_ansi_markup(markup_msg.c_str());
+
+		assert(rendered_msg.length());
+		const uint16_t cp = get_utf8_code_page();
+		if (rendered_msg_by_codepage[cp].empty()) {
+			if (!utf8_to_dos(rendered_msg,
+			                 rendered_msg_by_codepage[cp],
+			                 UnicodeFallback::Box,
+			                 cp)) {
+				LOG_WARNING("LANG: Problem converting UTF8 string '%s' to DOS code page",
+				            rendered_msg.c_str());
+			}
+			assert(rendered_msg_by_codepage[cp].length());
+		}
+
+		return rendered_msg_by_codepage[cp].c_str();
+	}
+
+	void Set(const char *markup)
+	{
+		assert(markup);
+		markup_msg = markup;
+
+		rendered_msg.clear();
+		rendered_msg_by_codepage.clear();
+	}
+};
+
+static std::unordered_map<std::string, Message> messages;
 static std::deque<std::string> messages_order;
 
-// Add but don't replace existing
-void MSG_Add(const char *name, const char *msg)
+// Add the message if it doesn't exist yet
+void MSG_Add(const char *name, const char *markup_msg)
 {
-	// Only add the message if it doesn't exist yet
-	if (messages.find(name) == messages.end()) {
-		messages[name] = msg;
+	const auto &pair = messages.try_emplace(name, markup_msg);
+	if (pair.second) // if the insertion was successful
 		messages_order.emplace_back(name);
-	}
 }
 
 // Replace existing or add if it doesn't exist
-void MSG_Replace(const char *name, const char *msg)
+static void msg_replace(const char *name, const char *markup_msg)
 {
 	auto it = messages.find(name);
 	if (it == messages.end())
-		MSG_Add(name, msg);
-	else // replace the prior message
-		it->second = msg;
+		MSG_Add(name, markup_msg);
+	else
+		it->second.Set(markup_msg);
 }
 
-static bool LoadMessageFile(std::string filename)
+static bool load_message_file(const std_fs::path &filename)
 {
 	if (filename.empty())
 		return false;
 
-	// Expand the filename and check if it exists -- returns empty if not found
-	filename = to_native_path(filename);
-
-	// Was the file not found?
-	if (filename.empty()) {
+	if (!path_exists(filename) || !is_readable(filename)) {
 		LOG_MSG("LANG: Language file %s not found, skipping",
-		        filename.c_str());
+		        filename.string().c_str());
 		return false;
 	}
 
-	FILE *mfile = fopen(filename.c_str(), "rt");
+	FILE *mfile = fopen(filename.string().c_str(), "rt");
 	if (!mfile) {
 		LOG_MSG("LANG: Failed opening language file: %s, skipping",
-		        filename.c_str());
+		        filename.string().c_str());
 		return false;
 	}
 
@@ -85,7 +163,7 @@ static bool LoadMessageFile(std::string filename)
 	/* Start out with empty strings */
 	name[0] = 0;
 	message[0] = 0;
-	while (fgets(linein, LINE_IN_MAXLEN, mfile) != 0) {
+	while (fgets(linein, LINE_IN_MAXLEN, mfile) != nullptr) {
 		/* Parse the read line */
 		/* First remove characters 10 and 13 from the line */
 		char * parser=linein;
@@ -109,7 +187,7 @@ static bool LoadMessageFile(std::string filename)
 			// This second if should not be needed, but better be safe.
 			if (ll && message[ll - 1] == '\n')
 				message[ll - 1] = 0;
-			MSG_Replace(name, message);
+			msg_replace(name, message);
 		} else {
 			/* Normal message to be added */
 			safe_strcat(message, linein);
@@ -117,7 +195,7 @@ static bool LoadMessageFile(std::string filename)
 		}
 	}
 	fclose(mfile);
-	LOG_MSG("LANG: Loaded language file: %s", filename.c_str());
+	LOG_MSG("LANG: Loaded language file: %s", filename.string().c_str());
 	return true;
 }
 
@@ -127,16 +205,32 @@ const char * MSG_Get(char const * msg)
 	return boxer_localizedStringForKey(msg);
 }
 /*
-
-const char *MSG_Get(char const *requested_name)
+const char* MSG_Get(const char* requested_name)
 {
 	const auto it = messages.find(requested_name);
-	if (it != messages.end())
-		return it->second.c_str();
-	return "Message not Found!\n";
+	if (it != messages.end()) {
+		return it->second.GetRendered();
+	}
+	LOG_WARNING("LANG: Message '%s' not found", requested_name);
+	return msg_not_found;
 }
 */
 //--End of modifications
+
+const char* MSG_GetRaw(const char* requested_name)
+{
+	const auto it = messages.find(requested_name);
+	if (it != messages.end()) {
+		return it->second.GetRaw();
+	}
+	LOG_WARNING("LANG: Message '%s' not found", requested_name);
+	return msg_not_found;
+}
+
+bool MSG_Exists(const char *requested_name)
+{
+	return contains(messages, requested_name);
+}
 
 // Write the names and messages (in the order they were added) to the given location
 bool MSG_Write(const char * location) {
@@ -145,8 +239,7 @@ bool MSG_Write(const char * location) {
 		return false;
 
 	for (const auto &name : messages_order)
-		fprintf(out, ":%s\n%s\n.\n", name.c_str(),
-		        messages.at(name).c_str());
+		fprintf(out, ":%s\n%s\n.\n", name.data(), messages.at(name).GetRaw());
 
 	fclose(out);
 	return true;
@@ -160,56 +253,33 @@ bool MSG_Write(const char * location) {
 
 // 2. It also supports the more convenient syntax without needing to provide a
 //    filename or path: `-lang ru`. In this case, it constructs a path into the
-//    platform's config path/translations/<lang>.lng. 
+//    platform's config path/translations/<lang>[.utf8].lng.
 
-void MSG_Init(Section_prop *section)
+void MSG_Init([[maybe_unused]] Section_prop *section)
 {
-	std::string lang = {};
-	std::deque<std::string> langs = {};
+	// TODO: After migration to C++20 try to switch to constexpr
+	static const std_fs::path subdir   = "translations";
+	static const std::string extension = ".lng";
 
-	// Did the user provide a language on the command line?
-	if (control->cmdline->FindString("-lang", lang, true))
-		langs.emplace_back(std::move(lang));
+	const auto lang = GetLanguage();
 
-	// Is a language provided in the conf file?
-	const auto pathprop = section->Get_path("language");
-	if (pathprop) {
-		lang = pathprop->realpath;
-		if (lang.size()) {
-			langs.emplace_back(std::move(lang));
-		}
+	// If the language is english, then use the internal message
+	if (lang.empty() || starts_with(lang, "en")) {
+		LOG_MSG("LANG: Using internal English language messages");
+		return;
 	}
 
-	// No languages provided, so nothing more to do!
-	if (langs.empty())
+	bool result = false;
+	if (ends_with(lang, ".lng"))
+		result = load_message_file(GetResourcePath(subdir, lang));
+	else
+		// If a short-hand name was provided then add the file extension
+		result = load_message_file(GetResourcePath(subdir, lang + extension));
+
+	if (result)
 		return;
 
-	// Try load the user's language file(s)
-	for (const auto &l : langs) {
-		// If a short-hand name was provided then add the file extension
-		lang = l + (ends_with(l, ".lng") ? "" : ".lng");
-
-		// Can we load the filename from the current path?
-		if (path_exists(lang) && LoadMessageFile(lang)) {
-			return;
-		}
-		// If not, let's try getting it from the config/translations
-		// area. To do this we need to first get just the
-		// filename-portion from the possible /full/path/lang.lng
-		const auto path_elements = split(lang, CROSS_FILESPLIT);
-		if (path_elements.empty())
-			continue;
-
-		// the last element is the filename without the path
-		lang = path_elements.back();
-		LOG_MSG("LANG: Searching config path for: %s", lang.c_str());
-
-		// Construct a full path by prepending the config/translations path
-		lang = CROSS_GetPlatformConfigDir() + "translations" + CROSS_FILESPLIT + lang;
-
-		// Try loading it
-		if (LoadMessageFile(lang)) {
-			return;
-		}
-	}
+	// If we got here, then the language was not found
+	LOG_WARNING("LANG: The '%s' language resource file could not be loaded, using internal English messages",
+	            lang.c_str());
 }

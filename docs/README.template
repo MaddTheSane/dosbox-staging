@@ -1,10 +1,21 @@
-This is the development snapshot build of dosbox-staging project.
+Welcome to DOSBox Staging, a modern continuation of the DOSBox project that focuses on ease of use, advanced features, and current development practices.
 
-Please report any bugs or issues to: https://github.com/%GITHUB_REPO%
+This package contains %PACKAGE_INFORMATION% of the DOSBox Staging project.
 
-You can find detailed instructions on using DOSBox in file: doc/manual.txt
+DOSBox Staging is meant as a (mostly) drop-in replacement for older DOSBox versions -- your existing configurations will continue to work, but you will have access to many advanced features.
 
-branch: %GIT_BRANCH%
-commit: %GIT_COMMIT%
+To learn more, check out the Getting Started guide on our website:
+https://dosbox-staging.github.io/getting-started/introduction/
+
+Our project website:
+https://dosbox-staging.github.io/
+
+You can report bugs and ask questions in our GitHub repository:
+https://github.com/%GITHUB_REPO%
+
+If you want to chat, you will find fellow users and developers in the #dosbox-staging channel of Luxtorpeda project's Discord server:
+https://discord.gg/WwAg3Xf
 
 Have fun!
+
+--The DOSBox Staging team

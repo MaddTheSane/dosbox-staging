@@ -16,9 +16,24 @@ missed.txt
 build
 builddir
 
-# Visual Studio
+# VCPKG
+vcpkg_installed
+
+# Visual Studio / Code
 .vs
 .vscode
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# IntelliJ
+.idea
+*.iml
+
+# Local History for Visual Studio Code
+.history/
 
 # GNU Global tags, used by some VSCode/Codium plugins
 GPATH
@@ -56,3 +71,12 @@ suppress_base.json
 .clangd
 .cache
 compile_commands.json
+
+tools/find_magical_f_code
+tools/find_magical_f_code.exe
+tools/is_magical_asset
+tools/is_magical_asset.exe
+tools/superanalyze_mpeg_ps
+tools/superanalyze_mpeg_ps.exe
+tools/unlock_the_magic_mpeg_ps
+tools/unlock_the_magic_mpeg_ps.exe

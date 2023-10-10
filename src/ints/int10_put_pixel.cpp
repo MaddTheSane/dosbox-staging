@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -18,13 +19,14 @@
 
 #include "int10.h"
 
-#include "mem.h"
 #include "inout.h"
+#include "mem.h"
+#include "pci_bus.h"
 
-static Bit8u cga_masks[4]={0x3f,0xcf,0xf3,0xfc};
-static Bit8u cga_masks2[8]={0x7f,0xbf,0xdf,0xef,0xf7,0xfb,0xfd,0xfe};
+static uint8_t cga_masks[4]={0x3f,0xcf,0xf3,0xfc};
+static uint8_t cga_masks2[8]={0x7f,0xbf,0xdf,0xef,0xf7,0xfb,0xfd,0xfe};
 
-void INT10_PutPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u color) {
+void INT10_PutPixel(uint16_t x,uint16_t y,uint8_t page,uint8_t color) {
 	static bool putpixelwarned = false;
 
 	switch (CurMode->type) {
@@ -32,10 +34,10 @@ void INT10_PutPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u color) {
 	{
 		if (real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_MODE)<=5) {
 			// this is a 16k mode
-			Bit16u off=(y>>1)*80+(x>>2);
+			uint16_t off=(y>>1)*80+(x>>2);
 			if (y&1) off+=8*1024;
 
-			Bit8u old=real_readb(0xb800,off);
+			uint8_t old=real_readb(0xb800,off);
 			if (color & 0x80) {
 				color&=3;
 				old^=color << (2*(3-(x&3)));
@@ -45,7 +47,7 @@ void INT10_PutPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u color) {
 			real_writeb(0xb800,off,old);
 		} else {
 			// a 32k mode: PCJr special case (see M_TANDY16)
-			Bit16u seg;
+			uint16_t seg;
 			if (machine==MCH_PCJR) {
 				Bitu cpupage =
 					(real_readb(BIOSMEM_SEG, BIOSMEM_CRTCPU_PAGE) >> 3) & 0x7;
@@ -53,10 +55,10 @@ void INT10_PutPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u color) {
 			} else
 				seg = 0xb800;
 
-			Bit16u off=(y>>2)*160+((x>>2)&(~1));
+			uint16_t off=(y>>2)*160+((x>>2)&(~1));
 			off+=(8*1024) * (y & 3);
 
-			Bit16u old=real_readw(seg,off);
+			uint16_t old=real_readw(seg,off);
 			if (color & 0x80) {
 				old^=(color&1) << (7-(x&7));
 				old^=((color&2)>>1) << ((7-(x&7))+8);
@@ -69,9 +71,9 @@ void INT10_PutPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u color) {
 	break;
 	case M_CGA2:
 		{
-				Bit16u off=(y>>1)*80+(x>>3);
+				uint16_t off=(y>>1)*80+(x>>3);
 				if (y&1) off+=8*1024;
-				Bit8u old=real_readb(0xb800,off);
+				uint8_t old=real_readb(0xb800,off);
 				if (color & 0x80) {
 					color&=1;
 					old^=color << ((7-(x&7)));
@@ -89,7 +91,7 @@ void INT10_PutPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u color) {
 		bool is_32k = (real_readb(BIOSMEM_SEG, BIOSMEM_CURRENT_MODE) >= 9)?
 			true:false;
 
-		Bit16u segment, offset;
+		uint16_t segment, offset;
 		if (is_32k) {
 			if (machine==MCH_PCJR) {
 				Bitu cpupage =
@@ -110,8 +112,8 @@ void INT10_PutPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u color) {
 		}
 
 		// update the pixel
-		Bit8u old=real_readb(segment, offset);
-		Bit8u p[2];
+		uint8_t old=real_readb(segment, offset);
+		uint8_t p[2];
 		p[1] = (old >> 4) & 0xf;
 		p[0] = old & 0xf;
 		Bitu ind = 1-(x & 0x1);
@@ -135,11 +137,11 @@ void INT10_PutPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u color) {
 			LOG(LOG_INT10, LOG_ERROR)("PutPixel unhandled mode type %d", CurMode->type);
 			break;
 		}
-		FALLTHROUGH;
+		[[fallthrough]];
 	case M_EGA: {
 		/* Set the correct bitmask for the pixel position */
 		IO_Write(0x3ce, 0x8);
-		Bit8u mask = 128 >> (x & 7);
+		uint8_t mask = 128 >> (x & 7);
 		IO_Write(0x3cf, mask);
 		/* Set the color to set/reset register */
 		IO_Write(0x3ce, 0x0);
@@ -185,13 +187,14 @@ void INT10_PutPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u color) {
 	}
 
 	case M_VGA:
-		mem_writeb(PhysMake(0xa000,y*320+x),color);
+		mem_writeb(PhysicalMake(0xa000,y*320+x),color);
 		break;
 	case M_LIN8: {
 			if (CurMode->swidth!=(Bitu)real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS)*8)
 				LOG(LOG_INT10,LOG_ERROR)("PutPixel_VGA_w: %u!=%x",CurMode->swidth,real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS)*8);
-			PhysPt off=S3_LFB_BASE+y*real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS)*8+x;
-			mem_writeb(off,color);
+		        PhysPt off = PciGfxLfbBase + x +
+		                     y * real_readw(BIOSMEM_SEG, BIOSMEM_NB_COLS) * 8;
+		        mem_writeb(off,color);
 			break;
 		}
 	default:
@@ -203,28 +206,28 @@ void INT10_PutPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u color) {
 	}	
 }
 
-void INT10_GetPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u * color) {
+void INT10_GetPixel(uint16_t x,uint16_t y,uint8_t page,uint8_t * color) {
 	switch (CurMode->type) {
 	case M_CGA4:
 		{
-			Bit16u off=(y>>1)*80+(x>>2);
+			uint16_t off=(y>>1)*80+(x>>2);
 			if (y&1) off+=8*1024;
-			Bit8u val=real_readb(0xb800,off);
+			uint8_t val=real_readb(0xb800,off);
 			*color=(val>>(((3-(x&3)))*2)) & 3 ;
 		}
 		break;
 	case M_CGA2:
 		{
-			Bit16u off=(y>>1)*80+(x>>3);
+			uint16_t off=(y>>1)*80+(x>>3);
 			if (y&1) off+=8*1024;
-			Bit8u val=real_readb(0xb800,off);
+			uint8_t val=real_readb(0xb800,off);
 			*color=(val>>(((7-(x&7))))) & 1 ;
 		}
 		break;
 	case M_TANDY16:
 		{
 			bool is_32k = (real_readb(BIOSMEM_SEG, BIOSMEM_CURRENT_MODE) >= 9)?true:false;
-			Bit16u segment, offset;
+			uint16_t segment, offset;
 			if (is_32k) {
 				if (machine==MCH_PCJR) {
 					Bitu cpupage = (real_readb(BIOSMEM_SEG, BIOSMEM_CRTCPU_PAGE) >> 3) & 0x7;
@@ -237,7 +240,7 @@ void INT10_GetPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u * color) {
 				offset = (y >> 1) * (CurMode->swidth >> 1) + (x>>1);
 				offset += (8*1024) * (y & 1);
 			}
-			Bit8u val=real_readb(segment,offset);
+			uint8_t val=real_readb(segment,offset);
 			*color=(val>>((x&1)?0:4)) & 0xf;
 		}
 		break;
@@ -264,13 +267,14 @@ void INT10_GetPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u * color) {
 			break;
 		}
 	case M_VGA:
-		*color=mem_readb(PhysMake(0xa000,320*y+x));
+		*color=mem_readb(PhysicalMake(0xa000,320*y+x));
 		break;
 	case M_LIN8: {
 			if (CurMode->swidth!=(Bitu)real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS)*8)
 				LOG(LOG_INT10,LOG_ERROR)("GetPixel_VGA_w: %u!=%x",CurMode->swidth,real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS)*8);
-			PhysPt off=S3_LFB_BASE+y*real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS)*8+x;
-			*color = mem_readb(off);
+		        PhysPt off = PciGfxLfbBase + x +
+		                     y * real_readw(BIOSMEM_SEG, BIOSMEM_NB_COLS) * 8;
+		        *color = mem_readb(off);
 			break;
 		}
 	default:

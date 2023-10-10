@@ -3,7 +3,11 @@ name: Coverity Scan analysis
 on:
   push:
     branches:
-      - master
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   COVERITY_EMAIL: ${{ secrets.CoverityEmail }}
@@ -12,20 +16,20 @@ env:
   PACKAGE: "/dev/shm/coverity-package/coverity.tar.zst"
   PACKAGE_DIR: "/dev/shm/coverity-package"
   # Latest package: https://scan.coverity.com/download
-  PACKAGE_VERSION: "2020.09"
+  PACKAGE_VERSION: "2022.6.0"
   # One-time download, then lives in GitHub cache
-  TARBALL_URL: "https://kcgen.duckdns.org/coverity.tar.zst"
-  TARBALL_SHA256: "f7f529088c140a45176e99e1bbcb7581fa751619318e30f20c3697269dc32411"
+  TARBALL_URL: "https://kcgen.duckdns.org/coverity-2022.tar.zst"
+  TARBALL_SHA256: "8e95399eb7306c7cb8cc5e59807d6d479cf8ae65b683f3904e9537db6864288f"
 
 jobs:
   coverity_scan:
     name: Coverity static analyzer
     runs-on: ubuntu-20.04
     steps:
-      - name: Checkout repository and submodules
-        uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
 
       - run:  sudo apt-get update
 
@@ -36,11 +40,26 @@ jobs:
 
       - name: Install C++ compiler and dependencies
         run: |
-          sudo apt-get install curl zstd clang $(cat .github/packages/ubuntu-20.04-apt.txt)
+          sudo apt-get install curl zstd clang $(cat packages/ubuntu-20.04-apt.txt)
           sudo pip3 install --upgrade meson ninja
 
+      - name: Cache subprojects
+        id:   cache-subprojects
+        uses: actions/cache@v3.3.2
+        with:
+          path: subprojects.tar
+          key: subprojects-${{ hashFiles('subprojects/*.wrap') }}-4
+          enableCrossOsArchive: true
+
+      - if:   steps.cache-subprojects.outputs.cache-hit != 'true'
+        name: Generate subprojects cache
+        run:  scripts/fetch-and-tar-subprojects.sh
+
+      - name: Extract subprojects cache
+        run:  scripts/extract-subprojects-tar.sh
+
       - name: Prepare the Coverity package cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3.3.2
         id: cache-coverity
         with:
           path: ${{ env.PACKAGE_DIR }}
@@ -52,15 +71,26 @@ jobs:
       - name: Install the Coverity package
         run: |
           set -xeuo pipefail
-          tee >(tar -I zstd -C "${BASE_DIR}" -x) < "${PACKAGE}" \
-          | sha256sum -c <(echo "${TARBALL_SHA256} -" )
+          echo "$TARBALL_SHA256 $PACKAGE" | sha256sum --check --status
+          zstd --long=31 -dc "${PACKAGE}" | tar -C "${BASE_DIR}" -x
 
       - name: Build and instrument the project
         run: |
           set -xeu
-          CC="clang" CXX="clang++" meson setup -Dbuild-type=debug -Duse_mt32emu=false -Dunit_tests=disabled build
+          CC="clang" CXX="clang++" meson setup \
+          -Dbuildtype=minsize \
+          -Db_ndebug=false \
+          -Dunit_tests=disabled \
+          -Duse_alsa=false \
+          -Duse_fluidsynth=false \
+          -Duse_mt32emu=false \
+          -Duse_opengl=false \
+          -Duse_sdl2_net=false \
+          -Duse_slirp=false \
+          -Duse_xinput2=false \
+          build
           PATH="${BASE_DIR}/cov-analysis-linux64-${PACKAGE_VERSION}/bin:${PATH}"
-          cov-build --dir cov-int ninja -C build
+          cov-build --dir cov-int meson compile -C build
           tar -cvaf package.tar.gz cov-int
 
       - name: Upload the package to Coverity

@@ -31,12 +31,6 @@
 
 static CacheBlock *CreateCacheBlock(CodePageHandler *codepage, PhysPt start, Bitu max_opcodes)
 {
-#if defined(HAVE_MPROTECT)
-			if(mprotect(cache_code_link_blocks,CACHE_TOTAL+CACHE_MAXSIZE+PAGESIZE_TEMP,PROT_WRITE|PROT_READ) != 0)
-				LOG_MSG("Setting execute permission on the code cache has failed");
-#endif
-
-	
 	// initialize a load of variables
 	decode.code_start=start;
 	decode.code=start;
@@ -46,7 +40,7 @@ static CacheBlock *CreateCacheBlock(CodePageHandler *codepage, PhysPt start, Bit
 	decode.page.invmap=codepage->invalidation_map;
 	decode.page.first=start >> 12;
 	decode.active_block=decode.block=cache_openblock();
-	decode.block->page.start=(Bit16u)decode.page.index;
+	decode.block->page.start=(uint16_t)decode.page.index;
 	codepage->AddCacheBlock(decode.block);
 
 	auto cache_addr = static_cast<void *>(
@@ -206,7 +200,7 @@ restart_prefix:
 				case 0x80:case 0x81:case 0x82:case 0x83:case 0x84:case 0x85:case 0x86:case 0x87:	
 				case 0x88:case 0x89:case 0x8a:case 0x8b:case 0x8c:case 0x8d:case 0x8e:case 0x8f:	
 					dyn_branched_exit((BranchTypes)(dual_code&0xf),
-						decode.big_op ? (Bit32s)decode_fetchd() : (Bit16s)decode_fetchw());
+						decode.big_op ? (int32_t)decode_fetchd() : (int16_t)decode_fetchw());
 					goto finish_block;
 
 				// conditional byte set instructions
@@ -296,7 +290,7 @@ restart_prefix:
 			dyn_push_word_imm(decode.big_op ? decode_fetchd() :  decode_fetchw());
 			break;
 		case 0x6a:
-			dyn_push_byte_imm((Bit8s)decode_fetchb());
+			dyn_push_byte_imm((int8_t)decode_fetchb());
 			break;
 
 		// signed multiplication
@@ -308,7 +302,7 @@ restart_prefix:
 		// short conditional jumps
 		case 0x70:case 0x71:case 0x72:case 0x73:case 0x74:case 0x75:case 0x76:case 0x77:	
 		case 0x78:case 0x79:case 0x7a:case 0x7b:case 0x7c:case 0x7d:case 0x7e:case 0x7f:	
-			dyn_branched_exit((BranchTypes)(opcode&0xf),(Bit8s)decode_fetchb());	
+			dyn_branched_exit((BranchTypes)(opcode&0xf),(int8_t)decode_fetchb());	
 			goto finish_block;
 
 		// 'op []/reg8,imm8'
@@ -399,16 +393,16 @@ restart_prefix:
 //		case 0xa6 to 0xaf string operations, some missing
 
 		// movsb/w/d
-		case 0xa4:dyn_string(STR_MOVSB);break;
-		case 0xa5:dyn_string(decode.big_op ? STR_MOVSD : STR_MOVSW);break;
+		case 0xa4:dyn_string(R_MOVSB);break;
+		case 0xa5:dyn_string(decode.big_op ? R_MOVSD : R_MOVSW);break;
 
 		// stosb/w/d
-		case 0xaa:dyn_string(STR_STOSB);break;
-		case 0xab:dyn_string(decode.big_op ? STR_STOSD : STR_STOSW);break;
+		case 0xaa:dyn_string(R_STOSB);break;
+		case 0xab:dyn_string(decode.big_op ? R_STOSD : R_STOSW);break;
 
 		// lodsb/w/d
-		case 0xac:dyn_string(STR_LODSB);break;
-		case 0xad:dyn_string(decode.big_op ? STR_LODSD : STR_LODSW);break;
+		case 0xac:dyn_string(R_LODSB);break;
+		case 0xad:dyn_string(decode.big_op ? R_LODSD : R_LODSW);break;
 
 
 		// 'test reg8/16/32,imm8/16/32'
@@ -420,7 +414,7 @@ restart_prefix:
 			dyn_mov_byte_imm(opcode&3,(opcode>>2)&1,decode_fetchb());
 			break;
 		case 0xb8:case 0xb9:case 0xba:case 0xbb:case 0xbc:case 0xbd:case 0xbe:case 0xbf:	
-			dyn_mov_word_imm(opcode&7);break;
+			dyn_mov_word_imm(opcode&7);
 			break;
 
 		// 'shiftop []/reg8,imm8/1/cl'
@@ -530,7 +524,7 @@ restart_prefix:
 			goto finish_block;
 		// 'jmp near imm16/32'
 		case 0xe9:
-			dyn_exit_link(decode.big_op ? (Bit32s)decode_fetchd() : (Bit16s)decode_fetchw());
+			dyn_exit_link(decode.big_op ? (int32_t)decode_fetchd() : (int16_t)decode_fetchw());
 			goto finish_block;
 		// 'jmp far'
 		case 0xea:
@@ -538,7 +532,7 @@ restart_prefix:
 			goto finish_block;
 		// 'jmp short imm8'
 		case 0xeb:
-			dyn_exit_link((Bit8s)decode_fetchb());
+			dyn_exit_link((int8_t)decode_fetchb());
 			goto finish_block;
 
 
@@ -623,15 +617,9 @@ illegalopcode:
 
 	goto finish_block;
 finish_block:
-
-#if defined(HAVE_MPROTECT)
-			if(mprotect(cache_code_link_blocks,CACHE_TOTAL+CACHE_MAXSIZE+PAGESIZE_TEMP,PROT_EXEC|PROT_READ) != 0)
-				LOG_MSG("Setting execute permission on the code cache has failed");
-#endif
-
 	// setup the correct end-address
 	decode.page.index--;
-	decode.active_block->page.end=(Bit16u)decode.page.index;
+	decode.active_block->page.end=(uint16_t)decode.page.index;
 	dyn_mem_execute(cache_addr, cache_bytes);
 	const auto cache_flush_bytes = static_cast<size_t>(decode.block->cache.size);
 	dyn_cache_invalidate(cache_addr, cache_flush_bytes);

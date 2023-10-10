@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -45,12 +46,12 @@ l_MODRMswitch:
 			inst_op1_d=Fetchb();
 			break;
 		case M_Ebx:
-			if (inst.rm<0xc0) inst_op1_ds=(Bit8s)LoadMb(inst.rm_eaa);
-			else inst_op1_ds=(Bit8s)reg_8(inst.rm_eai);
+			if (inst.rm<0xc0) inst_op1_ds=(int8_t)LoadMb(inst.rm_eaa);
+			else inst_op1_ds=(int8_t)reg_8(inst.rm_eai);
 			break;
 		case M_EbIb:
 			inst_op2_d=Fetchb();
-			FALLTHROUGH;
+			[[fallthrough]];
 		case M_Eb:
 			if (inst.rm<0xc0) inst_op1_d=LoadMb(inst.rm_eaa);
 			else inst_op1_d=reg_8(inst.rm_eai);
@@ -63,7 +64,7 @@ l_MODRMswitch:
 		case M_GbEb:
 			if (inst.rm<0xc0) inst_op2_d=LoadMb(inst.rm_eaa);
 			else inst_op2_d=reg_8(inst.rm_eai);
-			FALLTHROUGH;
+			[[fallthrough]];
 		case M_Gb:
 			inst_op1_d=reg_8(inst.rm_index);;
 			break;
@@ -72,18 +73,18 @@ l_MODRMswitch:
 			inst_op1_d=Fetchw();
 			break;
 		case M_EwxGwx:
-			inst_op2_ds=(Bit16s)reg_16(inst.rm_index);
+			inst_op2_ds=(int16_t)reg_16(inst.rm_index);
 			goto l_M_Ewx;
 		case M_EwxIbx:
 			inst_op2_ds=Fetchbs();
 			goto l_M_Ewx;
 		case M_EwxIwx:
 			inst_op2_ds=Fetchws();
-			FALLTHROUGH;
+			[[fallthrough]];
 		case M_Ewx:
 l_M_Ewx:
-			if (inst.rm<0xc0) inst_op1_ds=(Bit16s)LoadMw(inst.rm_eaa);
-			else inst_op1_ds=(Bit16s)reg_16(inst.rm_eai);
+			if (inst.rm<0xc0) inst_op1_ds=(int16_t)LoadMw(inst.rm_eaa);
+			else inst_op1_ds=(int16_t)reg_16(inst.rm_eai);
 			break;
 		case M_EwIb:
 			inst_op2_d=Fetchb();
@@ -102,12 +103,12 @@ l_M_Ewx:
 			goto l_M_EwGw;
 		case M_EwGwt:
 			inst_op2_d=reg_16(inst.rm_index);
-			inst.rm_eaa+=((Bit16s)inst_op2_d >> 4) * 2;
+			inst.rm_eaa+=((int16_t)inst_op2_d >> 4) * 2;
 			goto l_M_Ew;
 		case M_EwGw:
 l_M_EwGw:
 			inst_op2_d=reg_16(inst.rm_index);
-			FALLTHROUGH;
+			[[fallthrough]];
 		case M_Ew:
 l_M_Ew:
 			if (inst.rm<0xc0) inst_op1_d=LoadMw(inst.rm_eaa);
@@ -116,7 +117,7 @@ l_M_Ew:
 		case M_GwEw:
 			if (inst.rm<0xc0) inst_op2_d=LoadMw(inst.rm_eaa);
 			else inst_op2_d=reg_16(inst.rm_eai);
-			FALLTHROUGH;
+			[[fallthrough]];
 		case M_Gw:
 			inst_op1_d=reg_16(inst.rm_index);;
 			break;
@@ -125,11 +126,11 @@ l_M_Ew:
 			inst_op1_d=Fetchd();
 			break;
 		case M_EdxGdx:
-			inst_op2_ds=(Bit32s)reg_32(inst.rm_index);
-			FALLTHROUGH;
+			inst_op2_ds=(int32_t)reg_32(inst.rm_index);
+			[[fallthrough]];
 		case M_Edx:
-			if (inst.rm<0xc0) inst_op1_d=(Bit32s)LoadMd(inst.rm_eaa);
-			else inst_op1_d=(Bit32s)reg_32(inst.rm_eai);
+			if (inst.rm<0xc0) inst_op1_d=(int32_t)LoadMd(inst.rm_eaa);
+			else inst_op1_d=(int32_t)reg_32(inst.rm_eai);
 			break;
 		case M_EdIb:
 			inst_op2_d=Fetchb();
@@ -145,7 +146,7 @@ l_M_Ew:
 			goto l_M_EdGd;
 		case M_EdGdt:
 			inst_op2_d=reg_32(inst.rm_index);
-			inst.rm_eaa+=((Bit32s)inst_op2_d >> 5) * 4;
+			inst.rm_eaa+=((int32_t)inst_op2_d >> 5) * 4;
 			goto l_M_Ed;
 		case M_EdGdIb:
 			inst_imm_d=Fetchb();
@@ -153,7 +154,7 @@ l_M_Ew:
 		case M_EdGd:
 l_M_EdGd:
 			inst_op2_d=reg_32(inst.rm_index);
-			FALLTHROUGH;
+			[[fallthrough]];
 		case M_Ed:
 l_M_Ed:
 			if (inst.rm<0xc0) inst_op1_d=LoadMd(inst.rm_eaa);
@@ -162,7 +163,7 @@ l_M_Ed:
 		case M_GdEd:
 			if (inst.rm<0xc0) inst_op2_d=LoadMd(inst.rm_eaa);
 			else inst_op2_d=reg_32(inst.rm_eai);
-			FALLTHROUGH;
+			[[fallthrough]];
 		case M_Gd:
 			inst_op1_d=reg_32(inst.rm_index);
 			break;
@@ -258,19 +259,19 @@ l_M_Ed:
 /* Direct load of registers */
 	case L_REGbIb:
 		inst_op2_d=Fetchb();
-		FALLTHROUGH;
+		[[fallthrough]];
 	case L_REGb:
 		inst_op1_d=reg_8(inst.code.extra);
 		break;
 	case L_REGwIw:
 		inst_op2_d=Fetchw();
-		FALLTHROUGH;
+		[[fallthrough]];
 	case L_REGw:
 		inst_op1_d=reg_16(inst.code.extra);
 		break;
 	case L_REGdId:
 		inst_op2_d=Fetchd();
-		FALLTHROUGH;
+		[[fallthrough]];
 	case L_REGd:
 		inst_op1_d=reg_32(inst.code.extra);
 		break;
@@ -358,14 +359,14 @@ l_M_Ed:
 		goto nextopcode;
 	case D_PUSHAw:
 		{
-			Bit16u old_sp=reg_sp;
+			uint16_t old_sp=reg_sp;
 			Push_16(reg_ax);Push_16(reg_cx);Push_16(reg_dx);Push_16(reg_bx);
 			Push_16(old_sp);Push_16(reg_bp);Push_16(reg_si);Push_16(reg_di);
 		}
 		goto nextopcode;
 	case D_PUSHAd:
 		{
-			Bit32u old_esp=reg_esp;
+			uint32_t old_esp=reg_esp;
 			Push_32(reg_eax);Push_32(reg_ecx);Push_32(reg_edx);Push_32(reg_ebx);
 			Push_32(old_esp);Push_32(reg_ebp);Push_32(reg_esi);Push_32(reg_edi);
 		}
@@ -390,23 +391,25 @@ l_M_Ed:
 	case D_XLAT:
 		if (inst.prefix & PREFIX_SEG) {
 			if (inst.prefix & PREFIX_ADDR) {
-				reg_al=LoadMb(inst.seg.base+(Bit32u)(reg_ebx+reg_al));
-			} else {
-				reg_al=LoadMb(inst.seg.base+(Bit16u)(reg_bx+reg_al));
-			}
-		} else {
+			        reg_al = LoadMb(inst.seg.base + (reg_ebx + reg_al));
+		        } else {
+			        reg_al = LoadMb(inst.seg.base +
+			                        (uint16_t)(reg_bx + reg_al));
+		        }
+	        } else {
 			if (inst.prefix & PREFIX_ADDR) {
-				reg_al=LoadMb(SegBase(ds)+(Bit32u)(reg_ebx+reg_al));
-			} else {
-				reg_al=LoadMb(SegBase(ds)+(Bit16u)(reg_bx+reg_al));
-			}
-		}
+			        reg_al = LoadMb(SegBase(ds) + (reg_ebx + reg_al));
+		        } else {
+			        reg_al = LoadMb(SegBase(ds) +
+			                        (uint16_t)(reg_bx + reg_al));
+		        }
+	        }
 		goto nextopcode;
 	case D_CBW:
-		reg_ax=(Bit8s)reg_al;
+		reg_ax=(int8_t)reg_al;
 		goto nextopcode;
 	case D_CWDE:
-		reg_eax=(Bit16s)reg_ax;
+		reg_eax=(int16_t)reg_ax;
 		goto nextopcode;
 	case D_CWD:
 		if (reg_ax & 0x8000) reg_dx=0xffff;
@@ -516,13 +519,13 @@ l_M_Ed:
 		CPU_SW_Interrupt_NoIOPLCheck(1,GetIP());
 		continue;
 	case D_RDTSC: {
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMSLOW)
+		if (CPU_ArchitectureType<ArchitectureType::PentiumSlow)
 			goto illegalopcode;
-	        Bit64s tsc = (Bit64s)(PIC_FullIndex() *
+	        int64_t tsc = (int64_t)(PIC_FullIndex() *
 	                              static_cast<double>(
 	                                      CPU_CycleAutoAdjust ? 70000 : CPU_CycleMax));
-	        reg_edx = (Bit32u)(tsc >> 32);
-		reg_eax = (Bit32u)(tsc & 0xffffffff);
+	        reg_edx = (uint32_t)(tsc >> 32);
+		reg_eax = (uint32_t)(tsc & 0xffffffff);
 		break;
 	}
 	default:

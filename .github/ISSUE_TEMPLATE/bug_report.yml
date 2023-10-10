@@ -1,6 +1,5 @@
 name: Bug Report
 description: File a Bug report
-title: '[BUG] '
 labels: bug
 #assignees: 'anonymous@temp'
 
@@ -28,7 +27,7 @@ body:
     attributes:
       label: Different version than latest?
       description: Alpha, Git, or Branch?
-      placeholder: "Ex. 0.78.0-alpha, git verion, branch testing."
+      placeholder: "Ex. 0.81.0-alpha, git verion, branch testing."
     validations:
       required: false
   - type: dropdown
@@ -42,9 +41,11 @@ body:
         - Windows 8
         - Windows 7
         - Windows Other
-        - Mac OS
+        - macOS (Intel)
+        - macOS (Apple Silicon)
         - Linux x86
         - Linux x86_64
+        - Linux ppc64le
         - Linux ARM (Raspberry Pi)
         - Other
     validations:
@@ -91,6 +92,16 @@ body:
         1. 
         2.
         3.
+    validations:
+      required: false
+  - type: input
+    id: package_url
+    attributes:
+      label: Download URL of affected game or software
+      description: |
+        If a single game or program is affected, provide a download link to ensure we're using binary-exact files and version(s).
+        This is required unless the issue broadly applies.
+      placeholder: "example: https://archive.org/details/StarWarsX-wingDemo"
     validations:
       required: false
   - type: textarea

@@ -1,6 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <ClCompile Include="..\src\capture\capture.cpp">
+      <Filter>src\capture</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\capture\capture_audio.cpp">
+      <Filter>src\capture</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\capture\capture_midi.cpp">
+      <Filter>src\capture</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\capture\capture_video.cpp">
+      <Filter>src\capture</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\capture\image\image_capturer.cpp">
+      <Filter>src\capture\image</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\capture\image\image_decoder.cpp">
+      <Filter>src\capture\image</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\capture\image\image_saver.cpp">
+      <Filter>src\capture\image</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\capture\image\image_scaler.cpp">
+      <Filter>src\capture\image</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\capture\image\png_writer.cpp">
+      <Filter>src\capture\image</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\cpu\callback.cpp">
       <Filter>src\cpu</Filter>
     </ClCompile>
@@ -41,9 +68,6 @@
       <Filter>src\debug</Filter>
     </ClCompile>
     <ClCompile Include="..\src\debug\debug_gui.cpp">
-      <Filter>src\debug</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\debug\debug_win32.cpp">
       <Filter>src\debug</Filter>
     </ClCompile>
     <ClCompile Include="..\src\dos\cdrom.cpp">
@@ -121,22 +145,22 @@
     <ClCompile Include="..\src\gui\sdlmain.cpp">
       <Filter>src\gui</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\gui\sdl_gui.cpp">
-      <Filter>src\gui</Filter>
-    </ClCompile>
     <ClCompile Include="..\src\gui\sdl_mapper.cpp">
       <Filter>src\gui</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\hardware\adlib.cpp">
+    <ClCompile Include="..\src\gui\shader_manager.cpp">
+      <Filter>src\gui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\adlib_gold.cpp">
       <Filter>src\hardware</Filter>
     </ClCompile>
     <ClCompile Include="..\src\hardware\cmos.cpp">
       <Filter>src\hardware</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\hardware\dc_silencer.cpp">
+    <ClCompile Include="..\src\hardware\compressor.cpp">
       <Filter>src\hardware</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\hardware\dbopl.cpp">
+    <ClCompile Include="..\src\hardware\covox.cpp">
       <Filter>src\hardware</Filter>
     </ClCompile>
     <ClCompile Include="..\src\hardware\disney.cpp">
@@ -157,8 +181,50 @@
     <ClCompile Include="..\src\hardware\hardware.cpp">
       <Filter>src\hardware</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\hardware\ide.cpp">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\imfc.cpp">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\hardware\innovation.cpp">
       <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\input\intel8042.cpp">
+      <Filter>src\hardware\input</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\input\intel8255.cpp">
+      <Filter>src\hardware\input</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\input\keyboard.cpp">
+      <Filter>src\hardware\input</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\input\keyboard_scancodes.cpp">
+      <Filter>src\hardware\input</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\input\mouse.cpp">
+      <Filter>src\hardware\input</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\input\mouse_common.cpp">
+      <Filter>src\hardware\input</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\input\mouse_config.cpp">
+      <Filter>src\hardware\input</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\input\mouse_interfaces.cpp">
+      <Filter>src\hardware\input</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\input\mouse_manymouse.cpp">
+      <Filter>src\hardware\input</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\input\mouseif_dos_driver.cpp">
+      <Filter>src\hardware\input</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\input\mouseif_ps2_bios.cpp">
+      <Filter>src\hardware\input</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\input\mouseif_virtual_machines.cpp">
+      <Filter>src\hardware\input</Filter>
     </ClCompile>
     <ClCompile Include="..\src\hardware\iohandler.cpp">
       <Filter>src\hardware</Filter>
@@ -175,22 +241,13 @@
     <ClCompile Include="..\src\hardware\joystick.cpp">
       <Filter>src\hardware</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\hardware\keyboard.cpp">
+    <ClCompile Include="..\src\hardware\lpt_dac.cpp">
       <Filter>src\hardware</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\hardware\mame\fmopl.cpp">
-      <Filter>src\hardware\mame</Filter>
     </ClCompile>
     <ClCompile Include="..\src\hardware\mame\saa1099.cpp">
       <Filter>src\hardware\mame</Filter>
     </ClCompile>
     <ClCompile Include="..\src\hardware\mame\sn76496.cpp">
-      <Filter>src\hardware\mame</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\hardware\mame\ymdeltat.cpp">
-      <Filter>src\hardware\mame</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\hardware\mame\ymf262.cpp">
       <Filter>src\hardware\mame</Filter>
     </ClCompile>
     <ClCompile Include="..\src\hardware\memory.cpp">
@@ -202,10 +259,31 @@
     <ClCompile Include="..\src\hardware\mpu401.cpp">
       <Filter>src\hardware</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\hardware\ne2000.cpp">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\opl.cpp">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\hardware\pci_bus.cpp">
       <Filter>src\hardware</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\hardware\reelmagic\driver.cpp">
+      <Filter>src\hardware\reelmagic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\reelmagic\player.cpp">
+      <Filter>src\hardware\reelmagic</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\reelmagic\video_mixer.cpp">
+      <Filter>src\hardware\reelmagic</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\hardware\pcspeaker.cpp">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\pcspeaker_discrete.cpp">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\pcspeaker_impulse.cpp">
       <Filter>src\hardware</Filter>
     </ClCompile>
     <ClCompile Include="..\src\hardware\pic.cpp">
@@ -232,11 +310,17 @@
     <ClCompile Include="..\src\hardware\serialport\serialdummy.cpp">
       <Filter>src\hardware\serialport</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\hardware\serialport\serialmouse.cpp">
+      <Filter>src\hardware\serialport</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\hardware\serialport\serialport.cpp">
       <Filter>src\hardware\serialport</Filter>
     </ClCompile>
     <ClCompile Include="..\src\hardware\serialport\softmodem.cpp">
       <Filter>src\hardware\serialport</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\ston1_dac.cpp">
+      <Filter>src\hardware</Filter>
     </ClCompile>
     <ClCompile Include="..\src\hardware\tandy_sound.cpp">
       <Filter>src\hardware</Filter>
@@ -286,6 +370,15 @@
     <ClCompile Include="..\src\hardware\vga_xga.cpp">
       <Filter>src\hardware</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\hardware\voodoo.cpp">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\virtualbox.cpp">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\vmware.cpp">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\ints\bios.cpp">
       <Filter>src\ints</Filter>
     </ClCompile>
@@ -293,6 +386,9 @@
       <Filter>src\ints</Filter>
     </ClCompile>
     <ClCompile Include="..\src\ints\bios_keyboard.cpp">
+      <Filter>src\ints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\ints\bios_pci.cpp">
       <Filter>src\ints</Filter>
     </ClCompile>
     <ClCompile Include="..\src\ints\ems.cpp">
@@ -328,14 +424,8 @@
     <ClCompile Include="..\src\ints\int10_vptable.cpp">
       <Filter>src\ints</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\ints\mouse.cpp">
-      <Filter>src\ints</Filter>
-    </ClCompile>
     <ClCompile Include="..\src\ints\xms.cpp">
       <Filter>src\ints</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\libs\gui_tk\gui_tk.cpp">
-      <Filter>src\libs\gui_tk</Filter>
     </ClCompile>
     <ClCompile Include="..\src\libs\decoders\flac.c">
       <Filter>src\libs\decoders</Filter>
@@ -358,6 +448,24 @@
     <ClCompile Include="..\src\libs\decoders\wav.c">
       <Filter>src\libs\decoders</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\libs\manymouse\linux_evdev.c">
+      <Filter>src\libs\manymouse</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\manymouse\macosx_hidmanager.c">
+      <Filter>src\libs\manymouse</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\manymouse\macosx_hidutilities.c">
+      <Filter>src\libs\manymouse</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\manymouse\manymouse.c">
+      <Filter>src\libs\manymouse</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\manymouse\windows_wminput.c">
+      <Filter>src\libs\manymouse</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\manymouse\x11_xinput2.c">
+      <Filter>src\libs\manymouse</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\libs\nuked\opl3.c">
       <Filter>src\libs\nuked</Filter>
     </ClCompile>
@@ -365,6 +473,12 @@
       <Filter>src\libs\ppscale</Filter>
     </ClCompile>
     <ClCompile Include="..\src\misc\cross.cpp">
+      <Filter>src\misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\misc\ethernet.cpp">
+      <Filter>src\misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\misc\ethernet_slirp.cpp">
       <Filter>src\misc</Filter>
     </ClCompile>
     <ClCompile Include="..\src\misc\messages.cpp">
@@ -379,11 +493,23 @@
     <ClCompile Include="..\src\misc\setup.cpp">
       <Filter>src\misc</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\misc\soft_limiter.cpp">
+    <ClCompile Include="..\src\misc\string_utils.cpp">
       <Filter>src\misc</Filter>
     </ClCompile>
     <ClCompile Include="..\src\misc\support.cpp">
       <Filter>src\misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\misc\unicode.cpp">
+      <Filter>src\misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\shell\autoexec.cpp">
+      <Filter>src\shell</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\shell\command_line.cpp">
+      <Filter>src\shell</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\shell\file_reader.cpp">
+      <Filter>src\shell</Filter>
     </ClCompile>
     <ClCompile Include="..\src\shell\shell.cpp">
       <Filter>src\shell</Filter>
@@ -402,6 +528,9 @@
     </ClCompile>
     <ClCompile Include="..\src\midi\midi.cpp">
       <Filter>src\midi</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_attrib.cpp">
+      <Filter>src\dos</Filter>
     </ClCompile>
     <ClCompile Include="..\src\dos\program_autotype.cpp">
       <Filter>src\dos</Filter>
@@ -424,7 +553,22 @@
     <ClCompile Include="..\src\dos\program_ls.cpp">
       <Filter>src\dos</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\dos\program_move.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_placeholder.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_subst.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\misc\fs_utils.cpp">
+      <Filter>src\misc</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\misc\fs_utils_win32.cpp">
+      <Filter>src\misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\misc\help_util.cpp">
       <Filter>src\misc</Filter>
     </ClCompile>
     <ClCompile Include="..\src\main.cpp">
@@ -449,6 +593,9 @@
       <Filter>src\libs\residfp</Filter>
     </ClCompile>
     <ClCompile Include="..\src\libs\residfp\Filter8580.cpp">
+      <Filter>src\libs\residfp</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\residfp\FilterModelConfig.cpp">
       <Filter>src\libs\residfp</Filter>
     </ClCompile>
     <ClCompile Include="..\src\libs\residfp\FilterModelConfig6581.cpp">
@@ -481,18 +628,252 @@
     <ClCompile Include="..\src\libs\residfp\WaveformGenerator.cpp">
       <Filter>src\libs\residfp</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\libs\tal-chorus\Lfo.cpp">
+      <Filter>src\libs\tal-chorus</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\YM7128B_emu\YM7128B_emu.c">
+      <Filter>src\libs\YM7128B_emu</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\misc\pacer.cpp">
       <Filter>src\misc</Filter>
     </ClCompile>
-    <ClCompile Include="..\submodules\loguru\loguru.cpp">
-      <Filter>submodules\loguru</Filter>
+    <ClCompile Include="..\src\dos\program_biostest.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_boot.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_imgmount.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_intro.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_keyb.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_loadfix.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_loadrom.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_mem.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_mixer.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_more.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_more_output.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_mount.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_mount_common.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_mousectl.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_rescan.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_serial.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_setver.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_tree.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\loguru\loguru.cpp">
+      <Filter>src\libs\loguru</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\sdlcd\SDL_cdrom.c">
+      <Filter>src\libs\sdlcd</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\sdlcd\win32\SDL_syscdrom.c">
+      <Filter>src\libs\sdlcd</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\whereami\whereami.c">
+      <Filter>src\libs\whereami</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\ghc\fs_std_impl.cpp">
+      <Filter>src\libs\ghc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\misc\ansi_code_markup.cpp">
+      <Filter>src\misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\sdl2_queue\pdcclip.cpp">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\sdl2_queue\pdcdisp.cpp">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\sdl2_queue\pdcgetsc.cpp">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\sdl2_queue\pdckbd.cpp">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\sdl2_queue\pdcscrn.cpp">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\sdl2_queue\pdcsetsc.cpp">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\sdl2_queue\pdcutil.cpp">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\addch.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\addchstr.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\addstr.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\attr.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\beep.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\bkgd.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\border.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\clear.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\color.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\debug.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\delch.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\deleteln.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\getch.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\getstr.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\getyx.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\inch.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\inchstr.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\initscr.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\inopts.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\insch.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\insstr.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\instr.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\kernel.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\keyname.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\mouse.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\move.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\outopts.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\overlay.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\pad.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\panel.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\printw.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\refresh.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\scanw.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\scr_dump.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\scroll.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\slk.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\termattr.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\touch.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\util.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\PDCurses\pdcurses\window.c">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\zmbv\drvproc.cpp">
+      <Filter>src\libs\zmbv</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\zmbv\zmbv.cpp">
+      <Filter>src\libs\zmbv</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\zmbv\zmbv_vfw.cpp">
+      <Filter>src\libs\zmbv</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\include\audio_frame.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClCompile Include="..\include\autoexec.h">
+      <Filter>src\shell</Filter>
+    </ClCompile>
     <ClInclude Include="..\include\bios.h">
       <Filter>include</Filter>
     </ClInclude>
     <ClInclude Include="..\include\bios_disk.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\bitops.h">
       <Filter>include</Filter>
     </ClInclude>
     <ClInclude Include="..\include\byteorder.h">
@@ -537,6 +918,9 @@
     <ClInclude Include="..\include\hardware.h">
       <Filter>include</Filter>
     </ClInclude>
+    <ClInclude Include="..\include\help_util.h">
+      <Filter>include</Filter>
+    </ClInclude>
     <ClInclude Include="..\include\inout.h">
       <Filter>include</Filter>
     </ClInclude>
@@ -567,6 +951,9 @@
     <ClInclude Include="..\include\mouse.h">
       <Filter>include</Filter>
     </ClInclude>
+    <ClInclude Include="..\include\ne2000.h">
+      <Filter>include</Filter>
+    </ClInclude>
     <ClInclude Include="..\include\paging.h">
       <Filter>include</Filter>
     </ClInclude>
@@ -579,10 +966,25 @@
     <ClInclude Include="..\include\programs.h">
       <Filter>include</Filter>
     </ClInclude>
+    <ClInclude Include="..\include\reelmagic.h">
+      <Filter>include</Filter>
+    </ClInclude>
     <ClInclude Include="..\include\regs.h">
       <Filter>include</Filter>
     </ClInclude>
     <ClInclude Include="..\include\render.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\rgb.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\rgb555.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\rgb565.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\rgb888.h">
       <Filter>include</Filter>
     </ClInclude>
     <ClInclude Include="..\include\rwqueue.h">
@@ -597,9 +999,6 @@
     <ClInclude Include="..\include\shell.h">
       <Filter>include</Filter>
     </ClInclude>
-    <ClInclude Include="..\include\soft_limiter.h">
-      <Filter>include</Filter>
-    </ClInclude>
     <ClInclude Include="..\include\support.h">
       <Filter>include</Filter>
     </ClInclude>
@@ -611,6 +1010,33 @@
     </ClInclude>
     <ClInclude Include="..\include\video.h">
       <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\capture\capture.h">
+      <Filter>src\capture</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\capture\capture_audio.h">
+      <Filter>src\capture</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\capture\capture_midi.h">
+      <Filter>src\capture</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\capture\capture_video.h">
+      <Filter>src\capture</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\capture\image\image_capturer.h">
+      <Filter>src\capture\image</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\capture\image\image_decoder.h">
+      <Filter>src\capture\image</Filter>
+    </ClInclude>
+    <ClCompile Include="..\src\capture\image\image_saver.h">
+      <Filter>src\capture\image</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\capture\image\image_scaler.h">
+      <Filter>src\capture\image</Filter>
+    </ClCompile>
+    <ClInclude Include="..\src\capture\image\png_writer.h">
+      <Filter>src\capture\image</Filter>
     </ClInclude>
     <ClInclude Include="..\src\cpu\core_dynrec\decoder.h">
       <Filter>src\cpu\core_dynrec</Filter>
@@ -735,13 +1161,64 @@
     <ClInclude Include="..\src\gui\render_templates.h">
       <Filter>src\gui</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\hardware\font-switch.h">
+    <ClInclude Include="..\src\gui\shader_manager.h">
+      <Filter>src\gui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\adlib_gold.h">
       <Filter>src\hardware</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\hardware\mame\emu.h">
-      <Filter>src\hardware\mame</Filter>
+    <ClCompile Include="..\src\hardware\compressor.h">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\covox.h">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\disney.h">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClInclude Include="..\src\hardware\gameblaster.h">
+      <Filter>src\hardware</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\hardware\mame\fmopl.h">
+    <ClInclude Include="..\src\hardware\innovation.h">
+      <Filter>src\hardware</Filter>
+    </ClInclude>
+    <ClCompile Include="..\src\hardware\lpt_dac.h">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClInclude Include="..\src\hardware\opl.h">
+      <Filter>src\hardware</Filter>
+    </ClInclude>
+    <ClCompile Include="..\src\hardware\pcspeaker.h">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\pcspeaker_discrete.h">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\pcspeaker_impulse.h">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\ston1_dac.h">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
+    <ClInclude Include="..\src\hardware\input\intel8042.h">
+      <Filter>src\hardware\input</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\input\intel8255.h">
+      <Filter>src\hardware\input</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\input\mouse_common.h">
+      <Filter>src\hardware\input</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\input\mouse_config.h">
+      <Filter>src\hardware\input</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\input\mouse_interfaces.h">
+      <Filter>src\hardware\input</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\input\mouse_manymouse.h">
+      <Filter>src\hardware\input</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\mame\emu.h">
       <Filter>src\hardware\mame</Filter>
     </ClInclude>
     <ClInclude Include="..\src\hardware\mame\saa1099.h">
@@ -750,11 +1227,11 @@
     <ClInclude Include="..\src\hardware\mame\sn76496.h">
       <Filter>src\hardware\mame</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\hardware\mame\ymdeltat.h">
-      <Filter>src\hardware\mame</Filter>
+    <ClInclude Include="..\src\hardware\reelmagic\mpeg_decoder.h">
+      <Filter>src\hardware\reelmagic</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\hardware\mame\ymf262.h">
-      <Filter>src\hardware\mame</Filter>
+    <ClInclude Include="..\src\hardware\reelmagic\vga_passthrough.h">
+      <Filter>src\hardware\reelmagic</Filter>
     </ClInclude>
     <ClInclude Include="..\src\hardware\serialport\directserial.h">
       <Filter>src\hardware\serialport</Filter>
@@ -774,10 +1251,10 @@
     <ClInclude Include="..\src\hardware\serialport\softmodem.h">
       <Filter>src\hardware\serialport</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\ints\int10.h">
-      <Filter>src\ints</Filter>
+    <ClInclude Include="..\src\hardware\serialport\serialmouse.h">
+      <Filter>src\hardware\serialport</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\ints\xms.h">
+    <ClInclude Include="..\src\ints\int10.h">
       <Filter>src\ints</Filter>
     </ClInclude>
     <ClInclude Include="..\src\libs\decoders\archive.h">
@@ -809,6 +1286,9 @@
     </ClInclude>
     <ClInclude Include="..\src\libs\decoders\xxhash.h">
       <Filter>src\libs\decoders</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\manymouse\manymouse.h">
+      <Filter>src\libs\manymouse</Filter>
     </ClInclude>
     <ClInclude Include="..\src\libs\nuked\opl3.h">
       <Filter>src\libs\nuked</Filter>
@@ -855,12 +1335,6 @@
     <ClInclude Include="..\src\gui\gui_msgs.h">
       <Filter>src\gui</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\gui\render_crt_glsl.h">
-      <Filter>src\gui</Filter>
-    </ClInclude>
-    <ClInclude Include="..\src\gui\render_glsl.h">
-      <Filter>src\gui</Filter>
-    </ClInclude>
     <ClInclude Include="..\src\libs\residfp\array.h">
       <Filter>src\libs\residfp</Filter>
     </ClInclude>
@@ -880,6 +1354,9 @@
       <Filter>src\libs\residfp</Filter>
     </ClInclude>
     <ClInclude Include="..\src\libs\residfp\Filter8580.h">
+      <Filter>src\libs\residfp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\residfp\FilterModelConfig.h">
       <Filter>src\libs\residfp</Filter>
     </ClInclude>
     <ClInclude Include="..\src\libs\residfp\FilterModelConfig6581.h">
@@ -918,11 +1395,63 @@
     <ClInclude Include="..\src\libs\residfp\WaveformGenerator.h">
       <Filter>src\libs\residfp</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\libs\tal-chorus\Chorus.h">
+      <Filter>src\libs\tal-chorus</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\tal-chorus\ChorusEngine.h">
+      <Filter>src\libs\tal-chorus</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\tal-chorus\DCBlock.h">
+      <Filter>src\libs\tal-chorus</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\tal-chorus\Lfo.h">
+      <Filter>src\libs\tal-chorus</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\tal-chorus\OnePoleLP.h">
+      <Filter>src\libs\tal-chorus</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\tal-chorus\OscNoise.h">
+      <Filter>src\libs\tal-chorus</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\tal-chorus\Params.h">
+      <Filter>src\libs\tal-chorus</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\YM7128B_emu\YM7128B_emu.h">
+      <Filter>src\libs\YM7128B_emu</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\cpu\core_dyn_x86\risc_x64.h">
       <Filter>src\cpu\core_dyn_x86</Filter>
     </ClInclude>
-    <ClInclude Include="..\submodules\loguru\loguru.hpp">
-      <Filter>submodules\loguru</Filter>
+    <ClInclude Include="..\src\dos\program_serial.h">
+      <Filter>src\dos</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\dos\program_tree.h">
+      <Filter>src\dos</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\loguru\loguru.hpp">
+      <Filter>src\libs\loguru</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\whereami\whereami.h">
+      <Filter>src\libs\whereami</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\ansi_code_markup.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\PDCurses\sdl2_queue\pdcsdl.h">
+      <Filter>src\libs\pdcurses</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\mverb\MVerb.h">
+      <Filter>src\libs\mverb</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\fontstash\fontstash.h">
+      <Filter>src\libs\fontstash</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\stb_truetype\stb_truetype.h">
+      <Filter>src\libs\stb_truetype</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\zmbv\Resource.h" />
+    <ClInclude Include="..\src\libs\zmbv\zmbv.h">
+      <Filter>src\libs\zmbv</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -944,6 +1473,12 @@
     </Filter>
     <Filter Include="src">
       <UniqueIdentifier>{076f6c33-0103-4281-b437-111cd14a0c23}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\capture">
+      <UniqueIdentifier>{e19191a3-0830-4c33-b6f4-41dd6f76c211}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\capture\image">
+      <UniqueIdentifier>{429c5b2d-99ce-4d8d-8eea-7702f851d8ee}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\cpu">
       <UniqueIdentifier>{034c69b6-a49d-4c92-b15c-9939085f12d7}</UniqueIdentifier>
@@ -975,8 +1510,14 @@
     <Filter Include="src\hardware">
       <UniqueIdentifier>{075d87f5-0708-414a-a8c0-4284e1744cb0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\hardware\input">
+      <UniqueIdentifier>{67b90d76-c04c-4bda-8f55-1cd7dacc830c}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\hardware\mame">
       <UniqueIdentifier>{375a1299-bfa1-4e28-ae0f-7769b8b1653b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\hardware\reelmagic">
+      <UniqueIdentifier>{5757f3b1-8b61-43d2-a47b-60bb1080c682}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\hardware\serialport">
       <UniqueIdentifier>{5130c0ee-83d9-4e35-b61e-fb189d1e1b31}</UniqueIdentifier>
@@ -990,14 +1531,20 @@
     <Filter Include="src\libs\decoders">
       <UniqueIdentifier>{d49f3a50-e4ed-4da7-a530-eeefef580e9b}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\libs\gui_tk">
-      <UniqueIdentifier>{c1d4aca1-2ddd-4dc2-ba93-8b2279ef4d30}</UniqueIdentifier>
+    <Filter Include="src\libs\fontstash">
+      <UniqueIdentifier>{5f937800-dd4d-4ab6-8874-a12f1286102a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\mverb">
+      <UniqueIdentifier>{8804de8e-c30a-4d93-b2b4-1c1634fd97b7}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\libs\nuked">
       <UniqueIdentifier>{69d13cb3-0db7-4e3c-92a0-c2b1a79b5b63}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\libs\ppscale">
       <UniqueIdentifier>{63f12ee0-e983-404f-bbd2-5b6cd633a0af}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\stb_truetype">
+      <UniqueIdentifier>{53a02719-2224-438f-a9f1-829e984a5791}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\misc">
       <UniqueIdentifier>{cf5cb904-4d22-4482-8dfa-ab37306b91c8}</UniqueIdentifier>
@@ -1016,6 +1563,33 @@
     </Filter>
     <Filter Include="src\libs\residfp">
       <UniqueIdentifier>{e8ef008d-ceb9-4224-9b9e-b5b62933ca0d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\tal-chorus">
+      <UniqueIdentifier>{033fc91c-5316-48fd-a3f8-0d7a1b0839ae}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\YM7128B_emu">
+      <UniqueIdentifier>{033fc9cc-5916-480d-a3f8-839ae0d7a1b0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\loguru">
+      <UniqueIdentifier>{61f19037-c60b-46ea-8d28-53fbf18dc6db}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\whereami">
+      <UniqueIdentifier>{d1c1e098-73ca-4f3a-a2f7-e8186a52c4dc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\ghc">
+      <UniqueIdentifier>{9df2bcc2-35e3-4be4-a577-dff8be565c65}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\sdlcd">
+      <UniqueIdentifier>{5aedba43-0ef7-4531-a907-6609a23675d8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\pdcurses">
+      <UniqueIdentifier>{40435b8c-40e5-4751-ad49-5c4492538be5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\manymouse">
+      <UniqueIdentifier>{367194fd-13af-44ca-8bd9-b3f1190f786c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\zmbv">
+      <UniqueIdentifier>{99b19861-c042-4e3e-bf24-ee8a418866f6}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

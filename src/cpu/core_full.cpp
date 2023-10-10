@@ -18,16 +18,16 @@
 
 #include "dosbox.h"
 
-#include "pic.h"
-#include "regs.h"
+#include "callback.h"
 #include "cpu.h"
+#include "debug.h"
+#include "fpu.h"
+#include "inout.h"
 #include "lazyflags.h"
 #include "paging.h"
-#include "fpu.h"
-#include "debug.h"
-#include "inout.h"
-#include "callback.h"
-
+#include "pic.h"
+#include "regs.h"
+#include "tracy.h"
 
 typedef PhysPt EAPoint;
 #define SegBase(c)	SegPhys(c)
@@ -36,9 +36,9 @@ typedef PhysPt EAPoint;
 #define LoadMw(off) mem_readw_inline(off)
 #define LoadMd(off) mem_readd_inline(off)
 
-#define LoadMbs(off) (Bit8s)(LoadMb(off))
-#define LoadMws(off) (Bit16s)(LoadMw(off))
-#define LoadMds(off) (Bit32s)(LoadMd(off))
+#define LoadMbs(off) (int8_t)(LoadMb(off))
+#define LoadMws(off) (int16_t)(LoadMw(off))
+#define LoadMds(off) (int32_t)(LoadMd(off))
 
 #define SaveMb(off,val)	mem_writeb_inline(off,val)
 #define SaveMw(off,val)	mem_writew_inline(off,val)
@@ -56,12 +56,14 @@ typedef PhysPt EAPoint;
 
 #define EXCEPTION(blah)										\
 	{														\
-		Bit8u new_num=blah;									\
+		uint8_t new_num=blah;									\
 		CPU_Exception(new_num,0);							\
 		continue;											\
 	}
 
-Bits CPU_Core_Full_Run(void) {
+Bits CPU_Core_Full_Run() noexcept
+{
+	ZoneScoped;
 	FullData inst{};
 	while (CPU_Cycles-->0) {
 #if C_DEBUG
@@ -92,7 +94,6 @@ illegalopcode:
 	FillFlags();
 	return CBRET_NONE;
 }
-
 
 void CPU_Core_Full_Init(void) {
 

@@ -1,6 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -39,19 +40,21 @@ const char *UnmountHelper(char umount)
 	                                           : drive_index(drive_id);
 	assert(i_drive < DOS_DRIVES);
 
-	if (i_drive < MAX_DISK_IMAGES && Drives[i_drive] == NULL && !imageDiskList[i_drive])
+	if (i_drive < MAX_DISK_IMAGES && !Drives[i_drive] && !imageDiskList[i_drive]) {
 		return MSG_Get("PROGRAM_MOUNT_UMOUNT_NOT_MOUNTED");
+	}
 
-	if (i_drive >= MAX_DISK_IMAGES && Drives[i_drive] == NULL)
+	if (i_drive >= MAX_DISK_IMAGES && !Drives[i_drive]) {
 		return MSG_Get("PROGRAM_MOUNT_UMOUNT_NOT_MOUNTED");
+	}
 
 	if (Drives[i_drive]) {
 		switch (DriveManager::UnmountDrive(i_drive)) {
 			case 1: return MSG_Get("PROGRAM_MOUNT_UMOUNT_NO_VIRTUAL");
 			case 2: return MSG_Get("MSCDEX_ERROR_MULTIPLE_CDROMS");
 		}
-		Drives[i_drive] = 0;
-		mem_writeb(Real2Phys(dos.tables.mediaid)+i_drive*9,0);
+		Drives[i_drive] = nullptr;
+		mem_writeb(RealToPhysical(dos.tables.mediaid)+i_drive*9,0);
 		if (i_drive == DOS_GetDefaultDrive()) {
 			DOS_SetDrive(ZDRIVE_NUM);
 		}
@@ -59,7 +62,8 @@ const char *UnmountHelper(char umount)
 	}
 
 	if (i_drive < MAX_DISK_IMAGES && imageDiskList[i_drive]) {
-		imageDiskList[i_drive].reset();
+		imageDiskList[i_drive] = nullptr;
+		DriveManager::CloseNumberedImage(imageDiskList[i_drive]);
 	}
 
 	//--Added 2010-01-18 by Alun Bestor: let Boxer know that the drive state has changed
@@ -67,4 +71,34 @@ const char *UnmountHelper(char umount)
 	//--End of modifications
 
 	return MSG_Get("PROGRAM_MOUNT_UMOUNT_SUCCESS");
+}
+
+void AddCommonMountMessages() {
+	MSG_Add("MSCDEX_SUCCESS","MSCDEX installed.\n");
+	MSG_Add("MSCDEX_ERROR_MULTIPLE_CDROMS","MSCDEX: Failure: Drive-letters of multiple CD-ROM drives have to be continuous.\n");
+	MSG_Add("MSCDEX_ERROR_NOT_SUPPORTED","MSCDEX: Failure: Not yet supported.\n");
+	MSG_Add("MSCDEX_ERROR_PATH","MSCDEX: Specified location is not a CD-ROM drive.\n");
+	MSG_Add("MSCDEX_ERROR_OPEN","MSCDEX: Failure: Invalid file or unable to open.\n");
+	MSG_Add("MSCDEX_TOO_MANY_DRIVES","MSCDEX: Failure: Too many CD-ROM drives (max: 5). MSCDEX Installation failed.\n");
+	MSG_Add("MSCDEX_LIMITED_SUPPORT","MSCDEX: Mounted subdirectory: limited support.\n");
+	MSG_Add("MSCDEX_INVALID_FILEFORMAT","MSCDEX: Failure: File is either no ISO/CUE image or contains errors.\n");
+	MSG_Add("MSCDEX_UNKNOWN_ERROR","MSCDEX: Failure: Unknown error.\n");
+	MSG_Add("MSCDEX_WARNING_NO_OPTION", "MSCDEX: Warning: Ignoring unsupported option '%s'.\n");
+
+	MSG_Add("PROGRAM_MOUNT_STATUS_DRIVE", "Drive");
+	MSG_Add("PROGRAM_MOUNT_STATUS_TYPE", "Type");
+	MSG_Add("PROGRAM_MOUNT_STATUS_LABEL", "Label");
+	MSG_Add("PROGRAM_MOUNT_STATUS_NAME", "Image name");
+	MSG_Add("PROGRAM_MOUNT_STATUS_SLOT", "Swap slot");
+	MSG_Add("PROGRAM_MOUNT_STATUS_2", "%s mounted as %c drive\n");
+	MSG_Add("PROGRAM_MOUNT_STATUS_1", "The currently mounted drives are:\n");
+}
+
+void AddMountTypeMessages() {
+	MSG_Add("MOUNT_TYPE_LOCAL_DIRECTORY", "Local directory");
+	MSG_Add("MOUNT_TYPE_CDROM", "CD-ROM drive");
+	MSG_Add("MOUNT_TYPE_FAT", "FAT image");
+	MSG_Add("MOUNT_TYPE_ISO", "ISO image");
+	MSG_Add("MOUNT_TYPE_VIRTUAL", "Internal virtual drive");
+	MSG_Add("MOUNT_TYPE_UNKNOWN", "unknown drive");
 }

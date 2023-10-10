@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2020  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -38,13 +38,21 @@ public:
 
 	~MidiHandler_oss() override;
 
-	const char *GetName() const override { return "oss"; }
+	std::string_view GetName() const override
+	{
+		return "oss";
+	}
+
+	MidiDeviceType GetDeviceType() const override
+	{
+		return MidiDeviceType::External;
+	}
 
 	bool Open(const char *conf) override;
 
 	void Close() override;
 
-	void PlayMsg(const uint8_t *msg) override;
+	void PlayMsg(const MidiMessage& msg) override;
 
 	void PlaySysex(uint8_t *sysex, size_t len) override;
 };

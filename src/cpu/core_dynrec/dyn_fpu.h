@@ -52,14 +52,14 @@ static void FPU_FFREE(Bitu st) {
 #endif
 
 
-static INLINE void dyn_fpu_top() {
+static inline void dyn_fpu_top() {
 	gen_mov_word_to_reg(FC_OP2,(void*)(&TOP),true);
 	gen_add_imm(FC_OP2,decode.modrm.rm);
 	gen_and_imm(FC_OP2,7);
 	gen_mov_word_to_reg(FC_OP1,(void*)(&TOP),true);
 }
 
-static INLINE void dyn_fpu_top_swapped() {
+static inline void dyn_fpu_top_swapped() {
 	gen_mov_word_to_reg(FC_OP1,(void*)(&TOP),true);
 	gen_add_imm(FC_OP1,decode.modrm.rm);
 	gen_and_imm(FC_OP1,7);
@@ -374,7 +374,7 @@ static void dyn_fpu_esc3()
 			switch (decode.modrm.rm) {
 			case 0x00:				//FNENI
 			case 0x01:				//FNDIS
-				LOG(LOG_FPU, LOG_ERROR)("8087 only fpu code used esc 3: group 4: subfunction: %" PRIuPTR,
+				LOG(LOG_FPU, LOG_ERROR)("8087 only fpu code used esc 3: group 4: subfunction: %u",
 				                        decode.modrm.rm);
 				break;
 			case 0x02:				//FNCLEX FCLEX
@@ -388,7 +388,7 @@ static void dyn_fpu_esc3()
 //				LOG(LOG_FPU,LOG_ERROR)("80267 protected mode (un)set. Nothing done");
 				break;
 			default:
-				E_Exit("ESC 3:ILLEGAL OPCODE group %" PRIuPTR " subfunction %" PRIuPTR,
+				E_Exit("ESC 3:ILLEGAL OPCODE group %u subfunction %u",
 				       decode.modrm.reg, decode.modrm.rm);
 			}
 			break;
@@ -648,7 +648,7 @@ static void dyn_fpu_esc7(){
 		}
 	} else {
 		switch(decode.modrm.reg){
-		case 0x00:  /* FILD Bit16s */
+		case 0x00:  /* FILD int16_t */
 			gen_call_function_raw((void*)&FPU_PREP_PUSH);
 			dyn_fill_ea(FC_OP1); 
 			gen_mov_word_to_reg(FC_OP2,(void*)(&TOP),true);
@@ -657,11 +657,11 @@ static void dyn_fpu_esc7(){
 		case 0x01:
 			LOG(LOG_FPU,LOG_WARN)("ESC 7 EA:Unhandled group %X subfunction %X",static_cast<uint32_t>(decode.modrm.reg),static_cast<uint32_t>(decode.modrm.rm));
 			break;
-		case 0x02:   /* FIST Bit16s */
+		case 0x02:   /* FIST int16_t */
 			dyn_fill_ea(FC_ADDR); 
 			gen_call_function_R((void*)&FPU_FST_I16,FC_ADDR);
 			break;
-		case 0x03:	/* FISTP Bit16s */
+		case 0x03:	/* FISTP int16_t */
 			dyn_fill_ea(FC_ADDR); 
 			gen_call_function_R((void*)&FPU_FST_I16,FC_ADDR);
 			gen_call_function_raw((void*)&FPU_FPOP);
@@ -672,7 +672,7 @@ static void dyn_fpu_esc7(){
 			gen_mov_word_to_reg(FC_OP2,(void*)(&TOP),true);
 			gen_call_function_RR((void*)&FPU_FBLD,FC_OP1,FC_OP2);
 			break;
-		case 0x05:  /* FILD Bit64s */
+		case 0x05:  /* FILD int64_t */
 			gen_call_function_raw((void*)&FPU_PREP_PUSH);
 			dyn_fill_ea(FC_OP1);
 			gen_mov_word_to_reg(FC_OP2,(void*)(&TOP),true);
@@ -683,7 +683,7 @@ static void dyn_fpu_esc7(){
 			gen_call_function_R((void*)&FPU_FBST,FC_ADDR);
 			gen_call_function_raw((void*)&FPU_FPOP);
 			break;
-		case 0x07:  /* FISTP Bit64s */
+		case 0x07:  /* FISTP int64_t */
 			dyn_fill_ea(FC_ADDR); 
 			gen_call_function_R((void*)&FPU_FST_I64,FC_ADDR);
 			gen_call_function_raw((void*)&FPU_FPOP);

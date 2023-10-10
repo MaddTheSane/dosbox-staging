@@ -1,8 +1,8 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
- *  Copyright (C) 2018-2021  Kevin R. Croft <krcroft@gmail.com>
+ *  Copyright (C) 2020-2022  The DOSBox Staging Team
+ *  Copyright (C) 2018-2021  kcgen <kcgen@users.noreply.github.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -43,6 +43,7 @@
 #include <opusfile.h>
 #include <SDL.h>
 
+#include "math_utils.h"
 #include "support.h"
 
 #include "SDL_sound.h"
@@ -158,10 +159,9 @@ static int32_t RWops_opus_seek(void * stream, const opus_int64 offset, const int
  */
 static int32_t RWops_opus_close(void * stream)
 {
-    (void) stream; // deliberately unused, but present for API compliance
-    /* SDL closes this for us */
-    // return SDL_RWclose((SDL_RWops*)stream);
-    return 0;
+    constexpr auto success = 0;
+    const auto sdl_stream = static_cast<SDL_RWops*>(stream);
+    return sdl_stream ? SDL_RWclose(sdl_stream) : success;
 } /* RWops_opus_close */
 
 
@@ -239,6 +239,8 @@ static void opus_close(Sound_Sample * sample)
         op_free(of);
         internal->decoder_private = nullptr;
     }
+    // Close the SDL Sound's RW-ops callback pointer to prevent further operations on the stream
+    internal->rw = nullptr;
     return;
 
 } /* opus_close */

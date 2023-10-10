@@ -1,4 +1,7 @@
 /*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2022-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -27,11 +30,15 @@
 #include "../ints/int10.h"
 #include "inout.h"
 #include "mem.h"
+#include "pci_bus.h"
 #include "support.h"
 #include "vga.h"
 
-void SVGA_S3_WriteCRTC(io_port_t reg, uint8_t val, io_width_t)
+void PCI_AddSVGAS3_Device();
+
+void SVGA_S3_WriteCRTC(io_port_t reg, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	switch (reg) {
 	case 0x31:	/* CR31 Memory Configuration */
 //TODO Base address
@@ -108,7 +115,7 @@ void SVGA_S3_WriteCRTC(io_port_t reg, uint8_t val, io_width_t)
 	case 0x45:  /* Hardware cursor mode */
 		vga.s3.hgc.curmode = val;
 		// Activate hardware cursor code if needed
-		VGA_ActivateHardwareCursor();
+		(void)VGA_ActivateHardwareCursor();
 		break;
 	case 0x46:
 		vga.s3.hgc.originx = (vga.s3.hgc.originx & 0x00ff) | (val << 8);
@@ -440,9 +447,9 @@ uint8_t SVGA_S3_ReadCRTC(io_port_t reg, io_width_t)
 	case 0x67:	/* Extended Miscellaneous Control 2 */
 		return vga.s3.misc_control_2;
 	case 0x69:	/* Extended System Control 3 */
-		return (Bit8u)((vga.config.display_start & 0x1f0000)>>16);
+		return (uint8_t)((vga.config.display_start & 0x1f0000)>>16);
 	case 0x6a:	/* Extended System Control 4 */
-		return (Bit8u)(vga.svga.bank_read & 0x7f);
+		return (uint8_t)(vga.svga.bank_read & 0x7f);
 	case 0x6b:	// BIOS scatchpad: LFB address
 		return vga.s3.reg_6b;
 	default:
@@ -450,31 +457,131 @@ uint8_t SVGA_S3_ReadCRTC(io_port_t reg, io_width_t)
 	}
 }
 
-void SVGA_S3_WriteSEQ(io_port_t reg, uint8_t val, io_width_t)
+void SVGA_S3_WriteSEQ(io_port_t reg, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	if (reg > 0x8 && vga.s3.pll.lock != 0x6)
 		return;
+
+	// The PLL M value can be programmed with any integer value from 1 to
+	// 127. The binary equivalent of this value is programmed in bits 6-0 of
+	// SR11 for the MCLK and in bits 6-0 of SR13 for the DCLK.
+	auto to_ppl_m = [](const uint8_t val) -> uint8_t {
+		return val & 0b0111'1111;
+	};
+
+	// The PLL N value can be programmed with any integer value from 1
+	// to 31. The binary equivalent of this value is programmed in bits
+	// 4-0 of SR10 for the MCLK and in bits 4-0 of SR12 for the DCLK.
+	auto to_ppl_n = [](const uint8_t val) -> uint8_t {
+		return val & 0b0001'1111;
+	};
+
+	// The PLL R value is a 2-bit range value that can be programmed with
+	// any integer value from 0 to 3. The R value is programmed in bits 6-5
+	// of SR 10 for MCLK and bits 6-5 of SR12 for DCLK.
+	auto to_ppl_r = [](const uint8_t val) -> uint8_t {
+		return (val & 0b0110'0000) >> 5;
+	};
+
 	switch (reg) {
-	case 0x08:
+	case 0x08: // Register lock / unlock
 		vga.s3.pll.lock=val;
 		break;
-	case 0x10:		/* Memory PLL Data Low */
-		vga.s3.mclk.n = (val & 0b000'11111);
-		vga.s3.mclk.r = (val & 0b111'00000) >> 5;
+	case 0x10: // Memory PLL Data Low
+		vga.s3.mclk.n = to_ppl_n(val);
+		vga.s3.mclk.r = to_ppl_r(val);
 		break;
-	case 0x11:		/* Memory PLL Data High */
-		vga.s3.mclk.m=val & 0x7f;
+	case 0x11: // Memory PLL Data High
+		vga.s3.mclk.m = to_ppl_m(val);
 		break;
-	case 0x12:		/* Video PLL Data Low */
-		vga.s3.clk[3].n = (val & 0b000'11111);
-		vga.s3.clk[3].r = (val & 0b111'00000) >> 5;
+	case 0x12: // Video PLL Data Low
+		vga.s3.clk[3].n = to_ppl_n(val);
+		vga.s3.clk[3].r = to_ppl_r(val);
 		break;
-	case 0x13:		/* Video PLL Data High */
-		vga.s3.clk[3].m=val & 0x7f;
+	case 0x13: // Video PLL Data High
+		vga.s3.clk[3].m = to_ppl_m(val);
 		break;
-	case 0x15:
-		vga.s3.pll.cmd=val;
-		VGA_StartResize();
+	case 0x15: // CLKSYN Control 2 Register
+		vga.s3.pll.control_2 = val;
+
+		/*
+		CLKSYN Control 2 (SR15), pp 130
+		~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		Bit 0 MFRQ EN - Enable new MCLK frequency load
+		0 = Register bit clear
+		1 = Load new MCLK frequency
+
+		When new MCLK PLL values are programmed, this bit can be set to
+		1 to load these values in the PLL. The loading may be delayed a
+		small but variable amount of time. This bit should be cleared to
+		0 after loading to prevent repeated loading. Alternately, use
+		bit 5 of this register to produce an immediate load.
+
+		Bit 1 DFRQ EN - Enable new DCLK frequency load
+		0 = Register bit clear
+		1 - Load new DCLK frequency
+
+		When new DCLK PLL values are programmed, this bit can be set to
+		1 to load these values in the PLL. Bits 3-2 of 3C2H must also be
+		set to 11b if they are not already at this value. The loading
+		may be delayed a small but variable amount of time. This bit
+		should be programmed to 1 at power-up to allow loading of the
+		VGA DCLK value and then left at this setting. Use bit 5 of this
+		register to produce an immediate load.
+
+		Bit 2 MCLK OUT - Output internally generated MCLK
+		0 = Pin 147 acts as the STWR strobe
+		1 = Pin 147 outputs the internally generated MCLK
+
+		This is used only for testing.
+
+		Bit 3 VCLK OUT - VCLK direction determined by EVCLK
+
+		0 = Pin 148 outputs the internally generated VCLK regardless of
+		the state of EVCLK
+
+		1 = VCLK direction is determined by the EVCLK signal
+
+		Bit 4 DCLK/2 - Divide DCLK by 2
+		0 = DCLK unchanged
+		1 = Divide DCLK by 2
+
+		Either this bit or bit 6 of this register must be set to 1 for
+		clock doubled RAMDAC op- eration (mode 0001).
+
+		Bit 5 CLK LOAD - MCLK, DCLK load
+		0 = Clock loading is controlled by bits 0 and 1 of this register
+		1 = Load MCLK and DCLK PLL values immediately
+
+		To produce an immediate MCLK and DCLK load, program this bit to
+		1 and then to 0. Bits 3-2 of 3C2H must also then be programmed
+		to 11b to load the DCLK values if they are not already
+		programmed to this value. This register must never be left set
+		to 1.
+
+		Bit 6 DCLK INV - Invert DCLK
+		0 = DCLK unchanged
+		1 = Invert DCLK
+
+		Either this bit or bit 4 of this register must be set to 1 for
+		clock doubled RAMDAC op- eration (mode 0001).
+
+		Bit 7 2 CYC MWR - Enable 2 cycle memory write
+		0 = 3 MCLK memory write
+		1 = 2 MCLK memory write
+
+		Setting this bit to 1 bypasses the VGA logic for linear
+		addressing when bit 7 of SRA is set to 1. This can allow 2 MCLK
+		operation for MCLK frequencies between 55 and 57 MHz.
+		*/
+
+		// Only initiate a mode change if bit 0, 1, or 5 are set
+		if (val & 0b0010'0011)
+			VGA_StartResize();
+		break;
+	case 0x18: // RADAC/CLKSYN Control Register (SR18)
+		vga.s3.pll.control = val;
 		break;
 	default:
 		LOG(LOG_VGAMISC,LOG_NORMAL)("VGA:S3:SEQ:Write to illegal index %2X", static_cast<uint32_t>(reg));
@@ -489,18 +596,20 @@ uint8_t SVGA_S3_ReadSEQ(io_port_t reg, io_width_t)
 		return (reg < 0x1b) ? 0 : static_cast<uint8_t>(reg);
 
 	switch (reg) {
-	case 0x08:		/* PLL Unlock */
+	case 0x08: // PLL Unlock
 		return vga.s3.pll.lock;
-	case 0x10:		/* Memory PLL Data Low */
+	case 0x10: // Memory PLL Data Low
 		return (vga.s3.mclk.r << 5) | vga.s3.mclk.n;
-	case 0x11:		/* Memory PLL Data High */
+	case 0x11: // Memory PLL Data High
 		return vga.s3.mclk.m;
-	case 0x12:		/* Video PLL Data Low */
+	case 0x12: // Video PLL Data Low
 		return (vga.s3.clk[3].r << 5) | vga.s3.clk[3].n;
-	case 0x13:		/* Video Data High */
+	case 0x13: // Video Data High
 		return vga.s3.clk[3].m;
-	case 0x15:
-		return vga.s3.pll.cmd;
+	case 0x15: // CLKSYN Control 2 Register
+		return vga.s3.pll.control_2;
+	case 0x18: // RADAC/CLKSYN Control Register (SR18)
+		return vga.s3.pll.control;
 	default:
 		LOG(LOG_VGAMISC,LOG_NORMAL)("VGA:S3:SEQ:Read from illegal index %2X", static_cast<uint32_t>(reg));
 		return 0;
@@ -510,14 +619,19 @@ uint8_t SVGA_S3_ReadSEQ(io_port_t reg, io_width_t)
 uint32_t SVGA_S3_GetClock(void)
 {
 	uint32_t clock = (vga.misc_output >> 2) & 3;
-	if (clock == 0)
-		clock = 25175000;
-	else if (clock == 1)
-		clock = 28322000;
-	else
-		clock=1000*S3_CLOCK(vga.s3.clk[clock].m,vga.s3.clk[clock].n,vga.s3.clk[clock].r);
-	/* Check for dual transfer, clock/2 */
-	if (vga.s3.pll.cmd & 0x10) clock/=2;
+	if (clock == 0) {
+		clock = Vga640PixelClockHz;
+	} else if (clock == 1) {
+		clock = Vga720PixelClockHz;
+	} else {
+		clock = 1000 * S3_CLOCK(vga.s3.clk[clock].m,
+		                        vga.s3.clk[clock].n,
+		                        vga.s3.clk[clock].r);
+	}
+	// Check for dual transfer, clock/2
+	if (vga.s3.pll.control_2 & 0x10) {
+		clock /= 2;
+	}
 	return clock;
 }
 
@@ -527,6 +641,40 @@ bool SVGA_S3_HWCursorActive(void) {
 
 bool SVGA_S3_AcceptsMode(Bitu mode) {
 	return VideoModeMemSize(mode) < vga.vmemsize;
+}
+
+void replace_mode_120h_with_halfline()
+{
+	// when C++20 is available, replace this with designated initializers
+	auto make_halfline_block = []() {
+		VideoModeBlock block = {};
+
+		block.mode     = 0x120;
+		block.type     = M_LIN16;
+		block.swidth   = 640;
+		block.sheight  = 400;
+		block.twidth   = 80;
+		block.theight  = 25;
+		block.cwidth   = 8;
+		block.cheight  = 16;
+		block.ptotal   = 1;
+		block.pstart   = 0xA0000;
+		block.plength  = 0x10000;
+		block.htotal   = 200;
+		block.vtotal   = 449;
+		block.hdispend = 160;
+		block.vdispend = 400;
+		return block;
+	};
+	constexpr auto halfline_block = make_halfline_block();
+	constexpr auto halfline_mode  = halfline_block.mode;
+
+	for (auto &block : ModeList_VGA) {
+		if (block.mode == halfline_mode) {
+			block = halfline_block;
+			break;
+		}
+	}
 }
 
 void filter_s3_modes_to_oem_only()
@@ -568,6 +716,12 @@ void filter_s3_modes_to_oem_only()
 	        {hash(1152,  864, M_LIN24),                        mb_4 | mb_8},
 	        {hash(1152,  864, M_LIN32),                        mb_4 | mb_8},
 
+	        {hash(1280,  960,  M_LIN4),          mb_1 | mb_2 | mb_4 | mb_8},
+	        {hash(1280,  960,  M_LIN8),                 mb_2 | mb_4 | mb_8},
+	        {hash(1280,  960, M_LIN16),                        mb_4 | mb_8},
+	        {hash(1280,  960, M_LIN24),                        mb_4 | mb_8},
+	        {hash(1280,  960, M_LIN32),                               mb_8},
+
 	        {hash(1280, 1024,  M_LIN4),          mb_1 | mb_2 | mb_4 | mb_8},
 	        {hash(1280, 1024,  M_LIN8),                 mb_2 | mb_4 | mb_8},
 	        {hash(1280, 1024, M_LIN16),                        mb_4 | mb_8},
@@ -590,27 +744,30 @@ void filter_s3_modes_to_oem_only()
 	case 8192 * 1024: dram_size = mb_8; break;
 	}
 	auto mode_not_allowed = [&](const VideoModeBlock &m) -> bool {
-		// Allows all the standard VESA modes, which start prior to 0x120
-		if (m.mode < 0x120)
-			return false;
+		// Permit common VESA modes except 320x200 hi-color that were
+		// rarely properly supported until the late 90s.
+		constexpr auto s3_vesa_modes_start = 0x150;
+		if (m.mode < s3_vesa_modes_start)
+			return (m.mode == 0x10d || m.mode == 0x10e || m.mode == 0x10f);
 
 		// Allow all modes that aren't part of the VESA VGA set (CGA/EGA/Hercules/etc)
-		constexpr auto vesa_vga_modes = M_LIN4 | M_LIN8 | M_LIN15 | M_LIN16 | M_LIN24 | M_LIN32;
-		const bool is_a_vesa_vga_mode = m.type & vesa_vga_modes;
-		if (!is_a_vesa_vga_mode)
+		if (!VESA_IsVesaMode(m.mode)) {
 			return false;
+		}
 
 		// Does the S3 OEM list have this mode for the given DRAM size?
 		const auto it = oem_modes.find(hash(m.swidth, m.sheight, m.type));
 		const bool is_an_oem_mode = (it != oem_modes.end()) && (it->second & dram_size);
 
-		// LOG_MSG("S3: %x: %ux%u - m.type=%d is_a_vesa_vga_mode=%d is_an_oem_mode=%d",
-		//         m.mode, m.swidth, m.sheight, m.type, is_a_vesa_vga_mode, is_an_oem_mode);
+		// LOG_MSG("S3: %x: %ux%u - m.type=%d is_vesa_mode=%d is_an_oem_mode=%d",
+		//         m.mode, m.swidth, m.sheight, m.type, VESA_IsVesaMode(m.mode), is_an_oem_mode);
 
 		return !is_an_oem_mode;
 	};
 	// We don't need the return value
-	(void)std::remove_if(ModeList_VGA.begin(), ModeList_VGA.end(), mode_not_allowed);
+	ModeList_VGA.erase(std::remove_if(ModeList_VGA.begin(),
+	                                  ModeList_VGA.end(), mode_not_allowed),
+	                   ModeList_VGA.end());
 }
 
 void SVGA_Setup_S3Trio(void)
@@ -619,12 +776,12 @@ void SVGA_Setup_S3Trio(void)
 	svga.read_p3d5 = &SVGA_S3_ReadCRTC;
 	svga.write_p3c5 = &SVGA_S3_WriteSEQ;
 	svga.read_p3c5 = &SVGA_S3_ReadSEQ;
-	svga.write_p3c0 = 0; /* no S3-specific functionality */
-	svga.read_p3c1 = 0; /* no S3-specific functionality */
+	svga.write_p3c0 = nullptr; /* no S3-specific functionality */
+	svga.read_p3c1 = nullptr; /* no S3-specific functionality */
 
-	svga.set_video_mode = 0; /* implemented in core */
-	svga.determine_mode = 0; /* implemented in core */
-	svga.set_clock = 0; /* implemented in core */
+	svga.set_video_mode = nullptr; /* implemented in core */
+	svga.determine_mode = nullptr; /* implemented in core */
+	svga.set_clock = nullptr; /* implemented in core */
 	svga.get_clock = &SVGA_S3_GetClock;
 	svga.hardware_cursor_active = &SVGA_S3_HWCursorActive;
 	svga.accepts_mode = &SVGA_S3_AcceptsMode;
@@ -656,17 +813,118 @@ void SVGA_Setup_S3Trio(void)
 
 	std::string description = "S3 Trio64 ";
 
-	description += int10.vesa_oldvbe ? "(VESA 1.2)" : "(VESA 2.0)";
+	description += int10.vesa_oldvbe ? "VESA 1.2" : "VESA 2.0";
 
-	if (int10.vesa_mode_preference == VESA_MODE_PREF::COMPATIBLE) {
+	switch (int10.vesa_mode_preference) {
+	case VesaModePref::Compatible:
 		filter_s3_modes_to_oem_only();
-		description += " compatible modes";
-	} else {
-		description += " all modes";
+		description += " compatible";
+		break;
+	case VesaModePref::Halfline:
+		replace_mode_120h_with_halfline();
+		description += " halfline";
+		break;
+	case VesaModePref::All: break;
+	}
+	if (int10.vesa_nolfb)
+		description += " without LFB";
+
+	const auto num_modes = ModeList_VGA.size();
+	VGA_LogInitialization(description.c_str(), ram_type.c_str(), num_modes);
+
+	PCI_AddSVGAS3_Device();
+}
+
+struct PCI_VGADevice : public PCI_Device {
+	enum { vendor = 0x5333 }; // S3
+	enum { device = 0x8811 }; // trio64
+	//enum { device = 0x8810 }; // trio32
+
+	PCI_VGADevice():PCI_Device(vendor,device) { }
+
+	Bits ParseReadRegister(uint8_t regnum) override
+	{
+		return regnum;
 	}
 
-	if (int10.vesa_nolfb)
-		description += " and LFB disabled";
+	bool OverrideReadRegister([[maybe_unused]] uint8_t regnum,
+	                          [[maybe_unused]] uint8_t* rval,
+	                          [[maybe_unused]] uint8_t* rval_mask) override
+	{
+		return false;
+	}
 
-	VGA_LogInitialization(description.c_str(), ram_type.c_str());
+	Bits ParseWriteRegister(uint8_t regnum, uint8_t value) override
+	{
+		if ((regnum>=0x18) && (regnum<0x28)) return -1;	// base addresses are read-only
+		if ((regnum>=0x30) && (regnum<0x34)) return -1;	// expansion rom addresses are read-only
+		switch (regnum) {
+			case 0x10:
+				return (PCI_GetCFGData(PCIId(), PCISubfunction(), 0x10)&0x0f);
+			case 0x11:
+				return 0x00;
+			case 0x12:
+				//return (value&0xc0);	// -> 4mb addressable
+				return (value&0x00);	// -> 16mb addressable
+			case 0x13:
+				return value;
+			case 0x14:
+				return (PCI_GetCFGData(PCIId(), PCISubfunction(), 0x10)&0x0f);
+			case 0x15:
+				return 0x00;
+			case 0x16:
+				return value;	// -> 64kb addressable
+			case 0x17:
+				return value;
+			default:
+				break;
+		}
+		return value;
+	}
+
+	bool InitializeRegisters(uint8_t registers[256]) override
+	{
+		// init (S3 graphics card)
+		//registers[0x08] = 0x44;	// revision ID (s3 trio64v+)
+		registers[0x08] = 0x00;	// revision ID
+		registers[0x09] = 0x00;	// interface
+		registers[0x0a] = 0x00;	// subclass type (vga compatible)
+		//registers[0x0a] = 0x01;	// subclass type (xga device)
+		registers[0x0b] = 0x03;	// class type (display controller)
+		registers[0x0c] = 0x00;	// cache line size
+		registers[0x0d] = 0x00;	// latency timer
+		registers[0x0e] = 0x00;	// header type (other)
+
+		// reset
+		registers[0x04] = 0x23;	// command register (vga palette snoop, ports enabled, memory space enabled)
+		registers[0x05] = 0x00;
+		registers[0x06] = 0x80;	// status register (medium timing, fast back-to-back)
+		registers[0x07] = 0x02;
+
+		//registers[0x3c] = 0x0b;	// irq line
+		//registers[0x3d] = 0x01;	// irq pin
+
+		// BAR0 - memory space, within first 4GB
+		// Check 8-byte alignment of LFB base
+		static_assert((PciGfxLfbBase & 0xf) == 0);
+		registers[0x10] = static_cast<uint8_t>(PciGfxLfbBase & 0xff);
+		registers[0x11] = static_cast<uint8_t>((PciGfxLfbBase >> 8) & 0xff);
+		registers[0x12] = static_cast<uint8_t>((PciGfxLfbBase >> 16) & 0xff);
+		registers[0x13] = static_cast<uint8_t>((PciGfxLfbBase >> 24) & 0xff);
+
+		// BAR1 - MMIO space, within first 4GB
+		// Check 8-byte alignment of MMIO base
+		static_assert((PciGfxMmioBase & 0xf) == 0);
+		registers[0x14] = static_cast<uint8_t>(PciGfxMmioBase & 0xff);
+		registers[0x15] = static_cast<uint8_t>((PciGfxMmioBase >> 8) & 0xff);
+		registers[0x16] = static_cast<uint8_t>((PciGfxMmioBase >> 16) & 0xff);
+		registers[0x17] = static_cast<uint8_t>((PciGfxMmioBase >> 24) & 0xff);
+
+		return true;
+	}
+};
+
+void PCI_AddSVGAS3_Device() {
+	PCI_AddDevice(new PCI_VGADevice());
 }
+

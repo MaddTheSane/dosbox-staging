@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2023-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -27,111 +28,106 @@
 #include "inout.h"
 #include "support.h"
 
+enum class DMA_DIRECTION { READ, WRITE };
+
 enum DMAEvent {
 	DMA_REACHED_TC,
 	DMA_MASKED,
 	DMA_UNMASKED,
 };
 
+class Section;
+using DMA_ReservationCallback = std::function<void(Section*)>;
+
 class DmaChannel;
-using DMA_CallBack = std::function<void(DmaChannel *chan, DMAEvent event)>;
+using DMA_Callback = std::function<void(const DmaChannel* chan, DMAEvent event)>;
 
 class DmaChannel {
 public:
-	Bit32u pagebase;
-	Bit16u baseaddr;
-	Bit32u curraddr;
-	Bit16u basecnt;
-	Bit16u currcnt;
-	Bit8u channum;
-	Bit8u pagenum;
-	Bit8u DMA16;
-	bool increment;
-	bool autoinit;
-//	Bit8u trantype; //Not used at the moment
-	bool masked;
-	bool tcount;
-	bool request;
-	DMA_CallBack callback;
+	// Defaults at the time of initialization
+	uint32_t page_base  = 0;
+	uint32_t curr_addr = 0;
+
+	uint16_t base_addr  = 0;
+	uint16_t base_count = 0;
+	uint16_t curr_count = 0;
+
+	const uint8_t chan_num = 0;
+	uint8_t page_num = 0;
+	const uint8_t is_16bit = 0;
+
+	bool is_incremented             = true;
+	bool is_autoiniting             = false;
+	bool is_masked                  = true;
+	bool has_reached_terminal_count = false;
+	bool has_raised_request         = false;
+
+	DMA_Callback callback = {};
 
 	DmaChannel(uint8_t num, bool dma16);
+	~DmaChannel();
 
-	void DoCallBack(DMAEvent event) {
-		if (callback)
-			callback(this, event);
-	}
-	void SetMask(bool _mask) {
-		masked=_mask;
-		DoCallBack(masked ? DMA_MASKED : DMA_UNMASKED);
-	}
-	void Register_Callback(DMA_CallBack _cb) { 
-		callback = _cb; 
-		SetMask(masked);
-		if (callback) Raise_Request();
-		else Clear_Request();
-	}
-	void ReachedTC(void) {
-		tcount=true;
-		DoCallBack(DMA_REACHED_TC);
-	}
-	void SetPage(Bit8u val) {
-		pagenum=val;
-		pagebase=(pagenum >> DMA16) << (16+DMA16);
-	}
-	void Raise_Request(void) {
-		request=true;
-	}
-	void Clear_Request(void) {
-		request=false;
-	}
-	Bitu Read(Bitu size, Bit8u * buffer);
-	Bitu Write(Bitu size, Bit8u * buffer);
+	void DoCallback(DMAEvent event) const;
+	void SetMask(bool _mask);
+	void RegisterCallback(const DMA_Callback cb);
+	void ReachedTerminalCount();
+	void SetPage(uint8_t val);
+	void RaiseRequest();
+	void ClearRequest();
+	size_t Read(size_t words, uint8_t* const dest_buffer);
+	size_t Write(size_t words, uint8_t* const src_buffer);
+
+	// Reset the channel back to defaults, without callbacks or reservations.
+	void Reset();
+
+	// Reserves the channel for the owner. If a subsequent reservation is
+	// made then the previously held reservation callback is run to
+	// cleanup/remove that reserver (see the EvictReserver call below).
+	void ReserveFor(const std::string_view new_owner,
+	                const DMA_ReservationCallback new_cb);
+
+private:
+	void EvictReserver();
+	bool HasReservation() const;
+	size_t ReadOrWrite(DMA_DIRECTION direction, size_t words,
+	                   uint8_t* const buffer);
+
+	DMA_ReservationCallback reservation_callback = {};
+	std::string_view reservation_owner           = {};
 };
 
 class DmaController {
 private:
-	bool flipflop;
-	DmaChannel *dma_channels[4];
+	bool flipflop = false;
+
+	std::unique_ptr<DmaChannel> dma_channels[4] = {};
+
+	IO_ReadHandleObject io_read_handlers[0x12]   = {};
+	IO_WriteHandleObject io_write_handlers[0x12] = {};
+
+	const uint8_t index = 0;
 
 public:
-	IO_ReadHandleObject DMA_ReadHandler[0x12];
-	IO_WriteHandleObject DMA_WriteHandler[0x12];
+	DmaController(const uint8_t controller_index);
+	~DmaController();
 
-	DmaController(uint8_t ctrl) : flipflop(false)
-	{
-		assert(ctrl == 0 || ctrl == 1); // first or second DMA controller
-		constexpr auto n = ARRAY_LEN(dma_channels);
-		for (uint8_t i = 0; i < n; ++i)
-			dma_channels[i] = new DmaChannel(i + ctrl * n, ctrl == 1);
-	}
+	// prevent copy
+	DmaController(const DmaController&) = delete;
 
-	DmaController(const DmaController &) = delete; // prevent copy
-	DmaController &operator=(const DmaController &) = delete; // prevent assignment
+	// prevent assignment
+	DmaController& operator=(const DmaController&) = delete;
 
-	~DmaController()
-	{
-		for (auto *channel : dma_channels)
-			delete channel;
-	}
+	DmaChannel* GetChannel(const uint8_t channel_num) const;
 
-	DmaChannel *GetChannel(uint8_t chan) const
-	{
-		constexpr auto n = ARRAY_LEN(dma_channels);
-		if (chan < n)
-			return dma_channels[chan];
-		else
-			return nullptr;
-	}
-
-	void WriteControllerReg(io_port_t reg, uint16_t val, io_width_t width);
+	void WriteControllerReg(io_port_t reg, io_val_t value, io_width_t width);
 	uint16_t ReadControllerReg(io_port_t reg, io_width_t width);
+	void ResetChannel(const uint8_t channel_num) const;
 };
 
-DmaChannel * GetDMAChannel(Bit8u chan);
+DmaChannel* DMA_GetChannel(uint8_t chan);
 
-void CloseSecondDMAController(void);
-bool SecondDMAControllerAvailable(void);
-
-void DMA_SetWrapping(Bitu wrap);
+void DMA_ShutdownSecondaryController();
+void DMA_ResetChannel(const uint8_t channel_num);
+void DMA_SetWrapping(const uint32_t wrap);
 
 #endif

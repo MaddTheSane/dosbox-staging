@@ -1,1468 +1,982 @@
 /*
- *  SPDX-License-Identifier: LGPL-2.1-or-later
+ *  Copyright (C) 2002-2022  The DOSBox Team
  *
- *  Copyright (C) 2002-2021  The DOSBox Team
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
  *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- * 
- *  This library is distributed in the hope that it will be useful,
+ *  This program is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- * 
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
- */
-
-/* OPL2/OPL3 emulation library
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
  *
- * Originally based on ADLIBEMU.C, an AdLib/OPL2 emulation library by Ken Silverman
- * Copyright (C) 1998-2001 Ken Silverman
- * Ken Silverman's official web site: "http://www.advsys.net/ken"
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
 #include "opl.h"
 
-#include <cassert>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <sys/types.h>
 
-static fltype recipsamp;	// inverse of sampling rate
-static Bit16s wavtable[WAVEPREC*3];	// wave form table
+#include "../capture/capture.h"
+#include "cpu.h"
+#include "mapper.h"
+#include "mem.h"
+#include "setup.h"
+#include "support.h"
 
-// vibrato/tremolo tables
-static Bit32s vib_table[VIBTAB_SIZE];
-static Bit32s trem_table[TREMTAB_SIZE*2];
+#ifdef _MSC_VER
+#	pragma pack(1)
+#endif
 
-static Bit32s vibval_const[BLOCKBUF_SIZE];
-static Bit32s tremval_const[BLOCKBUF_SIZE];
+#define HW_OPL2     0
+#define HW_DUALOPL2 1
+#define HW_OPL3     2
 
-// vibrato value tables (used per-operator)
-static Bit32s vibval_var1[BLOCKBUF_SIZE];
-static Bit32s vibval_var2[BLOCKBUF_SIZE];
-//static Bit32s vibval_var3[BLOCKBUF_SIZE];
-//static Bit32s vibval_var4[BLOCKBUF_SIZE];
+static std::unique_ptr<OPL> opl = {};
 
-// vibrato/trmolo value table pointers
-static Bit32s *vibval1, *vibval2, *vibval3, *vibval4;
-static Bit32s *tremval1, *tremval2, *tremval3, *tremval4;
-
-// return a pointer to the requested operator, but only after ensuring it's valid
-op_type *get_op(const int64_t i)
+Timer::Timer(int16_t micros)
+        : clock_interval(micros * 0.001) // interval in milliseconds
 {
-	assert(i >= 0 && i < MAXOPERATORS);
-	return &op[i];
+	SetCounter(0);
 }
 
-// key scale level lookup table
-static const fltype kslmul[4] = {
-	0.0, 0.5, 0.25, 1.0		// -> 0, 3, 1.5, 6 dB/oct
-};
+// Update returns with true if overflow
+// Properly syncs up the start/end to current time and changing intervals
+bool Timer::Update(const double time)
+{
+	if (enabled && (time >= trigger)) {
+		// How far into the next cycle
+		const double deltaTime = time - trigger;
+		// Sync start to last cycle
+		const auto counter_mod = fmod(deltaTime, counter_interval);
 
-// frequency multiplicator lookup table
-static const fltype frqmul_tab[16] = {
-	0.5,1,2,3,4,5,6,7,8,9,10,10,12,12,15,15
-};
-// calculated frequency multiplication values (depend on sampling rate)
-static fltype frqmul[16];
-
-// key scale levels
-static Bit8u kslev[8][16];
-
-// map a channel number to the register offset of the modulator (=register base)
-static const Bit8u modulatorbase[9]	= {
-	0,1,2,
-	8,9,10,
-	16,17,18
-};
-
-// map a register base to a modulator operator number or operator number
-constexpr uint8_t regbase2modop[44] = {
-        // first set: OPL2 and OPL3
-        0,  1,  2,  0,  1,  2,  0,  0,  3,  4,  5,  3,  4,  5,  0,  0,  6,  7,  8,  6,  7,  8,
-        // second set: OPL3-only
-        18, 19, 20, 18, 19, 20, 0,  0,  21, 22, 23, 21, 22, 23, 0,  0,  24, 25, 26, 24, 25, 26
-};
-constexpr uint8_t regbase2op[44] = {
-        // first set: OPL2 and OPL3
-        0,  1,  2,  9,  10, 11, 0,  0,  3,  4,  5,  12, 13, 14, 0,  0,  6,  7,  8,  15, 16, 17,
-        // second set: OPL3-only
-        18, 19, 20, 27, 28, 29, 0,  0,  21, 22, 23, 30, 31, 32, 0,  0,  24, 25, 26, 33, 34, 35
-};
-
-// start of the waveform
-static Bit32u waveform[8] = {
-	WAVEPREC,
-	WAVEPREC>>1,
-	WAVEPREC,
-	(WAVEPREC*3)>>2,
-	0,
-	0,
-	(WAVEPREC*5)>>2,
-	WAVEPREC<<1
-};
-
-// length of the waveform as mask
-static Bit32u wavemask[8] = {
-	WAVEPREC-1,
-	WAVEPREC-1,
-	(WAVEPREC>>1)-1,
-	(WAVEPREC>>1)-1,
-	WAVEPREC-1,
-	((WAVEPREC*3)>>2)-1,
-	WAVEPREC>>1,
-	WAVEPREC-1
-};
-
-// where the first entry resides
-static Bit32u wavestart[8] = {
-	0,
-	WAVEPREC>>1,
-	0,
-	WAVEPREC>>2,
-	0,
-	0,
-	0,
-	WAVEPREC>>3
-};
-
-// envelope generator function constants
-static fltype attackconst[4] = {
-	(fltype)(1/2.82624),
-	(fltype)(1/2.25280),
-	(fltype)(1/1.88416),
-	(fltype)(1/1.59744)
-};
-static fltype decrelconst[4] = {
-	(fltype)(1/39.28064),
-	(fltype)(1/31.41608),
-	(fltype)(1/26.17344),
-	(fltype)(1/22.44608)
-};
-
-
-void operator_advance(op_type* op_pt, Bit32s vib) {
-	op_pt->wfpos = op_pt->tcount;						// waveform position
-	
-	// advance waveform time
-	op_pt->tcount += op_pt->tinc;
-	op_pt->tcount += (Bit32s)(op_pt->tinc)*vib/FIXEDPT;
-
-	op_pt->generator_pos += generator_add;
+		start   = time - counter_mod;
+		trigger = start + counter_interval;
+		// Only set the overflow flag when not masked
+		if (!masked)
+			overflow = true;
+	}
+	return overflow;
 }
 
-void operator_advance_drums(op_type* op_pt1, Bit32s vib1, op_type* op_pt2, Bit32s vib2, op_type* op_pt3, Bit32s vib3) {
-	Bit32u c1 = op_pt1->tcount/FIXEDPT;
-	Bit32u c3 = op_pt3->tcount/FIXEDPT;
-	Bit32u phasebit = (((c1 & 0x88) ^ ((c1<<5) & 0x80)) | ((c3 ^ (c3<<2)) & 0x20)) ? 0x02 : 0x00;
-
-	Bit32u noisebit = rand()&1;
-
-	Bit32u snare_phase_bit = (((Bitu)((op_pt1->tcount/FIXEDPT) / 0x100))&1);
-
-	//Hihat
-	Bit32u inttm = (phasebit<<8) | (0x34<<(phasebit ^ (noisebit<<1)));
-	op_pt1->wfpos = inttm*FIXEDPT;				// waveform position
-	// advance waveform time
-	op_pt1->tcount += op_pt1->tinc;
-	op_pt1->tcount += (Bit32s)(op_pt1->tinc)*vib1/FIXEDPT;
-	op_pt1->generator_pos += generator_add;
-
-	//Snare
-	inttm = ((1+snare_phase_bit) ^ noisebit)<<8;
-	op_pt2->wfpos = inttm*FIXEDPT;				// waveform position
-	// advance waveform time
-	op_pt2->tcount += op_pt2->tinc;
-	op_pt2->tcount += (Bit32s)(op_pt2->tinc)*vib2/FIXEDPT;
-	op_pt2->generator_pos += generator_add;
-
-	//Cymbal
-	inttm = (1+phasebit)<<8;
-	op_pt3->wfpos = inttm*FIXEDPT;				// waveform position
-	// advance waveform time
-	op_pt3->tcount += op_pt3->tinc;
-	op_pt3->tcount += (Bit32s)(op_pt3->tinc)*vib3/FIXEDPT;
-	op_pt3->generator_pos += generator_add;
+void Timer::Reset()
+{
+	// On a reset make sure the start is in sync with the next cycle
+	overflow = false;
 }
 
+void Timer::SetCounter(const uint8_t val)
+{
+	counter = val;
+	// Interval for next cycle
+	counter_interval = (256 - counter) * clock_interval;
+}
 
-// output level is sustained, mode changes only when operator is turned off (->release)
-// or when the keep-sustained bit is turned off (->sustain_nokeep)
-void operator_output(op_type* op_pt, Bit32s modulator, Bit32s trem) {
-	if (op_pt->op_state != OF_TYPE_OFF) {
-		op_pt->lastcval = op_pt->cval;
-		Bit32u i = (Bit32u)((op_pt->wfpos+modulator)/FIXEDPT);
+void Timer::SetMask(const bool set)
+{
+	masked = set;
+	if (masked)
+		overflow = false;
+}
 
-		// wform: -16384 to 16383 (0x4000)
-		// trem :  32768 to 65535 (0x10000)
-		// step_amp: 0.0 to 1.0
-		// vol  : 1/2^14 to 1/2^29 (/0x4000; /1../0x8000)
+void Timer::Stop()
+{
+	enabled = false;
+}
 
-		op_pt->cval = (Bit32s)(op_pt->step_amp*op_pt->vol*op_pt->cur_wform[i&op_pt->cur_wmask]*trem/16.0);
+void Timer::Start(const double time)
+{
+	// Only properly start when not running before
+	if (!enabled) {
+		enabled  = true;
+		overflow = false;
+		// Sync start to the last clock interval
+		const auto clockMod = fmod(time, clock_interval);
+
+		start = time - clockMod;
+		// Overflow trigger
+		trigger = start + counter_interval;
 	}
 }
 
+struct RawHeader {
+	uint8_t id[8];         // 0x00, "DBRAWOPL"
+	uint16_t version_high; // 0x08, size of the data following the m
+	uint16_t version_low;  // 0x0a, size of the data following the m
+	uint32_t commands;     // 0x0c, uint32_t amount of command/data pairs
+	uint32_t milliseconds; // 0x10, uint32_t Total milliseconds of data in
+	                       // this chunk
+	uint8_t hardware;      // 0x14, uint8_t Hardware Type
+	                       // 0=opl2,1=dual-opl2,2=opl3
+	uint8_t format; // 0x15, uint8_t Format 0=cmd/data interleaved, 1 maybe
+	                // all cdms, followed by all data
+	uint8_t compression;     // 0x16, uint8_t Compression Type, 0 = No
+	                         // Compression
+	uint8_t delay256;        // 0x17, uint8_t Delay 1-256 msec command
+	uint8_t delay_shift8;    // 0x18, uint8_t (delay + 1)*256
+	uint8_t conv_table_size; // 0x191, uint8_t Raw Conversion Table size
+} GCC_ATTRIBUTE(packed);
+#ifdef _MSC_VER
+#	pragma pack()
+#endif
 
-// no action, operator is off
-void operator_off(op_type* /*op_pt*/) {
-}
+// The Raw Tables is < 128 and is used to convert raw commands into a full
+// register index. When the high bit of a raw command is set it indicates the
+// cmd/data pair is to be sent to the 2nd port. After the conversion table the
+// raw data follows immediatly till the end of the chunk.
 
-// output level is sustained, mode changes only when operator is turned off (->release)
-// or when the keep-sustained bit is turned off (->sustain_nokeep)
-void operator_sustain(op_type* op_pt) {
-	Bit32u num_steps_add = op_pt->generator_pos/FIXEDPT;	// number of (standardized) samples
-	for (Bit32u ct=0; ct<num_steps_add; ct++) {
-		op_pt->cur_env_step++;
-	}
-	op_pt->generator_pos -= num_steps_add*FIXEDPT;
-}
+// Table to map the opl register to one <127 for dro saving
+class Capture {
+public:
+	bool DoWrite(const io_port_t reg_full, const uint8_t val)
+	{
+		const auto reg_mask = reg_full & 0xff;
 
-// operator in release mode, if output level reaches zero the operator is turned off
-void operator_release(op_type* op_pt) {
-	// ??? boundary?
-	if (op_pt->amp > 0.00000001) {
-		// release phase
-		op_pt->amp *= op_pt->releasemul;
-	}
-
-	Bit32u num_steps_add = op_pt->generator_pos/FIXEDPT;	// number of (standardized) samples
-	for (Bit32u ct=0; ct<num_steps_add; ct++) {
-		op_pt->cur_env_step++;						// sample counter
-		if ((op_pt->cur_env_step & op_pt->env_step_r)==0) {
-			if (op_pt->amp <= 0.00000001) {
-				// release phase finished, turn off this operator
-				op_pt->amp = 0.0;
-				if (op_pt->op_state == OF_TYPE_REL) {
-					op_pt->op_state = OF_TYPE_OFF;
-				}
+		// Check the raw index for this register if we actually have to
+		// save it
+		if (handle) {
+			// Check if we actually care for this to be logged,
+			// else just ignore it
+			uint8_t raw = to_raw[reg_mask];
+			if (raw == 0xff) {
+				return true;
 			}
-			op_pt->step_amp = op_pt->amp;
-		}
-	}
-	op_pt->generator_pos -= num_steps_add*FIXEDPT;
-}
+			// Check if this command will not just replace the same
+			// value in a reg that doesn't do anything with it
+			if ((*cache)[reg_full] == val)
+				return true;
 
-// operator in decay mode, if sustain level is reached the output level is either
-// kept (sustain level keep enabled) or the operator is switched into release mode
-void operator_decay(op_type* op_pt) {
-	if (op_pt->amp > op_pt->sustain_level) {
-		// decay phase
-		op_pt->amp *= op_pt->decaymul;
-	}
+			// Check how much time has passed
+			uint32_t passed = PIC_Ticks - lastTicks;
+			lastTicks       = PIC_Ticks;
+			header.milliseconds += passed;
 
-	Bit32u num_steps_add = op_pt->generator_pos/FIXEDPT;	// number of (standardized) samples
-	for (Bit32u ct=0; ct<num_steps_add; ct++) {
-		op_pt->cur_env_step++;
-		if ((op_pt->cur_env_step & op_pt->env_step_d)==0) {
-			if (op_pt->amp <= op_pt->sustain_level) {
-				// decay phase finished, sustain level reached
-				if (op_pt->sus_keep) {
-					// keep sustain level (until turned off)
-					op_pt->op_state = OF_TYPE_SUS;
-					op_pt->amp = op_pt->sustain_level;
+			// if ( passed > 0 ) LOG_MSG( "Delay %d", passed ) ;
+
+			// If we passed more than 30 seconds since the last
+			// command, we'll restart the the capture
+			if (passed > 30000) {
+				CloseFile();
+				goto skipWrite;
+			}
+			while (passed > 0) {
+				if (passed < 257) { // 1-256 millisecond delay
+					AddBuf(delay256,
+					       check_cast<uint8_t>(passed - 1));
+					passed = 0;
 				} else {
-					// next: release phase
-					op_pt->op_state = OF_TYPE_SUS_NOKEEP;
+					const auto shift = (passed >> 8);
+					passed -= shift << 8;
+					AddBuf(delay_shift8,
+					       check_cast<uint8_t>(shift - 1));
 				}
 			}
-			op_pt->step_amp = op_pt->amp;
+			AddWrite(reg_full, val);
+			return true;
+		}
+	skipWrite:
+		// Not yet capturing to a file here. Check for commands that
+		// would start capturing, if it's not one of them return.
+
+		// Note on in any channel
+		const auto note_on = reg_mask >= 0xb0 && reg_mask <= 0xb8 &&
+		                     (val & 0x020);
+
+		// Percussion mode enabled and a note on in any percussion
+		// instrument
+		const auto percussion_on = reg_mask == 0xbd && ((val & 0x3f) > 0x20);
+
+		if (!(note_on || percussion_on))
+			return true;
+
+		handle = CAPTURE_CreateFile(CaptureType::RawOplStream);
+		if (!handle)
+			return false;
+
+		InitHeader();
+
+		// Prepare space at start of the file for the header
+		fwrite(&header, 1, sizeof(header), handle);
+		// Write the Raw To Reg table
+		fwrite(&to_reg, 1, raw_used, handle);
+		// Write the cache of last commands
+		WriteCache();
+		// Write the command that triggered this
+		AddWrite(reg_full, val);
+
+		// Init the timing information for the next commands
+		lastTicks  = PIC_Ticks;
+		startTicks = PIC_Ticks;
+		return true;
+	}
+
+	Capture(RegisterCache *_cache) : header(), cache(_cache)
+	{
+		LOG_MSG("CAPTURE: Preparing to capture raw OPL output; capturing will start when OPL output starts");
+		MakeTables();
+	}
+
+	virtual ~Capture()
+	{
+		CloseFile();
+		LOG_MSG("CAPTURE: Stopped capturing raw OPL output");
+	}
+
+	// prevent copy
+	Capture(const Capture &) = delete;
+
+	// prevent assignment
+	Capture &operator=(const Capture &) = delete;
+
+private:
+	uint8_t to_reg[127];  // 127 entries to go from raw data to registers
+	uint8_t raw_used = 0; // How many entries in the ToPort are used
+	uint8_t to_raw[256];  // 256 entries to go from port index to raw data
+	                      //
+	uint8_t delay256     = 0;
+	uint8_t delay_shift8 = 0;
+
+	RawHeader header;
+
+	FILE *handle = nullptr;  // File used for writing
+	                         //
+	uint32_t startTicks = 0; // Start used to check total raw length on end
+	uint32_t lastTicks  = 0; // Last ticks when last last cmd was added
+	uint8_t buf[1024];       // 16 added for delay commands and what not
+	uint32_t bufUsed = 0;
+
+	RegisterCache *cache;
+
+	void MakeEntry(const uint8_t reg, uint8_t &raw)
+	{
+		to_reg[raw] = reg;
+		to_raw[reg] = raw;
+		++raw;
+	}
+
+	void MakeTables()
+	{
+		uint8_t index = 0;
+		memset(to_reg, 0xff, sizeof(to_reg));
+		memset(to_raw, 0xff, sizeof(to_raw));
+
+		// Select the entries that are valid and the index is the
+		// mapping to the index entry
+		MakeEntry(0x01, index); // 0x01: Waveform select
+		MakeEntry(0x04, index); // 104: Four-Operator Enable
+		MakeEntry(0x05, index); // 105: OPL3 Mode Enable
+		MakeEntry(0x08, index); // 08: CSW / NOTE-SEL
+		MakeEntry(0xbd, index); // BD: Tremolo Depth / Vibrato Depth /
+		                        // Percussion Mode / BD/SD/TT/CY/HH On
+
+		// Add the 32 byte range that hold the 18 operators
+		for (uint8_t i = 0; i < 24; ++i) {
+			if ((i & 7) < 6) {
+				MakeEntry(0x20 + i, index); // 20-35: Tremolo /
+				                            // Vibrato / Sustain
+				                            // / KSR / Frequency
+				                            // Multiplication Facto
+				MakeEntry(0x40 + i, index); // 40-55: Key Scale
+				                            // Level / Output Level
+				MakeEntry(0x60 + i, index); // 60-75: Attack
+				                            // Rate / Decay Rate
+				MakeEntry(0x80 + i, index); // 80-95: Sustain
+				                            // Level / Release
+				                            // Rate
+				MakeEntry(0xe0 + i, index); // E0-F5: Waveform
+				                            // Select
+			}
+		}
+
+		// Add the 9 byte range that hold the 9 channels
+		for (uint8_t i = 0; i < 9; ++i) {
+			MakeEntry(0xa0 + i, index); // A0-A8: Frequency Number
+			MakeEntry(0xb0 + i, index); // B0-B8: Key On / Block
+			                            // Number / F-Number(hi
+			                            // bits)
+			MakeEntry(0xc0 + i, index); // C0-C8: FeedBack Modulation
+			                            // Factor / Synthesis Type
+		}
+
+		// Store the amount of bytes the table contains
+		raw_used = index;
+
+		//	assert( raw_used <= 127 );
+		delay256     = raw_used;
+		delay_shift8 = raw_used + 1;
+	}
+
+	void ClearBuf()
+	{
+		fwrite(buf, 1, bufUsed, handle);
+		header.commands += bufUsed / 2;
+		bufUsed = 0;
+	}
+
+	void AddBuf(const uint8_t raw, const uint8_t val)
+	{
+		buf[bufUsed++] = raw;
+		buf[bufUsed++] = val;
+		if (bufUsed >= sizeof(buf)) {
+			ClearBuf();
 		}
 	}
-	op_pt->generator_pos -= num_steps_add*FIXEDPT;
-}
 
-// operator in attack mode, if full output level is reached,
-// the operator is switched into decay mode
-void operator_attack(op_type* op_pt) {
-	op_pt->amp = ((op_pt->a3*op_pt->amp + op_pt->a2)*op_pt->amp + op_pt->a1)*op_pt->amp + op_pt->a0;
+	void AddWrite(const io_port_t reg_full, const uint8_t val)
+	{
+		const uint8_t reg_mask = reg_full & 0xff;
+		//  Do some special checks if we're doing opl3 or dualopl2
+		// commands Although you could pretty much just stick to always
+		// doing opl3 on the player side
 
-	Bit32u num_steps_add = op_pt->generator_pos/FIXEDPT;		// number of (standardized) samples
-	for (Bit32u ct=0; ct<num_steps_add; ct++) {
-		op_pt->cur_env_step++;	// next sample
-		if ((op_pt->cur_env_step & op_pt->env_step_a)==0) {		// check if next step already reached
-			if (op_pt->amp > 1.0) {
-				// attack phase finished, next: decay
-				op_pt->op_state = OF_TYPE_DEC;
-				op_pt->amp = 1.0;
-				op_pt->step_amp = 1.0;
-			}
-			op_pt->step_skip_pos_a <<= 1;
-			if (op_pt->step_skip_pos_a==0) op_pt->step_skip_pos_a = 1;
-			if (op_pt->step_skip_pos_a & op_pt->env_step_skip_a) {	// check if required to skip next step
-				op_pt->step_amp = op_pt->amp;
-			}
+		// Enabling opl3 4op modes will make us go into opl3 mode
+		if (header.hardware != HW_OPL3 && reg_full == 0x104 && val &&
+		    (*cache)[0x105]) {
+			header.hardware = HW_OPL3;
+		}
+
+		// Writing a keyon to a 2nd address enables dual opl2 otherwise
+		// Maybe also check for rhythm
+		if (header.hardware == HW_OPL2 && reg_full >= 0x1b0 &&
+		    reg_full <= 0x1b8 && val) {
+			header.hardware = HW_DUALOPL2;
+		}
+
+		uint8_t raw = to_raw[reg_mask];
+		if (raw == 0xff)
+			return;
+		if (reg_full & 0x100)
+			raw |= 128;
+
+		AddBuf(raw, val);
+	}
+
+	void WriteCache()
+	{
+		// Check the registers to add
+		for (uint16_t i = 0; i < 256; ++i) {
+			auto val = (*cache)[i];
+			// Silence the note on entries
+			if (i >= 0xb0 && i <= 0xb8)
+				val &= ~0x20;
+			if (i == 0xbd)
+				val &= ~0x1f;
+			if (val)
+				AddWrite(i, val);
+
+			val = (*cache)[0x100 + i];
+
+			if (i >= 0xb0 && i <= 0xb8)
+				val &= ~0x20;
+			if (val)
+				AddWrite(0x100 + i, val);
 		}
 	}
-	op_pt->generator_pos -= num_steps_add*FIXEDPT;
-}
 
+	void InitHeader()
+	{
+		memset(&header, 0, sizeof(header));
+		memcpy(header.id, "DBRAWOPL", 8);
 
-typedef void (*optype_fptr)(op_type*);
+		header.version_low     = 0;
+		header.version_high    = 2;
+		header.delay256        = delay256;
+		header.delay_shift8    = delay_shift8;
+		header.conv_table_size = raw_used;
+	}
 
-optype_fptr opfuncs[6] = {
-	operator_attack,
-	operator_decay,
-	operator_release,
-	operator_sustain,	// sustain phase (keeping level)
-	operator_release,	// sustain_nokeep phase (release-style)
-	operator_off
+	void CloseFile()
+	{
+		if (handle) {
+			ClearBuf();
+
+			// Endianize the header and write it to beginning of the
+			// file
+			header.version_high = host_to_le(header.version_high);
+			header.version_low  = host_to_le(header.version_low);
+			header.commands     = host_to_le(header.commands);
+			header.milliseconds = host_to_le(header.milliseconds);
+
+			fseek(handle, 0, SEEK_SET);
+			fwrite(&header, 1, sizeof(header), handle);
+			fclose(handle);
+
+			handle = nullptr;
+		}
+	}
 };
 
-void change_attackrate(Bitu regbase, op_type* op_pt) {
-	Bits attackrate = adlibreg[ARC_ATTR_DECR+regbase]>>4;
-	if (attackrate) {
-		fltype f = (fltype)(pow(FL2,(fltype)attackrate+(op_pt->toff>>2)-1)*attackconst[op_pt->toff&3]*recipsamp);
-		// attack rate coefficients
-		op_pt->a0 = (fltype)(0.0377*f);
-		op_pt->a1 = (fltype)(10.73*f+1);
-		op_pt->a2 = (fltype)(-17.57*f);
-		op_pt->a3 = (fltype)(7.42*f);
+Chip::Chip() : timer0(80), timer1(320) {}
 
-		Bits step_skip = attackrate*4 + op_pt->toff;
-		Bits steps = step_skip >> 2;
-		op_pt->env_step_a = (1<<(steps<=12?12-steps:0))-1;
+bool Chip::Write(const io_port_t reg, const uint8_t val)
+{
+	// if(reg == 0x02 || reg == 0x03 || reg == 0x04)
+	// LOG(LOG_MISC,LOG_ERROR)("write adlib timer %X %X",reg,val);
+	switch (reg) {
+	case 0x02:
+		timer0.Update(PIC_FullIndex());
+		timer0.SetCounter(val);
+		return true;
+	case 0x03:
+		timer1.Update(PIC_FullIndex());
+		timer1.SetCounter(val);
+		return true;
+	case 0x04:
+		// Reset overflow in both timers
+		if (val & 0x80) {
+			timer0.Reset();
+			timer1.Reset();
+		} else {
+			const auto time = PIC_FullIndex();
+			if (val & 0x1)
+				timer0.Start(time);
+			else
+				timer0.Stop();
 
-		Bits step_num = (step_skip<=48)?(4-(step_skip&3)):0;
-		static Bit8u step_skip_mask[5] = {0xff, 0xfe, 0xee, 0xba, 0xaa}; 
-		op_pt->env_step_skip_a = step_skip_mask[step_num];
+			if (val & 0x2)
+				timer1.Start(time);
+			else
+				timer1.Stop();
 
-#if defined(OPLTYPE_IS_OPL3)
-		if (step_skip>=60) {
-#else
-		if (step_skip>=62) {
-#endif
-			op_pt->a0 = (fltype)(2.0);	// something that triggers an immediate transition to amp:=1.0
-			op_pt->a1 = (fltype)(0.0);
-			op_pt->a2 = (fltype)(0.0);
-			op_pt->a3 = (fltype)(0.0);
+			timer0.SetMask((val & 0x40) > 0);
+			timer1.SetMask((val & 0x20) > 0);
 		}
+		return true;
+	}
+	return false;
+}
+
+uint8_t Chip::Read()
+{
+	const auto time(PIC_FullIndex());
+	uint8_t ret = 0;
+
+	// Overflow won't be set if a channel is masked
+	if (timer0.Update(time)) {
+		ret |= 0x40;
+		ret |= 0x80;
+	}
+	if (timer1.Update(time)) {
+		ret |= 0x20;
+		ret |= 0x80;
+	}
+	return ret;
+}
+
+void OPL::Init(const uint16_t sample_rate)
+{
+	newm = 0;
+	OPL3_Reset(&oplchip, sample_rate);
+
+	ms_per_frame = millis_in_second / sample_rate;
+
+	memset(cache, 0, ARRAY_LEN(cache));
+
+	switch (mode) {
+	case Mode::Opl3: break;
+	case Mode::Opl3Gold:
+		adlib_gold = std::make_unique<AdlibGold>(sample_rate);
+		break;
+	case Mode::Opl2: break;
+	case Mode::DualOpl2:
+		// Setup opl3 mode in the hander
+		WriteReg(0x105, 1);
+		// Also set it up in the cache so the capturing will start opl3
+		CacheWrite(0x105, 1);
+		break;
+	}
+}
+
+void OPL::WriteReg(const io_port_t selected_reg, const uint8_t val)
+{
+	OPL3_WriteRegBuffered(&oplchip, selected_reg, val);
+	if (selected_reg == 0x105)
+		newm = selected_reg & 0x01;
+}
+
+io_port_t OPL::WriteAddr(const io_port_t port, const uint8_t val)
+{
+	io_port_t addr = val;
+	if ((port & 2) && (addr == 0x05 || newm)) {
+		addr |= 0x100;
+	}
+	return addr;
+}
+
+AudioFrame OPL::RenderFrame()
+{
+	static int16_t buf[2] = {};
+	OPL3_GenerateStream(&oplchip, buf, 1);
+
+	AudioFrame frame = {};
+	if (adlib_gold) {
+		adlib_gold->Process(buf, 1, &frame[0]);
 	} else {
-		// attack disabled
-		op_pt->a0 = 0.0;
-		op_pt->a1 = 1.0;
-		op_pt->a2 = 0.0;
-		op_pt->a3 = 0.0;
-		op_pt->env_step_a = 0;
-		op_pt->env_step_skip_a = 0;
+		frame.left  = buf[0];
+		frame.right = buf[1];
+	}
+	return frame;
+}
+
+void OPL::RenderUpToNow()
+{
+	const auto now = PIC_FullIndex();
+
+	// Wake up the channel and update the last rendered time datum.
+	if (channel->WakeUp()) {
+		last_rendered_ms = now;
+		return;
+	}
+	// Keep rendering until we're current
+	while (last_rendered_ms < now) {
+		last_rendered_ms += ms_per_frame;
+		fifo.emplace(RenderFrame());
 	}
 }
 
-void change_decayrate(Bitu regbase, op_type* op_pt) {
-	Bits decayrate = adlibreg[ARC_ATTR_DECR+regbase]&15;
-	// decaymul should be 1.0 when decayrate==0
-	if (decayrate) {
-		fltype f = (fltype)(-7.4493*decrelconst[op_pt->toff&3]*recipsamp);
-		op_pt->decaymul = (fltype)(pow(FL2,f*pow(FL2,(fltype)(decayrate+(op_pt->toff>>2)))));
-		Bits steps = (decayrate*4 + op_pt->toff) >> 2;
-		op_pt->env_step_d = (1<<(steps<=12?12-steps:0))-1;
-	} else {
-		op_pt->decaymul = 1.0;
-		op_pt->env_step_d = 0;
+void OPL::AudioCallback(const uint16_t requested_frames)
+{
+	assert(channel);
+
+	//if (fifo.size())
+	//	LOG_MSG("OPL: Queued %2lu cycle-accurate frames", fifo.size());
+
+	auto frames_remaining = requested_frames;
+
+	// First, send any frames we've queued since the last callback
+	while (frames_remaining && fifo.size()) {
+		channel->AddSamples_sfloat(1, &fifo.front()[0]);
+		fifo.pop();
+		--frames_remaining;
 	}
-}
-
-void change_releaserate(Bitu regbase, op_type* op_pt) {
-	Bits releaserate = adlibreg[ARC_SUSL_RELR+regbase]&15;
-	// releasemul should be 1.0 when releaserate==0
-	if (releaserate) {
-		fltype f = (fltype)(-7.4493*decrelconst[op_pt->toff&3]*recipsamp);
-		op_pt->releasemul = (fltype)(pow(FL2,f*pow(FL2,(fltype)(releaserate+(op_pt->toff>>2)))));
-		Bits steps = (releaserate*4 + op_pt->toff) >> 2;
-		op_pt->env_step_r = (1<<(steps<=12?12-steps:0))-1;
-	} else {
-		op_pt->releasemul = 1.0;
-		op_pt->env_step_r = 0;
+	// If the queue's run dry, render the remainder and sync-up our time datum
+	while (frames_remaining) {
+		const auto frame = RenderFrame();
+		channel->AddSamples_sfloat(1, &frame[0]);
+		--frames_remaining;
 	}
+	last_rendered_ms = PIC_FullIndex();
 }
 
-void change_sustainlevel(Bitu regbase, op_type* op_pt) {
-	Bits sustainlevel = adlibreg[ARC_SUSL_RELR+regbase]>>4;
-	// sustainlevel should be 0.0 when sustainlevel==15 (max)
-	if (sustainlevel<15) {
-		op_pt->sustain_level = (fltype)(pow(FL2,(fltype)sustainlevel * (-FL05)));
-	} else {
-		op_pt->sustain_level = 0.0;
+void OPL::CacheWrite(const io_port_t port, const uint8_t val)
+{
+	// capturing?
+	if (capture)
+		capture->DoWrite(port, val);
+
+	// Store it into the cache
+	cache[port] = val;
+}
+
+void OPL::DualWrite(const uint8_t index, const uint8_t port, const uint8_t value)
+{
+	// Make sure you don't use opl3 features
+	// Don't allow write to disable opl3
+	if (port == 5)
+		return;
+
+	// Only allow 4 waveforms
+	auto val = value;
+	if (port >= 0xe0)
+		val &= 3;
+
+	// Write to the timer?
+	if (chip[index].Write(port, val))
+		return;
+
+	// Enabling panning
+	if (port >= 0xc0 && port <= 0xc8) {
+		val &= 0x0f;
+		val |= index ? 0xA0 : 0x50;
 	}
+	const auto full_port = check_cast<io_port_t>(port + (index ? 0x100 : 0u));
+	WriteReg(full_port, val);
+	CacheWrite(full_port, val);
 }
 
-void change_waveform(Bitu regbase, op_type* op_pt) {
-#if defined(OPLTYPE_IS_OPL3)
-	if (regbase>=ARC_SECONDSET) regbase -= (ARC_SECONDSET-22);	// second set starts at 22
-#endif
-	// waveform selection
-	op_pt->cur_wmask = wavemask[wave_sel[regbase]];
-	op_pt->cur_wform = &wavtable[waveform[wave_sel[regbase]]];
-	// (might need to be adapted to waveform type here...)
-}
+void OPL::AdlibGoldControlWrite(const uint8_t val)
+{
+	switch (ctrl.index) {
+	case 0x04:
+		adlib_gold->StereoControlWrite(StereoProcessorControlReg::VolumeLeft,
+		                               val);
+		break;
+	case 0x05:
+		adlib_gold->StereoControlWrite(StereoProcessorControlReg::VolumeRight,
+		                               val);
+		break;
+	case 0x06:
+		adlib_gold->StereoControlWrite(StereoProcessorControlReg::Bass, val);
+		break;
+	case 0x07:
+		adlib_gold->StereoControlWrite(StereoProcessorControlReg::Treble, val);
+		break;
 
-void change_keepsustain(Bitu regbase, op_type* op_pt) {
-	op_pt->sus_keep = (adlibreg[ARC_TVS_KSR_MUL+regbase]&0x20)>0;
-	if (op_pt->op_state==OF_TYPE_SUS) {
-		if (!op_pt->sus_keep) op_pt->op_state = OF_TYPE_SUS_NOKEEP;
-	} else if (op_pt->op_state==OF_TYPE_SUS_NOKEEP) {
-		if (op_pt->sus_keep) op_pt->op_state = OF_TYPE_SUS;
-	}
-}
+	case 0x08:
+		adlib_gold->StereoControlWrite(StereoProcessorControlReg::SwitchFunctions,
+		                               val);
+		break;
 
-// enable/disable vibrato/tremolo LFO effects
-void change_vibrato(Bitu regbase, op_type* op_pt) {
-	op_pt->vibrato = (adlibreg[ARC_TVS_KSR_MUL+regbase]&0x40)!=0;
-	op_pt->tremolo = (adlibreg[ARC_TVS_KSR_MUL+regbase]&0x80)!=0;
-}
-
-// change amount of self-feedback
-void change_feedback(Bitu chanbase, op_type* op_pt) {
-	Bits feedback = adlibreg[ARC_FEEDBACK+chanbase]&14;
-	if (feedback) op_pt->mfbi = (Bit32s)(pow(FL2,(fltype)((feedback>>1)+8)));
-	else op_pt->mfbi = 0;
-}
-
-void change_frequency(Bitu chanbase, Bitu regbase, op_type* op_pt) {
-	// frequency
-	Bit32u frn = ((((Bit32u)adlibreg[ARC_KON_BNUM+chanbase])&3)<<8) + (Bit32u)adlibreg[ARC_FREQ_NUM+chanbase];
-	// block number/octave
-	Bit32u oct = ((((Bit32u)adlibreg[ARC_KON_BNUM+chanbase])>>2)&7);
-	op_pt->freq_high = (Bit32s)((frn>>7)&7);
-
-	// keysplit
-	Bit32u note_sel = (adlibreg[8]>>6)&1;
-	op_pt->toff = ((frn>>9)&(note_sel^1)) | ((frn>>8)&note_sel);
-	op_pt->toff += (oct<<1);
-
-	// envelope scaling (KSR)
-	if (!(adlibreg[ARC_TVS_KSR_MUL+regbase]&0x10)) op_pt->toff >>= 2;
-
-	// 20+a0+b0:
-	op_pt->tinc = (Bit32u)((((fltype)(frn<<oct))*frqmul[adlibreg[ARC_TVS_KSR_MUL+regbase]&15]));
-	// 40+a0+b0:
-	fltype vol_in = (fltype)((fltype)(adlibreg[ARC_KSL_OUTLEV+regbase]&63) +
-							kslmul[adlibreg[ARC_KSL_OUTLEV+regbase]>>6]*kslev[oct][frn>>6]);
-	op_pt->vol = (fltype)(pow(FL2,(fltype)(vol_in * -0.125 - 14)));
-
-	// operator frequency changed, care about features that depend on it
-	change_attackrate(regbase,op_pt);
-	change_decayrate(regbase,op_pt);
-	change_releaserate(regbase,op_pt);
-}
-
-void enable_operator(Bitu regbase, op_type* op_pt, Bit32u act_type) {
-	// check if this is really an off-on transition
-	if (op_pt->act_state == OP_ACT_OFF) {
-		Bits wselbase = regbase;
-		if (wselbase>=ARC_SECONDSET) wselbase -= (ARC_SECONDSET-22);	// second set starts at 22
-
-		op_pt->tcount = wavestart[wave_sel[wselbase]]*FIXEDPT;
-
-		// start with attack mode
-		op_pt->op_state = OF_TYPE_ATT;
-		op_pt->act_state |= act_type;
-	}
-}
-
-void disable_operator(op_type* op_pt, Bit32u act_type) {
-	// check if this is really an on-off transition
-	if (op_pt->act_state != OP_ACT_OFF) {
-		op_pt->act_state &= (~act_type);
-		if (op_pt->act_state == OP_ACT_OFF) {
-			if (op_pt->op_state != OF_TYPE_OFF) op_pt->op_state = OF_TYPE_REL;
-		}
-	}
-}
-
-void adlib_init(Bit32u samplerate) {
-	Bits i, j, oct;
-
-	int_samplerate = samplerate;
-
-	generator_add = (Bit32u)(INTFREQU*FIXEDPT/int_samplerate);
-
-
-	memset((void *)adlibreg,0,sizeof(adlibreg));
-	memset((void *)op,0,sizeof(op_type)*MAXOPERATORS);
-	memset((void *)wave_sel,0,sizeof(wave_sel));
-
-	for (i=0;i<MAXOPERATORS;i++) {
-		op[i].op_state = OF_TYPE_OFF;
-		op[i].act_state = OP_ACT_OFF;
-		op[i].amp = 0.0;
-		op[i].step_amp = 0.0;
-		op[i].vol = 0.0;
-		op[i].tcount = 0;
-		op[i].tinc = 0;
-		op[i].toff = 0;
-		op[i].cur_wmask = wavemask[0];
-		op[i].cur_wform = &wavtable[waveform[0]];
-		op[i].freq_high = 0;
-
-		op[i].generator_pos = 0;
-		op[i].cur_env_step = 0;
-		op[i].env_step_a = 0;
-		op[i].env_step_d = 0;
-		op[i].env_step_r = 0;
-		op[i].step_skip_pos_a = 0;
-		op[i].env_step_skip_a = 0;
-
-#if defined(OPLTYPE_IS_OPL3)
-		op[i].is_4op = false;
-		op[i].is_4op_attached = false;
-		op[i].left_pan = 1;
-		op[i].right_pan = 1;
-#endif
-	}
-
-	recipsamp = 1.0 / (fltype)int_samplerate;
-	for (i=15;i>=0;i--) {
-		frqmul[i] = (fltype)(frqmul_tab[i]*INTFREQU/(fltype)WAVEPREC*(fltype)FIXEDPT*recipsamp);
-	}
-
-	status = 0;
-	opl_index = 0;
-
-
-	// create vibrato table
-	vib_table[0] = 8;
-	vib_table[1] = 4;
-	vib_table[2] = 0;
-	vib_table[3] = -4;
-	for (i=4; i<VIBTAB_SIZE; i++) vib_table[i] = vib_table[i-4]*-1;
-
-	// vibrato at ~6.1 ?? (opl3 docs say 6.1, opl4 docs say 6.0, y8950 docs say 6.4)
-	vibtab_add = static_cast<Bit32u>(VIBTAB_SIZE*FIXEDPT_LFO/8192*INTFREQU/int_samplerate);
-	vibtab_pos = 0;
-
-	for (i=0; i<BLOCKBUF_SIZE; i++) vibval_const[i] = 0;
-
-
-	// create tremolo table
-	Bit32s trem_table_int[TREMTAB_SIZE];
-	for (i=0; i<14; i++)	trem_table_int[i] = i-13;		// upwards (13 to 26 -> -0.5/6 to 0)
-	for (i=14; i<41; i++)	trem_table_int[i] = -i+14;		// downwards (26 to 0 -> 0 to -1/6)
-	for (i=41; i<53; i++)	trem_table_int[i] = i-40-26;	// upwards (1 to 12 -> -1/6 to -0.5/6)
-
-	for (i=0; i<TREMTAB_SIZE; i++) {
-		// 0.0 .. -26/26*4.8/6 == [0.0 .. -0.8], 4/53 steps == [1 .. 0.57]
-		fltype trem_val1=(fltype)(((fltype)trem_table_int[i])*4.8/26.0/6.0);				// 4.8db
-		fltype trem_val2=(fltype)((fltype)((Bit32s)(trem_table_int[i]/4))*1.2/6.0/6.0);		// 1.2db (larger stepping)
-
-		trem_table[i] = (Bit32s)(pow(FL2,trem_val1)*FIXEDPT);
-		trem_table[TREMTAB_SIZE+i] = (Bit32s)(pow(FL2,trem_val2)*FIXEDPT);
-	}
-
-	// tremolo at 3.7hz
-	tremtab_add = (Bit32u)((fltype)TREMTAB_SIZE * TREM_FREQ * FIXEDPT_LFO / (fltype)int_samplerate);
-	tremtab_pos = 0;
-
-	for (i=0; i<BLOCKBUF_SIZE; i++) tremval_const[i] = FIXEDPT;
-
-
-	static Bitu initfirstime = 0;
-	if (!initfirstime) {
-		initfirstime = 1;
-
-		// create waveform tables
-		for (i=0;i<(WAVEPREC>>1);i++) {
-			wavtable[(i << 1) + WAVEPREC] = (Bit16s)(
-			        16384 * sin((fltype)((i << 1)) * M_PI * 2 / WAVEPREC));
-			wavtable[(i << 1) + 1 + WAVEPREC] = (Bit16s)(
-			        16384 *
-			        sin((fltype)((i << 1) + 1) * M_PI * 2 / WAVEPREC));
-			wavtable[i] = wavtable[(i << 1) + WAVEPREC];
-			// alternative: (zero-less)
-			/*			wavtable[(i<<1)  +WAVEPREC]	=
-			   (Bit16s)(16384*sin((fltype)((i<<2)+1)*M_PI/WAVEPREC));
-			                        wavtable[(i<<1)+1+WAVEPREC] =
-			   (Bit16s)(16384*sin((fltype)((i<<2)+3)*M_PI/WAVEPREC));
-			                        wavtable[i]
-			   = wavtable[(i<<1)-1+WAVEPREC]; */
-		}
-		for (i=0;i<(WAVEPREC>>3);i++) {
-			wavtable[i+(WAVEPREC<<1)]		= wavtable[i+(WAVEPREC>>3)]-16384;
-			wavtable[i+((WAVEPREC*17)>>3)]	= wavtable[i+(WAVEPREC>>2)]+16384;
-		}
-
-		// key scale level table verified ([table in book]*8/3)
-		kslev[7][0] = 0;	kslev[7][1] = 24;	kslev[7][2] = 32;	kslev[7][3] = 37;
-		kslev[7][4] = 40;	kslev[7][5] = 43;	kslev[7][6] = 45;	kslev[7][7] = 47;
-		kslev[7][8] = 48;
-		for (i=9;i<16;i++) kslev[7][i] = (Bit8u)(i+41);
-		for (j=6;j>=0;j--) {
-			for (i=0;i<16;i++) {
-				oct = (Bits)kslev[j+1][i]-8;
-				if (oct < 0) oct = 0;
-				kslev[j][i] = (Bit8u)oct;
-			}
-		}
-	}
-
-}
-
-
-
-void adlib_write(io_port_t idx, Bit8u val) {
-	Bit32u second_set = idx&0x100;
-	adlibreg[idx] = val;
-
-	switch (idx&0xf0) {
-	case ARC_CONTROL:
-		// here we check for the second set registers, too:
-		switch (idx) {
-		case 0x02:	// timer1 counter
-		case 0x03:	// timer2 counter
-			break;
-		case 0x04:
-			// IRQ reset, timer mask/start
-			if (val&0x80) {
-				// clear IRQ bits in status register
-				status &= ~0x60;
-			} else {
-				status = 0;
-			}
-			break;
-#if defined(OPLTYPE_IS_OPL3)
-		case 0x04|ARC_SECONDSET:
-			// 4op enable/disable switches for each possible channel
-			op[0].is_4op = (val&1)>0;
-			op[3].is_4op_attached = op[0].is_4op;
-			op[1].is_4op = (val&2)>0;
-			op[4].is_4op_attached = op[1].is_4op;
-			op[2].is_4op = (val&4)>0;
-			op[5].is_4op_attached = op[2].is_4op;
-			op[18].is_4op = (val&8)>0;
-			op[21].is_4op_attached = op[18].is_4op;
-			op[19].is_4op = (val&16)>0;
-			op[22].is_4op_attached = op[19].is_4op;
-			op[20].is_4op = (val&32)>0;
-			op[23].is_4op_attached = op[20].is_4op;
-			break;
-		case 0x05|ARC_SECONDSET:
-			break;
-#endif
-		case 0x08:
-			// CSW, note select
-			break;
-		default:
-			break;
+	case 0x09: // Left FM Volume
+		ctrl.lvol = val;
+		goto setvol;
+	case 0x0a: // Right FM Volume
+		ctrl.rvol = val;
+	setvol:
+		if (ctrl.mixer) {
+			// Dune CD version uses 32 volume steps in an apparent
+			// mistake, should be 128
+			channel->SetAppVolume(
+			        static_cast<float>(ctrl.lvol & 0x1f) / 31.0f,
+			        static_cast<float>(ctrl.rvol & 0x1f) / 31.0f);
 		}
 		break;
-	case ARC_TVS_KSR_MUL:
-	case ARC_TVS_KSR_MUL+0x10: {
-		// tremolo/vibrato/sustain keeping enabled; key scale rate; frequency multiplication
-		int num = idx&7;
-		Bitu base = (idx-ARC_TVS_KSR_MUL)&0xff;
-		if ((num<6) && (base<22)) {
-			Bitu modop = regbase2modop[second_set?(base+22):base];
-			Bitu regbase = base+second_set;
-			Bitu chanbase = second_set?(modop-18+ARC_SECONDSET):modop;
 
-			// change tremolo/vibrato and sustain keeping of this operator
-			op_type *op_ptr = get_op(modop + ((num < 3) ? 0 : 9));
-			change_keepsustain(regbase,op_ptr);
-			change_vibrato(regbase,op_ptr);
-
-			// change frequency calculations of this operator as
-			// key scale rate and frequency multiplicator can be changed
-#if defined(OPLTYPE_IS_OPL3)
-			if ((adlibreg[0x105]&1) && (op[modop].is_4op_attached)) {
-				// operator uses frequency of channel
-				change_frequency(chanbase-3,regbase,op_ptr);
-			} else {
-				change_frequency(chanbase,regbase,op_ptr);
-			}
-#else
-			change_frequency(chanbase,base,op_ptr);
-#endif
-		}
-		}
-		break;
-	case ARC_KSL_OUTLEV:
-	case ARC_KSL_OUTLEV+0x10: {
-		// key scale level; output rate
-		int num = idx&7;
-		Bitu base = (idx-ARC_KSL_OUTLEV)&0xff;
-		if ((num<6) && (base<22)) {
-			Bitu modop = regbase2modop[second_set?(base+22):base];
-			Bitu chanbase = second_set?(modop-18+ARC_SECONDSET):modop;
-
-			// change frequency calculations of this operator as
-			// key scale level and output rate can be changed
-			op_type *op_ptr = get_op(modop + ((num < 3) ? 0 : 9));
-#if defined(OPLTYPE_IS_OPL3)
-			Bitu regbase = base+second_set;
-			if ((adlibreg[0x105]&1) && (op[modop].is_4op_attached)) {
-				// operator uses frequency of channel
-				change_frequency(chanbase-3,regbase,op_ptr);
-			} else {
-				change_frequency(chanbase,regbase,op_ptr);
-			}
-#else
-			change_frequency(chanbase,base,op_ptr);
-#endif
-		}
-		}
-		break;
-	case ARC_ATTR_DECR:
-	case ARC_ATTR_DECR+0x10: {
-		// attack/decay rates
-		int num = idx&7;
-		Bitu base = (idx-ARC_ATTR_DECR)&0xff;
-		if ((num<6) && (base<22)) {
-			Bitu regbase = base+second_set;
-
-			// change attack rate and decay rate of this operator
-			op_type *op_ptr = get_op(regbase2op[second_set ? (base + 22) : base]);
-			change_attackrate(regbase,op_ptr);
-			change_decayrate(regbase,op_ptr);
-		}
-		}
-		break;
-	case ARC_SUSL_RELR:
-	case ARC_SUSL_RELR+0x10: {
-		// sustain level; release rate
-		int num = idx&7;
-		Bitu base = (idx-ARC_SUSL_RELR)&0xff;
-		if ((num<6) && (base<22)) {
-			Bitu regbase = base+second_set;
-
-			// change sustain level and release rate of this operator
-			op_type *op_ptr = get_op(regbase2op[second_set ? (base + 22) : base]);
-			change_releaserate(regbase,op_ptr);
-			change_sustainlevel(regbase,op_ptr);
-		}
-		}
-		break;
-	case ARC_FREQ_NUM: {
-		// 0xa0-0xa8 low8 frequency
-		Bitu base = (idx-ARC_FREQ_NUM)&0xff;
-		if (base<9) {
-			Bits opbase = second_set?(base+18):base;
-#if defined(OPLTYPE_IS_OPL3)
-			if ((adlibreg[0x105]&1) && op[opbase].is_4op_attached) break;
-#endif
-			// regbase of modulator:
-			Bits modbase = modulatorbase[base]+second_set;
-
-			Bitu chanbase = base+second_set;
-
-			change_frequency(chanbase, modbase, get_op(opbase));
-			change_frequency(chanbase, modbase + 3, get_op(opbase + 9));
-#if defined(OPLTYPE_IS_OPL3)
-			// for 4op channels all four operators are modified to the frequency of the channel
-			if ((adlibreg[0x105]&1) && op[second_set?(base+18):base].is_4op) {
-				change_frequency(chanbase, modbase + 8, get_op(opbase + 3));
-				change_frequency(chanbase, modbase + 3 + 8, get_op(opbase + 3 + 9));
-			}
-#endif
-		}
-		}
-		break;
-	case ARC_KON_BNUM: {
-		if (idx == ARC_PERC_MODE) {
-#if defined(OPLTYPE_IS_OPL3)
-			if (second_set) return;
-#endif
-
-			if ((val&0x30) == 0x30) {		// BassDrum active
-				enable_operator(16, get_op(6), OP_ACT_PERC);
-				change_frequency(6, 16, get_op(6));
-				enable_operator(16 + 3, get_op(6 + 9), OP_ACT_PERC);
-				change_frequency(6, 16 + 3, get_op(6 + 9));
-			} else {
-				disable_operator(get_op(6), OP_ACT_PERC);
-				disable_operator(get_op(6 + 9), OP_ACT_PERC);
-			}
-			if ((val&0x28) == 0x28) {		// Snare active
-				enable_operator(17 + 3, get_op(16), OP_ACT_PERC);
-				change_frequency(7, 17 + 3, get_op(16));
-			} else {
-				disable_operator(get_op(16), OP_ACT_PERC);
-			}
-			if ((val&0x24) == 0x24) {		// TomTom active
-				enable_operator(18, get_op(8), OP_ACT_PERC);
-				change_frequency(8, 18, get_op(8));
-			} else {
-				disable_operator(get_op(8), OP_ACT_PERC);
-			}
-			if ((val&0x22) == 0x22) {		// Cymbal active
-				enable_operator(18 + 3, get_op(8 + 9), OP_ACT_PERC);
-				change_frequency(8, 18 + 3, get_op(8 + 9));
-			} else {
-				disable_operator(get_op(8 + 9), OP_ACT_PERC);
-			}
-			if ((val&0x21) == 0x21) {		// Hihat active
-				enable_operator(17, get_op(7), OP_ACT_PERC);
-				change_frequency(7, 17, get_op(7));
-			} else {
-				disable_operator(get_op(7), OP_ACT_PERC);
-			}
-
-			break;
-		}
-		// regular 0xb0-0xb8
-		Bitu base = (idx-ARC_KON_BNUM)&0xff;
-		if (base<9) {
-			Bits opbase = second_set?(base+18):base;
-#if defined(OPLTYPE_IS_OPL3)
-			if ((adlibreg[0x105]&1) && op[opbase].is_4op_attached) break;
-#endif
-			// regbase of modulator:
-			Bits modbase = modulatorbase[base]+second_set;
-
-			if (val&32) {
-				// operator switched on
-				enable_operator(modbase, get_op(opbase), OP_ACT_NORMAL); // modulator (if 2op)
-				enable_operator(modbase + 3, get_op(opbase + 9), OP_ACT_NORMAL); // carrier (if 2op)
-#if defined(OPLTYPE_IS_OPL3)
-				// for 4op channels all four operators are switched on
-				if ((adlibreg[0x105]&1) && op[opbase].is_4op) {
-					// turn on chan+3 operators as well
-					enable_operator(modbase + 8, get_op(opbase + 3), OP_ACT_NORMAL);
-					enable_operator(modbase + 3 + 8, get_op(opbase + 3 + 9), OP_ACT_NORMAL);
-				}
-#endif
-			} else {
-				// operator switched off
-				disable_operator(get_op(opbase), OP_ACT_NORMAL);
-				disable_operator(get_op(opbase + 9), OP_ACT_NORMAL);
-#if defined(OPLTYPE_IS_OPL3)
-				// for 4op channels all four operators are switched off
-				if ((adlibreg[0x105]&1) && op[opbase].is_4op) {
-					// turn off chan+3 operators as well
-					disable_operator(get_op(opbase + 3), OP_ACT_NORMAL);
-					disable_operator(get_op(opbase + 3 + 9), OP_ACT_NORMAL);
-				}
-#endif
-			}
-
-			Bitu chanbase = base+second_set;
-
-			// change frequency calculations of modulator and carrier (2op) as
-			// the frequency of the channel has changed
-			change_frequency(chanbase, modbase, get_op(opbase));
-			change_frequency(chanbase, modbase + 3, get_op(opbase + 9));
-#if defined(OPLTYPE_IS_OPL3)
-			// for 4op channels all four operators are modified to the frequency of the channel
-			if ((adlibreg[0x105]&1) && op[second_set?(base+18):base].is_4op) {
-				// change frequency calculations of chan+3 operators as well
-				change_frequency(chanbase, modbase + 8, get_op(opbase + 3));
-				change_frequency(chanbase, modbase + 3 + 8, get_op(opbase + 3 + 9));
-			}
-#endif
-		}
-		}
-		break;
-	case ARC_FEEDBACK: {
-		// 0xc0-0xc8 feedback/modulation type (AM/FM)
-		Bitu base = (idx-ARC_FEEDBACK)&0xff;
-		if (base<9) {
-			Bits opbase = second_set?(base+18):base;
-			Bitu chanbase = base+second_set;
-			change_feedback(chanbase, get_op(opbase));
-#if defined(OPLTYPE_IS_OPL3)
-			// OPL3 panning
-			op[opbase].left_pan = ((val&0x10)>>4);
-			op[opbase].right_pan = ((val&0x20)>>5);
-#endif
-		}
-		}
-		break;
-	case ARC_WAVE_SEL:
-	case ARC_WAVE_SEL+0x10: {
-		int num = idx&7;
-		Bitu base = (idx-ARC_WAVE_SEL)&0xff;
-		if ((num<6) && (base<22)) {
-#if defined(OPLTYPE_IS_OPL3)
-			Bits wselbase = second_set?(base+22):base;	// for easier mapping onto wave_sel[]
-			// change waveform
-			if (adlibreg[0x105]&1) wave_sel[wselbase] = val&7;	// opl3 mode enabled, all waveforms accessible
-			else wave_sel[wselbase] = val&3;
-			op_type *op_ptr = get_op(regbase2modop[wselbase] + ((num < 3) ? 0 : 9));
-			change_waveform(wselbase,op_ptr);
-#else
-			if (adlibreg[0x01]&0x20) {
-				// wave selection enabled, change waveform
-				wave_sel[base] = val&3;
-				op_type *op_ptr = get_op(regbase2modop[base] + ((num < 3) ? 0 : 9));
-				change_waveform(base,op_ptr);
-			}
-#endif
-		}
-		}
-		break;
-	default:
-		break;
+	case 0x18: // Surround
+		adlib_gold->SurroundControlWrite(val);
 	}
 }
 
+uint8_t OPL::AdlibGoldControlRead()
+{
+	switch (ctrl.index) {
+	case 0x00: // Board Options
+		return 0x50; // 16-bit ISA, surround module, no
+		             // telephone/CDROM
+		// return 0x70; // 16-bit ISA, no
+		             // telephone/surround/CD-ROM
 
-uint8_t adlib_reg_read(io_port_t port) {
-#if defined(OPLTYPE_IS_OPL3)
-	// opl3-detection routines require ret&6 to be zero
-	if ((port&1)==0) {
-		return status;
-	}
-	return 0x00;
-#else
-	// opl2-detection routines require ret&6 to be 6
-	if ((port&1)==0) {
-		return status|6;
+	case 0x09: // Left FM Volume
+		return ctrl.lvol;
+	case 0x0a: // Right FM Volume
+		return ctrl.rvol;
+	case 0x15: // Audio Relocation
+		return 0x388 >> 3; // Cryo installer detection
 	}
 	return 0xff;
-#endif
 }
 
-void adlib_write_index(MAYBE_UNUSED io_port_t port, uint8_t val) {
-	opl_index = val;
-#if defined(OPLTYPE_IS_OPL3)
-	if ((port&3)!=0) {
-		// possibly second set
-		if (((adlibreg[0x105]&1)!=0) || (opl_index==5)) opl_index |= ARC_SECONDSET;
-	}
-#endif
-}
-
-static INLINE void clipit16(int32_t ival, int16_t *outval)
+void OPL::PortWrite(const io_port_t port, const io_val_t value, const io_width_t)
 {
-	if (ival<32768) {
-		if (ival>-32769) {
-			*outval=(Bit16s)ival;
-		} else {
-			*outval = -32768;
+	RenderUpToNow();
+
+	const auto val = check_cast<uint8_t>(value);
+
+	if (port & 1) {
+		switch (mode) {
+		case Mode::Opl3Gold:
+			if (port == 0x38b) {
+				if (ctrl.active) {
+					AdlibGoldControlWrite(val);
+					break;
+				}
+			}
+			[[fallthrough]];
+		case Mode::Opl2:
+		case Mode::Opl3:
+			if (!chip[0].Write(reg.normal, val)) {
+				WriteReg(reg.normal, val);
+				CacheWrite(reg.normal, val);
+			}
+			break;
+		case Mode::DualOpl2:
+			// Not a 0x??8 port, then write to a specific port
+			if (!(port & 0x8)) {
+				uint8_t index = (port & 2) >> 1;
+				DualWrite(index, reg.dual[index], val);
+			} else {
+				// Write to both ports
+				DualWrite(0, reg.dual[0], val);
+				DualWrite(1, reg.dual[1], val);
+			}
+			break;
 		}
 	} else {
-		*outval = 32767;
+		// Ask the handler to write the address
+		// Make sure to clip them in the right range
+		switch (mode) {
+		case Mode::Opl2:
+			reg.normal = WriteAddr(port, val) & 0xff;
+			break;
+		case Mode::Opl3Gold:
+			if (port == 0x38a) {
+				if (val == 0xff) {
+					ctrl.active = true;
+					break;
+				} else if (val == 0xfe) {
+					ctrl.active = false;
+					break;
+				} else if (ctrl.active) {
+					ctrl.index = val & 0xff;
+					break;
+				}
+			}
+			[[fallthrough]];
+		case Mode::Opl3:
+			reg.normal = WriteAddr(port, val) & 0x1ff;
+			break;
+		case Mode::DualOpl2:
+			// Not a 0x?88 port, when write to a specific side
+			if (!(port & 0x8)) {
+				uint8_t index   = (port & 2) >> 1;
+				reg.dual[index] = val & 0xff;
+			} else {
+				reg.dual[0] = val & 0xff;
+				reg.dual[1] = val & 0xff;
+			}
+			break;
+		default:
+			// TODO CMS and None must be removed as they're not real OPL modes
+			break;
+		}
 	}
 }
 
-// be careful with this
-// uses cptr and chanval, outputs into outbufl(/outbufr)
-// for opl3 check if opl3-mode is enabled (which uses stereo panning)
-#undef CHANVAL_OUT
-#if defined(OPLTYPE_IS_OPL3)
-#define CHANVAL_OUT									\
-	if (adlibreg[0x105]&1) {						\
-		outbufl[i] += chanval*cptr[0].left_pan;		\
-		outbufr[i] += chanval*cptr[0].right_pan;	\
-	} else {										\
-		outbufl[i] += chanval;						\
+uint8_t OPL::PortRead(const io_port_t port, const io_width_t)
+{
+	// roughly half a micro (as we already do 1 micro on each port read and
+	// some tests revealed it taking 1.5 micros to read an adlib port)
+	auto delaycyc = (CPU_CycleMax / 2048);
+	if (GCC_UNLIKELY(delaycyc > CPU_Cycles))
+		delaycyc = CPU_Cycles;
+
+	CPU_Cycles -= delaycyc;
+	CPU_IODelayRemoved += delaycyc;
+
+	switch (mode) {
+	case Mode::Opl2:
+		// We allocated 4 ports, so just return -1 for the higher ones
+		if (!(port & 3))
+			// Make sure the low bits are 6 on opl2
+			return chip[0].Read() | 0x6;
+		else
+			return 0xff;
+
+	case Mode::Opl3Gold:
+		if (ctrl.active) {
+			if (port == 0x38a)
+				return 0; // Control status, not busy
+			else if (port == 0x38b)
+				return AdlibGoldControlRead();
+		}
+		[[fallthrough]];
+	case Mode::Opl3:
+		// We allocated 4 ports, so just return -1 for the higher ones
+		if (!(port & 3))
+			return chip[0].Read();
+		else
+			return 0xff;
+
+	case Mode::DualOpl2:
+		// Only return for the lower ports
+		if (port & 1)
+			return 0xff;
+		// Make sure the low bits are 6 on opl2
+		return chip[(port >> 1) & 1].Read() | 0x6;
+
+	default:
+		// TODO CMS and None must be removed as they're not real OPL modes
+		break;
 	}
-#else
-#define CHANVAL_OUT									\
-	outbufl[i] += chanval;
-#endif
-
-void adlib_getsample(Bit16s* sndptr, Bits numsamples) {
-	Bits i, endsamples;
-	op_type* cptr;
-
-	Bit32s outbufl[BLOCKBUF_SIZE];
-#if defined(OPLTYPE_IS_OPL3)
-	// second output buffer (right channel for opl3 stereo)
-	Bit32s outbufr[BLOCKBUF_SIZE];
-#endif
-
-	// vibrato/tremolo lookup tables (global, to possibly be used by all operators)
-	Bit32s vib_lut[BLOCKBUF_SIZE];
-	Bit32s trem_lut[BLOCKBUF_SIZE];
-
-	Bits samples_to_process = numsamples;
-
-	for (Bits cursmp=0; cursmp<samples_to_process; cursmp+=endsamples) {
-		endsamples = samples_to_process-cursmp;
-		if (endsamples>BLOCKBUF_SIZE) endsamples = BLOCKBUF_SIZE;
-
-		memset((void*)&outbufl,0,endsamples*sizeof(Bit32s));
-#if defined(OPLTYPE_IS_OPL3)
-		// clear second output buffer (opl3 stereo)
-		if (adlibreg[0x105]&1) memset((void*)&outbufr,0,endsamples*sizeof(Bit32s));
-#endif
-
-		// calculate vibrato/tremolo lookup tables
-		Bit32s vib_tshift = ((adlibreg[ARC_PERC_MODE]&0x40)==0) ? 1 : 0;	// 14cents/7cents switching
-		for (i=0;i<endsamples;i++) {
-			// cycle through vibrato table
-			vibtab_pos += vibtab_add;
-			if (vibtab_pos/FIXEDPT_LFO>=VIBTAB_SIZE) vibtab_pos-=VIBTAB_SIZE*FIXEDPT_LFO;
-			vib_lut[i] = vib_table[vibtab_pos/FIXEDPT_LFO]>>vib_tshift;		// 14cents (14/100 of a semitone) or 7cents
-
-			// cycle through tremolo table
-			tremtab_pos += tremtab_add;
-			if (tremtab_pos/FIXEDPT_LFO>=TREMTAB_SIZE) tremtab_pos-=TREMTAB_SIZE*FIXEDPT_LFO;
-			if (adlibreg[ARC_PERC_MODE]&0x80) trem_lut[i] = trem_table[tremtab_pos/FIXEDPT_LFO];
-			else trem_lut[i] = trem_table[TREMTAB_SIZE+tremtab_pos/FIXEDPT_LFO];
-		}
-
-		if (adlibreg[ARC_PERC_MODE]&0x20) {
-			//BassDrum
-			cptr = get_op(6);
-			if (adlibreg[ARC_FEEDBACK+6]&1) {
-				// additive synthesis
-				if (cptr[9].op_state != OF_TYPE_OFF) {
-					if (cptr[9].vibrato) {
-						vibval1 = vibval_var1;
-						for (i=0;i<endsamples;i++)
-							vibval1[i] = (Bit32s)((vib_lut[i]*cptr[9].freq_high/8)*FIXEDPT*VIBFAC);
-					} else vibval1 = vibval_const;
-					if (cptr[9].tremolo) tremval1 = trem_lut;	// tremolo enabled, use table
-					else tremval1 = tremval_const;
-
-					// calculate channel output
-					for (i=0;i<endsamples;i++) {
-						operator_advance(&cptr[9],vibval1[i]);
-						opfuncs[cptr[9].op_state](&cptr[9]);
-						operator_output(&cptr[9],0,tremval1[i]);
-						
-						Bit32s chanval = cptr[9].cval*2;
-						CHANVAL_OUT
-					}
-				}
-			} else {
-				// frequency modulation
-				if ((cptr[9].op_state != OF_TYPE_OFF) || (cptr[0].op_state != OF_TYPE_OFF)) {
-					if ((cptr[0].vibrato) && (cptr[0].op_state != OF_TYPE_OFF)) {
-						vibval1 = vibval_var1;
-						for (i=0;i<endsamples;i++)
-							vibval1[i] = (Bit32s)((vib_lut[i]*cptr[0].freq_high/8)*FIXEDPT*VIBFAC);
-					} else vibval1 = vibval_const;
-					if ((cptr[9].vibrato) && (cptr[9].op_state != OF_TYPE_OFF)) {
-						vibval2 = vibval_var2;
-						for (i=0;i<endsamples;i++)
-							vibval2[i] = (Bit32s)((vib_lut[i]*cptr[9].freq_high/8)*FIXEDPT*VIBFAC);
-					} else vibval2 = vibval_const;
-					if (cptr[0].tremolo) tremval1 = trem_lut;	// tremolo enabled, use table
-					else tremval1 = tremval_const;
-					if (cptr[9].tremolo) tremval2 = trem_lut;	// tremolo enabled, use table
-					else tremval2 = tremval_const;
-
-					// calculate channel output
-					for (i=0;i<endsamples;i++) {
-						operator_advance(&cptr[0],vibval1[i]);
-						opfuncs[cptr[0].op_state](&cptr[0]);
-						operator_output(&cptr[0],(cptr[0].lastcval+cptr[0].cval)*cptr[0].mfbi/2,tremval1[i]);
-
-						operator_advance(&cptr[9],vibval2[i]);
-						opfuncs[cptr[9].op_state](&cptr[9]);
-						operator_output(&cptr[9],cptr[0].cval*FIXEDPT,tremval2[i]);
-						
-						Bit32s chanval = cptr[9].cval*2;
-						CHANVAL_OUT
-					}
-				}
-			}
-
-			//TomTom (j=8)
-			if (op[8].op_state != OF_TYPE_OFF) {
-				cptr = get_op(8);
-				if (cptr[0].vibrato) {
-					vibval3 = vibval_var1;
-					for (i=0;i<endsamples;i++)
-						vibval3[i] = (Bit32s)((vib_lut[i]*cptr[0].freq_high/8)*FIXEDPT*VIBFAC);
-				} else vibval3 = vibval_const;
-
-				if (cptr[0].tremolo) tremval3 = trem_lut;	// tremolo enabled, use table
-				else tremval3 = tremval_const;
-
-				// calculate channel output
-				for (i=0;i<endsamples;i++) {
-					operator_advance(&cptr[0],vibval3[i]);
-					opfuncs[cptr[0].op_state](&cptr[0]);		//TomTom
-					operator_output(&cptr[0],0,tremval3[i]);
-					Bit32s chanval = cptr[0].cval*2;
-					CHANVAL_OUT
-				}
-			}
-
-			//Snare/Hihat (j=7), Cymbal (j=8)
-			if ((op[7].op_state != OF_TYPE_OFF) || (op[16].op_state != OF_TYPE_OFF) ||
-				(op[17].op_state != OF_TYPE_OFF)) {
-				cptr = get_op(7);
-				if ((cptr[0].vibrato) && (cptr[0].op_state != OF_TYPE_OFF)) {
-					vibval1 = vibval_var1;
-					for (i=0;i<endsamples;i++)
-						vibval1[i] = (Bit32s)((vib_lut[i]*cptr[0].freq_high/8)*FIXEDPT*VIBFAC);
-				} else vibval1 = vibval_const;
-				if ((cptr[9].vibrato) && (cptr[9].op_state == OF_TYPE_OFF)) {
-					vibval2 = vibval_var2;
-					for (i=0;i<endsamples;i++)
-						vibval2[i] = (Bit32s)((vib_lut[i]*cptr[9].freq_high/8)*FIXEDPT*VIBFAC);
-				} else vibval2 = vibval_const;
-
-				if (cptr[0].tremolo) tremval1 = trem_lut;	// tremolo enabled, use table
-				else tremval1 = tremval_const;
-				if (cptr[9].tremolo) tremval2 = trem_lut;	// tremolo enabled, use table
-				else tremval2 = tremval_const;
-
-				cptr = get_op(8);
-				if ((cptr[9].vibrato) && (cptr[9].op_state == OF_TYPE_OFF)) {
-					vibval4 = vibval_var2;
-					for (i=0;i<endsamples;i++)
-						vibval4[i] = (Bit32s)((vib_lut[i]*cptr[9].freq_high/8)*FIXEDPT*VIBFAC);
-				} else vibval4 = vibval_const;
-
-				if (cptr[9].tremolo) tremval4 = trem_lut;	// tremolo enabled, use table
-				else tremval4 = tremval_const;
-
-				// calculate channel output
-				for (i=0;i<endsamples;i++) {
-					operator_advance_drums(get_op(7), vibval1[i], get_op(7 + 9),
-					                       vibval2[i], get_op(8 + 9), vibval4[i]);
-
-					opfuncs[op[7].op_state](get_op(7)); // Hihat
-					operator_output(get_op(7), 0, tremval1[i]);
-
-					opfuncs[op[7 + 9].op_state](get_op(7 + 9)); // Snare
-					operator_output(get_op(7 + 9), 0, tremval2[i]);
-
-					opfuncs[op[8 + 9].op_state](get_op(8 + 9)); // Cymbal
-					operator_output(get_op(8 + 9), 0, tremval4[i]);
-
-					Bit32s chanval = (op[7].cval + op[7+9].cval + op[8+9].cval)*2;
-					CHANVAL_OUT
-				}
-			}
-		}
-
-		Bitu max_channel = NUM_CHANNELS;
-#if defined(OPLTYPE_IS_OPL3)
-		if ((adlibreg[0x105]&1)==0) max_channel = NUM_CHANNELS/2;
-#endif
-		for (Bits cur_ch=max_channel-1; cur_ch>=0; cur_ch--) {
-			// skip drum/percussion operators
-			if ((adlibreg[ARC_PERC_MODE]&0x20) && (cur_ch >= 6) && (cur_ch < 9)) continue;
-
-			Bitu k = cur_ch;
-#if defined(OPLTYPE_IS_OPL3)
-			if (cur_ch < 9) {
-				cptr = get_op(cur_ch);
-			} else {
-				cptr = get_op(cur_ch + 9); // second set is operator18-operator35
-				k += (-9+256);		// second set uses registers 0x100 onwards
-			}
-			// check if this operator is part of a 4-op
-			if ((adlibreg[0x105]&1) && cptr->is_4op_attached) continue;
-#else
-			cptr = get_op(cur_ch);
-#endif
-
-			// check for FM/AM
-			if (adlibreg[ARC_FEEDBACK+k]&1) {
-#if defined(OPLTYPE_IS_OPL3)
-				if ((adlibreg[0x105]&1) && cptr->is_4op) {
-					if (adlibreg[ARC_FEEDBACK+k+3]&1) {
-						// AM-AM-style synthesis (op1[fb] + (op2 * op3) + op4)
-						if (cptr[0].op_state != OF_TYPE_OFF) {
-							if (cptr[0].vibrato) {
-								vibval1 = vibval_var1;
-								for (i=0;i<endsamples;i++)
-									vibval1[i] = (Bit32s)((vib_lut[i]*cptr[0].freq_high/8)*FIXEDPT*VIBFAC);
-							} else vibval1 = vibval_const;
-							if (cptr[0].tremolo) tremval1 = trem_lut;	// tremolo enabled, use table
-							else tremval1 = tremval_const;
-
-							// calculate channel output
-							for (i=0;i<endsamples;i++) {
-								operator_advance(&cptr[0],vibval1[i]);
-								opfuncs[cptr[0].op_state](&cptr[0]);
-								operator_output(&cptr[0],(cptr[0].lastcval+cptr[0].cval)*cptr[0].mfbi/2,tremval1[i]);
-
-								Bit32s chanval = cptr[0].cval;
-								CHANVAL_OUT
-							}
-						}
-
-						if ((cptr[3].op_state != OF_TYPE_OFF) || (cptr[9].op_state != OF_TYPE_OFF)) {
-							if ((cptr[9].vibrato) && (cptr[9].op_state != OF_TYPE_OFF)) {
-								vibval1 = vibval_var1;
-								for (i=0;i<endsamples;i++)
-									vibval1[i] = (Bit32s)((vib_lut[i]*cptr[9].freq_high/8)*FIXEDPT*VIBFAC);
-							} else vibval1 = vibval_const;
-							if (cptr[9].tremolo) tremval1 = trem_lut;	// tremolo enabled, use table
-							else tremval1 = tremval_const;
-							if (cptr[3].tremolo) tremval2 = trem_lut;	// tremolo enabled, use table
-							else tremval2 = tremval_const;
-
-							// calculate channel output
-							for (i=0;i<endsamples;i++) {
-								operator_advance(&cptr[9],vibval1[i]);
-								opfuncs[cptr[9].op_state](&cptr[9]);
-								operator_output(&cptr[9],0,tremval1[i]);
-
-								operator_advance(&cptr[3],0);
-								opfuncs[cptr[3].op_state](&cptr[3]);
-								operator_output(&cptr[3],cptr[9].cval*FIXEDPT,tremval2[i]);
-
-								Bit32s chanval = cptr[3].cval;
-								CHANVAL_OUT
-							}
-						}
-
-						if (cptr[3+9].op_state != OF_TYPE_OFF) {
-							if (cptr[3+9].tremolo) tremval1 = trem_lut;	// tremolo enabled, use table
-							else tremval1 = tremval_const;
-
-							// calculate channel output
-							for (i=0;i<endsamples;i++) {
-								operator_advance(&cptr[3+9],0);
-								opfuncs[cptr[3+9].op_state](&cptr[3+9]);
-								operator_output(&cptr[3+9],0,tremval1[i]);
-
-								Bit32s chanval = cptr[3+9].cval;
-								CHANVAL_OUT
-							}
-						}
-					} else {
-						// AM-FM-style synthesis (op1[fb] + (op2 * op3 * op4))
-						if (cptr[0].op_state != OF_TYPE_OFF) {
-							if (cptr[0].vibrato) {
-								vibval1 = vibval_var1;
-								for (i=0;i<endsamples;i++)
-									vibval1[i] = (Bit32s)((vib_lut[i]*cptr[0].freq_high/8)*FIXEDPT*VIBFAC);
-							} else vibval1 = vibval_const;
-							if (cptr[0].tremolo) tremval1 = trem_lut;	// tremolo enabled, use table
-							else tremval1 = tremval_const;
-
-							// calculate channel output
-							for (i=0;i<endsamples;i++) {
-								operator_advance(&cptr[0],vibval1[i]);
-								opfuncs[cptr[0].op_state](&cptr[0]);
-								operator_output(&cptr[0],(cptr[0].lastcval+cptr[0].cval)*cptr[0].mfbi/2,tremval1[i]);
-
-								Bit32s chanval = cptr[0].cval;
-								CHANVAL_OUT
-							}
-						}
-
-						if ((cptr[9].op_state != OF_TYPE_OFF) || (cptr[3].op_state != OF_TYPE_OFF) || (cptr[3+9].op_state != OF_TYPE_OFF)) {
-							if ((cptr[9].vibrato) && (cptr[9].op_state != OF_TYPE_OFF)) {
-								vibval1 = vibval_var1;
-								for (i=0;i<endsamples;i++)
-									vibval1[i] = (Bit32s)((vib_lut[i]*cptr[9].freq_high/8)*FIXEDPT*VIBFAC);
-							} else vibval1 = vibval_const;
-							if (cptr[9].tremolo) tremval1 = trem_lut;	// tremolo enabled, use table
-							else tremval1 = tremval_const;
-							if (cptr[3].tremolo) tremval2 = trem_lut;	// tremolo enabled, use table
-							else tremval2 = tremval_const;
-							if (cptr[3+9].tremolo) tremval3 = trem_lut;	// tremolo enabled, use table
-							else tremval3 = tremval_const;
-
-							// calculate channel output
-							for (i=0;i<endsamples;i++) {
-								operator_advance(&cptr[9],vibval1[i]);
-								opfuncs[cptr[9].op_state](&cptr[9]);
-								operator_output(&cptr[9],0,tremval1[i]);
-
-								operator_advance(&cptr[3],0);
-								opfuncs[cptr[3].op_state](&cptr[3]);
-								operator_output(&cptr[3],cptr[9].cval*FIXEDPT,tremval2[i]);
-
-								operator_advance(&cptr[3+9],0);
-								opfuncs[cptr[3+9].op_state](&cptr[3+9]);
-								operator_output(&cptr[3+9],cptr[3].cval*FIXEDPT,tremval3[i]);
-
-								Bit32s chanval = cptr[3+9].cval;
-								CHANVAL_OUT
-							}
-						}
-					}
-					continue;
-				}
-#endif
-				// 2op additive synthesis
-				if ((cptr[9].op_state == OF_TYPE_OFF) && (cptr[0].op_state == OF_TYPE_OFF)) continue;
-				if ((cptr[0].vibrato) && (cptr[0].op_state != OF_TYPE_OFF)) {
-					vibval1 = vibval_var1;
-					for (i=0;i<endsamples;i++)
-						vibval1[i] = (Bit32s)((vib_lut[i]*cptr[0].freq_high/8)*FIXEDPT*VIBFAC);
-				} else vibval1 = vibval_const;
-				if ((cptr[9].vibrato) && (cptr[9].op_state != OF_TYPE_OFF)) {
-					vibval2 = vibval_var2;
-					for (i=0;i<endsamples;i++)
-						vibval2[i] = (Bit32s)((vib_lut[i]*cptr[9].freq_high/8)*FIXEDPT*VIBFAC);
-				} else vibval2 = vibval_const;
-				if (cptr[0].tremolo) tremval1 = trem_lut;	// tremolo enabled, use table
-				else tremval1 = tremval_const;
-				if (cptr[9].tremolo) tremval2 = trem_lut;	// tremolo enabled, use table
-				else tremval2 = tremval_const;
-
-				// calculate channel output
-				for (i=0;i<endsamples;i++) {
-					// carrier1
-					operator_advance(&cptr[0],vibval1[i]);
-					opfuncs[cptr[0].op_state](&cptr[0]);
-					operator_output(&cptr[0],(cptr[0].lastcval+cptr[0].cval)*cptr[0].mfbi/2,tremval1[i]);
-
-					// carrier2
-					operator_advance(&cptr[9],vibval2[i]);
-					opfuncs[cptr[9].op_state](&cptr[9]);
-					operator_output(&cptr[9],0,tremval2[i]);
-
-					Bit32s chanval = cptr[9].cval + cptr[0].cval;
-					CHANVAL_OUT
-				}
-			} else {
-#if defined(OPLTYPE_IS_OPL3)
-				if ((adlibreg[0x105]&1) && cptr->is_4op) {
-					if (adlibreg[ARC_FEEDBACK+k+3]&1) {
-						// FM-AM-style synthesis ((op1[fb] * op2) + (op3 * op4))
-						if ((cptr[0].op_state != OF_TYPE_OFF) || (cptr[9].op_state != OF_TYPE_OFF)) {
-							if ((cptr[0].vibrato) && (cptr[0].op_state != OF_TYPE_OFF)) {
-								vibval1 = vibval_var1;
-								for (i=0;i<endsamples;i++)
-									vibval1[i] = (Bit32s)((vib_lut[i]*cptr[0].freq_high/8)*FIXEDPT*VIBFAC);
-							} else vibval1 = vibval_const;
-							if ((cptr[9].vibrato) && (cptr[9].op_state != OF_TYPE_OFF)) {
-								vibval2 = vibval_var2;
-								for (i=0;i<endsamples;i++)
-									vibval2[i] = (Bit32s)((vib_lut[i]*cptr[9].freq_high/8)*FIXEDPT*VIBFAC);
-							} else vibval2 = vibval_const;
-							if (cptr[0].tremolo) tremval1 = trem_lut;	// tremolo enabled, use table
-							else tremval1 = tremval_const;
-							if (cptr[9].tremolo) tremval2 = trem_lut;	// tremolo enabled, use table
-							else tremval2 = tremval_const;
-
-							// calculate channel output
-							for (i=0;i<endsamples;i++) {
-								operator_advance(&cptr[0],vibval1[i]);
-								opfuncs[cptr[0].op_state](&cptr[0]);
-								operator_output(&cptr[0],(cptr[0].lastcval+cptr[0].cval)*cptr[0].mfbi/2,tremval1[i]);
-
-								operator_advance(&cptr[9],vibval2[i]);
-								opfuncs[cptr[9].op_state](&cptr[9]);
-								operator_output(&cptr[9],cptr[0].cval*FIXEDPT,tremval2[i]);
-
-								Bit32s chanval = cptr[9].cval;
-								CHANVAL_OUT
-							}
-						}
-
-						if ((cptr[3].op_state != OF_TYPE_OFF) || (cptr[3+9].op_state != OF_TYPE_OFF)) {
-							if (cptr[3].tremolo) tremval1 = trem_lut;	// tremolo enabled, use table
-							else tremval1 = tremval_const;
-							if (cptr[3+9].tremolo) tremval2 = trem_lut;	// tremolo enabled, use table
-							else tremval2 = tremval_const;
-
-							// calculate channel output
-							for (i=0;i<endsamples;i++) {
-								operator_advance(&cptr[3],0);
-								opfuncs[cptr[3].op_state](&cptr[3]);
-								operator_output(&cptr[3],0,tremval1[i]);
-
-								operator_advance(&cptr[3+9],0);
-								opfuncs[cptr[3+9].op_state](&cptr[3+9]);
-								operator_output(&cptr[3+9],cptr[3].cval*FIXEDPT,tremval2[i]);
-
-								Bit32s chanval = cptr[3+9].cval;
-								CHANVAL_OUT
-							}
-						}
-
-					} else {
-						// FM-FM-style synthesis (op1[fb] * op2 * op3 * op4)
-						if ((cptr[0].op_state != OF_TYPE_OFF) || (cptr[9].op_state != OF_TYPE_OFF) || 
-							(cptr[3].op_state != OF_TYPE_OFF) || (cptr[3+9].op_state != OF_TYPE_OFF)) {
-							if ((cptr[0].vibrato) && (cptr[0].op_state != OF_TYPE_OFF)) {
-								vibval1 = vibval_var1;
-								for (i=0;i<endsamples;i++)
-									vibval1[i] = (Bit32s)((vib_lut[i]*cptr[0].freq_high/8)*FIXEDPT*VIBFAC);
-							} else vibval1 = vibval_const;
-							if ((cptr[9].vibrato) && (cptr[9].op_state != OF_TYPE_OFF)) {
-								vibval2 = vibval_var2;
-								for (i=0;i<endsamples;i++)
-									vibval2[i] = (Bit32s)((vib_lut[i]*cptr[9].freq_high/8)*FIXEDPT*VIBFAC);
-							} else vibval2 = vibval_const;
-							if (cptr[0].tremolo) tremval1 = trem_lut;	// tremolo enabled, use table
-							else tremval1 = tremval_const;
-							if (cptr[9].tremolo) tremval2 = trem_lut;	// tremolo enabled, use table
-							else tremval2 = tremval_const;
-							if (cptr[3].tremolo) tremval3 = trem_lut;	// tremolo enabled, use table
-							else tremval3 = tremval_const;
-							if (cptr[3+9].tremolo) tremval4 = trem_lut;	// tremolo enabled, use table
-							else tremval4 = tremval_const;
-
-							// calculate channel output
-							for (i=0;i<endsamples;i++) {
-								operator_advance(&cptr[0],vibval1[i]);
-								opfuncs[cptr[0].op_state](&cptr[0]);
-								operator_output(&cptr[0],(cptr[0].lastcval+cptr[0].cval)*cptr[0].mfbi/2,tremval1[i]);
-
-								operator_advance(&cptr[9],vibval2[i]);
-								opfuncs[cptr[9].op_state](&cptr[9]);
-								operator_output(&cptr[9],cptr[0].cval*FIXEDPT,tremval2[i]);
-
-								operator_advance(&cptr[3],0);
-								opfuncs[cptr[3].op_state](&cptr[3]);
-								operator_output(&cptr[3],cptr[9].cval*FIXEDPT,tremval3[i]);
-
-								operator_advance(&cptr[3+9],0);
-								opfuncs[cptr[3+9].op_state](&cptr[3+9]);
-								operator_output(&cptr[3+9],cptr[3].cval*FIXEDPT,tremval4[i]);
-
-								Bit32s chanval = cptr[3+9].cval;
-								CHANVAL_OUT
-							}
-						}
-					}
-					continue;
-				}
-#endif
-				// 2op frequency modulation
-				if ((cptr[9].op_state == OF_TYPE_OFF) && (cptr[0].op_state == OF_TYPE_OFF)) continue;
-				if ((cptr[0].vibrato) && (cptr[0].op_state != OF_TYPE_OFF)) {
-					vibval1 = vibval_var1;
-					for (i=0;i<endsamples;i++)
-						vibval1[i] = (Bit32s)((vib_lut[i]*cptr[0].freq_high/8)*FIXEDPT*VIBFAC);
-				} else vibval1 = vibval_const;
-				if ((cptr[9].vibrato) && (cptr[9].op_state != OF_TYPE_OFF)) {
-					vibval2 = vibval_var2;
-					for (i=0;i<endsamples;i++)
-						vibval2[i] = (Bit32s)((vib_lut[i]*cptr[9].freq_high/8)*FIXEDPT*VIBFAC);
-				} else vibval2 = vibval_const;
-				if (cptr[0].tremolo) tremval1 = trem_lut;	// tremolo enabled, use table
-				else tremval1 = tremval_const;
-				if (cptr[9].tremolo) tremval2 = trem_lut;	// tremolo enabled, use table
-				else tremval2 = tremval_const;
-
-				// calculate channel output
-				for (i=0;i<endsamples;i++) {
-					// modulator
-					operator_advance(&cptr[0],vibval1[i]);
-					opfuncs[cptr[0].op_state](&cptr[0]);
-					operator_output(&cptr[0],(cptr[0].lastcval+cptr[0].cval)*cptr[0].mfbi/2,tremval1[i]);
-
-					// carrier
-					operator_advance(&cptr[9],vibval2[i]);
-					opfuncs[cptr[9].op_state](&cptr[9]);
-					operator_output(&cptr[9],cptr[0].cval*FIXEDPT,tremval2[i]);
-
-					Bit32s chanval = cptr[9].cval;
-					CHANVAL_OUT
-				}
-			}
-		}
-
-#if defined(OPLTYPE_IS_OPL3)
-		if (adlibreg[0x105]&1) {
-			// convert to 16bit samples (stereo)
-			for (i=0;i<endsamples;i++) {
-				clipit16(outbufl[i],sndptr++);
-				clipit16(outbufr[i],sndptr++);
-			}
-		} else {
-			// convert to 16bit samples (mono)
-			for (i=0;i<endsamples;i++) {
-				clipit16(outbufl[i],sndptr++);
-				clipit16(outbufl[i],sndptr++);
-			}
-		}
-#else
-		// convert to 16bit samples
-		for (i=0;i<endsamples;i++)
-			clipit16(outbufl[i],sndptr++);
-#endif
-
+	return 0;
+}
+
+// Save the current state of the operators as instruments in an Reality AdLib
+// Tracker (RAD) file
+#if 0
+static void SaveRad()
+{
+	char b[16 * 1024];
+	int w = 0;
+
+	FILE *handle = CAPTURE_CreateFile(CaptureType::RadOplInstruments);
+	if (!handle)
+		return;
+
+	// Header
+	fwrite("RAD by REALiTY!!", 1, 16, handle);
+	b[w++] = 0x10; // version
+	b[w++] = 0x06; // default speed and no description
+	               //
+	// Write 18 instuments for all operators in the cache
+	for (int i = 0; i < 18; i++) {
+		const uint8_t *set  = opl->cache + (i / 9) * 256;
+		const auto offset   = ((i % 9) / 3) * 8 + (i % 3);
+		const uint8_t *base = set + offset;
+
+		b[w++] = 1 + i; // instrument number
+		b[w++] = base[0x23];
+		b[w++] = base[0x20];
+		b[w++] = base[0x43];
+		b[w++] = base[0x40];
+		b[w++] = base[0x63];
+		b[w++] = base[0x60];
+		b[w++] = base[0x83];
+		b[w++] = base[0x80];
+		b[w++] = set[0xc0 + (i % 9)];
+		b[w++] = base[0xe3];
+		b[w++] = base[0xe0];
 	}
+	b[w++] = 0; // instrument 0, no more instruments following
+	b[w++] = 1; // 1 pattern following
+
+	// Zero out the remaining part of the file a bit to make rad happy
+	for (int i = 0; i < 64; i++)
+		b[w++] = 0;
+
+	fwrite(b, 1, w, handle);
+	fclose(handle);
+}
+#endif
+
+static void OPL_SaveRawEvent(const bool pressed)
+{
+	if (!pressed)
+		return;
+	//	SaveRad();return;
+
+	if (!opl) {
+		LOG_WARNING("OPL: Can't capture the OPL stream because the OPL device is unavailable");
+		return;
+	}
+
+	// Are we already recording? If so, close the stream
+	if (opl->capture) {
+		opl->capture.reset();
+	}
+	// Otherwise start a new recording
+	else {
+		opl->capture = std::make_unique<Capture>(&opl->cache);
+	}
+}
+
+static std::string opl_mode_to_string(const Mode mode)
+{
+	switch (mode) {
+	case Mode::Opl2:     return "OPL2";
+	case Mode::DualOpl2: return "DualOPL2";
+	case Mode::Opl3:     return "OPL3";
+	case Mode::Opl3Gold: return "OPL3Gold";
+	}
+	return "Unknown";
+}
+
+OPL::OPL(Section *configuration, const OplMode oplmode)
+{
+	assert(oplmode != OplMode::Cms);
+	assert(oplmode != OplMode::None);
+
+	switch (oplmode) {
+	case OplMode::Opl2:     mode = Mode::Opl2;     break;
+	case OplMode::DualOpl2: mode = Mode::DualOpl2; break;
+	case OplMode::Opl3:     mode = Mode::Opl3;     break;
+	case OplMode::Opl3Gold: mode = Mode::Opl3Gold; break;
+	default: break;
+	}
+
+	Section_prop *section = static_cast<Section_prop *>(configuration);
+	const auto base = static_cast<uint16_t>(section->Get_hex("sbbase"));
+
+	ctrl.mixer = section->Get_bool("sbmixer");
+
+	std::set channel_features = {ChannelFeature::Sleep,
+	                             ChannelFeature::ReverbSend,
+	                             ChannelFeature::ChorusSend,
+	                             ChannelFeature::Synthesizer};
+
+	const auto dual_opl = mode != Mode::Opl2;
+
+	if (dual_opl)
+		channel_features.emplace(ChannelFeature::Stereo);
+
+	const auto mixer_callback = std::bind(&OPL::AudioCallback,
+	                                      this,
+	                                      std::placeholders::_1);
+
+	// Register the Audio channel
+	channel = MIXER_AddChannel(mixer_callback, use_mixer_rate, "OPL", channel_features);
+
+	// Used to be 2.0, which was measured to be too high. Exact value
+	// depends on card/clone.
+	//
+	// Please don't touch this value *EVER* again as many people fine-tune
+	// their mixer volumes per game, so changing this would break their
+	// settings. The value cannot be "improved"; there's simply no
+	// universally "good" setting that would work well in all games in
+	// existence.
+	constexpr auto opl_volume_scale_factor = 1.5f;
+	channel->Set0dbScalar(opl_volume_scale_factor);
+
+	Init(check_cast<uint16_t>(channel->GetSampleRate()));
+
+	using namespace std::placeholders;
+
+	const auto read_from = std::bind(&OPL::PortRead, this, _1, _2);
+	const auto write_to  = std::bind(&OPL::PortWrite, this, _1, _2, _3);
+
+	// 0x388-0x38b ports (read/write)
+	constexpr io_port_t port_0x388 = 0x388;
+	WriteHandler[0].Install(port_0x388, write_to, io_width_t::byte, 4);
+	ReadHandler[0].Install(port_0x388, read_from, io_width_t::byte, 4);
+
+	// 0x220-0x223 ports (read/write)
+	if (dual_opl) {
+		WriteHandler[1].Install(base, write_to, io_width_t::byte, 4);
+		ReadHandler[1].Install(base, read_from, io_width_t::byte, 4);
+	}
+	// 0x228-0x229 ports (write)
+	WriteHandler[2].Install(base + 8u, write_to, io_width_t::byte, 2);
+
+	// 0x228 port (read)
+	ReadHandler[2].Install(base + 8u, read_from, io_width_t::byte, 1);
+
+	MAPPER_AddHandler(OPL_SaveRawEvent, SDL_SCANCODE_UNKNOWN, 0, "caprawopl", "Rec. OPL");
+
+	LOG_MSG("OPL: Running %s on ports %xh and %xh",
+	        opl_mode_to_string(mode).c_str(),
+	        base,
+	        port_0x388);
+}
+
+OPL::~OPL()
+{
+	LOG_MSG("OPL: Shutting down %s", opl_mode_to_string(mode).c_str());
+
+	// Stop playback
+	if (channel) {
+		channel->Enable(false);
+	}
+
+	// Stop the game from accessing the IO ports
+	for (auto& rh : ReadHandler) {
+		rh.Uninstall();
+	}
+	for (auto& wh : WriteHandler) {
+		wh.Uninstall();
+	}
+
+	// Deregister the mixer channel, after which it's cleaned up
+	assert(channel);
+	MIXER_DeregisterChannel(channel);
+}
+
+void OPL_ShutDown([[maybe_unused]] Section* sec)
+{
+	opl = {};
+}
+
+void OPL_Init(Section* sec, const OplMode oplmode)
+{
+	assert(sec);
+	opl = std::make_unique<OPL>(sec, oplmode);
+
+	constexpr auto changeable_at_runtime = true;
+	sec->AddDestroyFunction(&OPL_ShutDown, changeable_at_runtime);
 }

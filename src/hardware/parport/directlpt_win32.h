@@ -36,12 +36,12 @@
 class CDirectLPT : public CParallel {
 public:
 	//HANDLE driverHandle;
-	Bit32u realbaseaddress;
-	Bit8u originalECPControlReg;
+	uint32_t realbaseaddress;
+	uint8_t originalECPControlReg;
 	
 	CDirectLPT(
 			Bitu nr,
-			Bit8u initIrq,
+			uint8_t initIrq,
 			CommandLine* cmd
             );
 	
@@ -61,9 +61,9 @@ public:
 	void Write_PR(Bitu);
 	void Write_CON(Bitu);
 	void Write_IOSEL(Bitu);
-	bool Putchar(Bit8u);
+	bool Putchar(uint8_t);
 
-	void handleUpperEvent(Bit16u type);
+	void handleUpperEvent(uint16_t type);
 };
 
 #endif	// WIN32

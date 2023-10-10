@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2022  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -38,125 +38,6 @@ TEST(DriveIndex, DriveZ)
 {
 	EXPECT_EQ(25, drive_index('z'));
 	EXPECT_EQ(25, drive_index('Z'));
-}
-
-TEST(Support_split_delim, NoBoundingDelims)
-{
-	const std::vector<std::string> expected({"a", "/b", "/c/d", "/e/f/"});
-	EXPECT_EQ(split("a:/b:/c/d:/e/f/", ':'), expected);
-	EXPECT_EQ(split("a /b /c/d /e/f/", ' '), expected);
-	EXPECT_EQ(split("abc", 'x'), std::vector<std::string>{"abc"});
-}
-
-TEST(Support_split_delim, DelimAtStartNotEnd)
-{
-	const std::vector<std::string> expected({"", "a", "/b", "/c/d", "/e/f/"});
-	EXPECT_EQ(split(":a:/b:/c/d:/e/f/", ':'), expected);
-	EXPECT_EQ(split(" a /b /c/d /e/f/", ' '), expected);
-}
-
-TEST(Support_split_delim, DelimAtEndNotStart)
-{
-	const std::vector<std::string> expected({"a", "/b", "/c/d", "/e/f/", ""});
-	EXPECT_EQ(split("a:/b:/c/d:/e/f/:", ':'), expected);
-	EXPECT_EQ(split("a /b /c/d /e/f/ ", ' '), expected);
-}
-
-TEST(Support_split_delim, DelimsAtBoth)
-{
-	const std::vector<std::string> expected({"", "a", "/b", "/c/d", "/e/f/", ""});
-	EXPECT_EQ(split(":a:/b:/c/d:/e/f/:", ':'), expected);
-	EXPECT_EQ(split(" a /b /c/d /e/f/ ", ' '), expected);
-}
-
-TEST(Support_split_delim, MultiInternalDelims)
-{
-	const std::vector<std::string> expected(
-	        {"a", "/b", "", "/c/d", "", "", "/e/f/"});
-	EXPECT_EQ(split("a:/b::/c/d:::/e/f/", ':'), expected);
-	EXPECT_EQ(split("a /b  /c/d   /e/f/", ' '), expected);
-}
-
-TEST(Support_split_delim, MultiBoundingDelims)
-{
-	const std::vector<std::string> expected(
-	        {"", "", "a", "/b", "/c/d", "/e/f/", "", "", ""});
-	EXPECT_EQ(split("::a:/b:/c/d:/e/f/:::", ':'), expected);
-	EXPECT_EQ(split("  a /b /c/d /e/f/   ", ' '), expected);
-}
-
-TEST(Support_split_delim, MixedDelims)
-{
-	const std::vector<std::string> expected(
-	        {"", "", "a", "/b", "", "/c/d", "/e/f/"});
-	EXPECT_EQ(split("::a:/b::/c/d:/e/f/", ':'), expected);
-	EXPECT_EQ(split("  a /b  /c/d /e/f/", ' '), expected);
-}
-
-TEST(Support_split_delim, Empty)
-{
-	const std::vector<std::string> empty;
-	const std::vector<std::string> two({"", ""});
-	const std::vector<std::string> three({"", "", ""});
-
-	EXPECT_EQ(split("", ':'), empty);
-	EXPECT_EQ(split(":", ':'), two);
-	EXPECT_EQ(split("::", ':'), three);
-	EXPECT_EQ(split("", ' '), empty);
-	EXPECT_EQ(split(" ", ' '), two);
-	EXPECT_EQ(split("  ", ' '), three);
-}
- 
-TEST(Support_split, NoBoundingWhitespace)
-{
-	const std::vector<std::string> expected({"a", "/b", "/c/d", "/e/f/"});
-	EXPECT_EQ(split("a /b /c/d /e/f/"), expected);
-	EXPECT_EQ(split("abc"), std::vector<std::string>{"abc"});
-}
-TEST(Support_split, WhitespaceAtStartNotEnd)
-{
-	const std::vector<std::string> expected({"a", "/b", "/c/d", "/e/f/"});
-	EXPECT_EQ(split(" a /b /c/d /e/f/"), expected);
-}
-
-TEST(Support_split, WhitespaceAtEndNotStart)
-{
-	const std::vector<std::string> expected({"a", "/b", "/c/d", "/e/f/"});
-	EXPECT_EQ(split("a /b /c/d /e/f/ "), expected);
-}
-
-TEST(Support_split, WhitespaceAtBoth)
-{
-	const std::vector<std::string> expected({"a", "/b", "/c/d", "/e/f/"});
-	EXPECT_EQ(split(" a /b /c/d /e/f/ "), expected);
-}
-
-TEST(Support_split, MultiInternalWhitespace)
-{
-	const std::vector<std::string> expected({"a", "/b", "/c/d", "/e/f/"});
-	EXPECT_EQ(split("a /b  /c/d   /e/f/"), expected);
-}
-
-TEST(Support_split, MultiBoundingWhitespace)
-{
-	const std::vector<std::string> expected({"a", "/b", "/c/d", "/e/f/"});
-	EXPECT_EQ(split("  a /b /c/d /e/f/   "), expected);
-}
-
-TEST(Support_split, MixedWhitespace)
-{
-	const std::vector<std::string> expected({"a", "b", "c"});
-	EXPECT_EQ(split("\t\na\f\vb\rc"), expected);
-	EXPECT_EQ(split("a\tb\f\vc"), expected);
-	EXPECT_EQ(split(" a \n \v \r b \f \r c "), expected);
-}
-
-TEST(Support_split, Empty)
-{
-	const std::vector<std::string> empty;
-	EXPECT_EQ(split(""), empty);
-	EXPECT_EQ(split(" "), empty);
-	EXPECT_EQ(split("   "), empty);
 }
 
 TEST(Support_next_int, Signed)
@@ -275,110 +156,89 @@ TEST(Support_next_uint, UnsignedInvalid)
 	EXPECT_NE(typeid(next_uint_t<uint64_t>), typeid(uint32_t));
 }
 
-TEST(Support_left_shift_signed, Positive)
+template <typename T>
+void test_randomizer(const T min_value, const T max_value)
 {
-	// shifting zero ...
-	int8_t var_8bit = 0;
-	int16_t var_16bit = 0;
-	int32_t var_32bit = 0;
-	// by zero
-	EXPECT_EQ(left_shift_signed(var_8bit, 0), 0);
-	EXPECT_EQ(left_shift_signed(var_16bit, 0), 0);
-	EXPECT_EQ(left_shift_signed(var_32bit, 0), 0);
+	// Ensure the range is valid
+	ASSERT_LT(min_value, max_value);
 
-	// shifting one ...
-	var_8bit = 1;
-	var_16bit = 1;
-	var_32bit = 1;
+	// Calculate one quarter of the range to roughly test the distribution
+	// of the generated values
+	const auto quarter_range = (max_value - min_value) / 4;
+	ASSERT_GT(quarter_range, 0);
 
-	// by four
-	EXPECT_EQ(left_shift_signed(var_8bit, 4), 16);
-	EXPECT_EQ(left_shift_signed(var_16bit, 4), 16);
-	EXPECT_EQ(left_shift_signed(var_32bit, 4), 16);
+	// Calculate a value roughly 25% greater than min
+	const auto near_min = min_value + quarter_range;
+	ASSERT_GT(near_min, min_value);
 
-	// by max signed bits
-	EXPECT_EQ(left_shift_signed(var_8bit, 6), 64);
-	EXPECT_EQ(left_shift_signed(var_16bit, 14), 16384);
-	EXPECT_EQ(left_shift_signed(var_32bit, 30), 1073741824);
+	// Calculate a value oughly 25% less than max
+	const auto near_max = max_value - quarter_range;
+	ASSERT_LT(near_max, max_value);
 
-	// max shiftable value before overflow
-	var_8bit = INT8_MAX / 2;
-	var_16bit = INT16_MAX / 2;
-	var_32bit = INT32_MAX / 2;
+	// State trackers of what we've found so far
+	bool found_near_middle = false;
+	bool found_near_min = false;
+	bool found_near_max = false;
 
-	EXPECT_EQ(left_shift_signed(var_8bit, 1), INT8_MAX - 1);
-	EXPECT_EQ(left_shift_signed(var_16bit, 1), INT16_MAX - 1);
-	EXPECT_EQ(left_shift_signed(var_32bit, 1), INT32_MAX - 1);
+	// Create a random value generator
+	const auto generate_random_value = CreateRandomizer<T>(min_value, max_value);
+
+	constexpr auto max_iterations = 1000;
+
+	// Start generating and testing values
+	for (auto i = 0; i < max_iterations; ++i) {
+
+		const auto v = generate_random_value();
+		EXPECT_GE(v, min_value);
+		EXPECT_LE(v, max_value);
+
+		const auto values_span_range = found_near_middle && found_near_min && found_near_max;
+		if (values_span_range) {
+			break;
+		}
+		else if (v > near_min && v < near_max) {
+			found_near_middle = true;
+		}
+		else if (v < near_min) {
+			found_near_min = true;
+		} else if (v > near_max) {
+			found_near_max = true;
+		}
+	}
+	// We can only pass when values have been found near the middle, min, and max before we pass the test
+	ASSERT_TRUE(found_near_middle);
+	ASSERT_TRUE(found_near_min);
+	ASSERT_TRUE(found_near_max);
 }
 
-TEST(Support_left_shift_signed, PositiveOverflow)
+TEST(CreateRandomizer, RangeOfLetters)
 {
-	int8_t var_8bit = INT8_MAX;
-	int16_t var_16bit = INT16_MAX;
-	int32_t var_32bit = INT32_MAX;
+	// Ensure we're dealing with the standard ASCII character values
+	ASSERT_EQ('A', 65);
+	ASSERT_EQ('z', 122);
 
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_8bit, 1); }, "");
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_16bit, 1); }, "");
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_32bit, 1); }, "");
-
-	var_8bit = 1;
-	var_16bit = 1;
-	var_32bit = 1;
-
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_8bit, 7); }, "");
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_16bit, 15); }, "");
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_32bit, 31); }, "");
+	test_randomizer<int16_t>('A', 'z');
 }
 
-TEST(Support_left_shift_signed, Negative)
+TEST(CreateRandomizer, RangeOfFloats)
 {
-	// shifting negative one ...
-	int8_t var_8bit = -1;
-	int16_t var_16bit = -1;
-	int32_t var_32bit = -1;
+	// positive range
+	test_randomizer(1000.0f, 2000.0f);
 
-	// by four
-	EXPECT_EQ(left_shift_signed(var_8bit, 4), -16);
-	EXPECT_EQ(left_shift_signed(var_16bit, 4), -16);
-	EXPECT_EQ(left_shift_signed(var_32bit, 4), -16);
+	// negative range
+	test_randomizer(-2000.0f, -1000.0f);
 
-	// by max signed bits
-	EXPECT_EQ(left_shift_signed(var_8bit, 7), INT8_MIN);
-	EXPECT_EQ(left_shift_signed(var_16bit, 15), INT16_MIN);
-	EXPECT_EQ(left_shift_signed(var_32bit, 31), INT32_MIN);
+	// postitive and negative range
+	test_randomizer(-32000.0f, 32000.0f);
 
-	// max shiftable value before overflow
-	var_8bit = INT8_MIN / 2;
-	var_16bit = INT16_MIN / 2;
-	var_32bit = INT32_MIN / 2;
+	// positive percent-as-ratio
+	test_randomizer(0.0f, 1.0f);
 
-	EXPECT_EQ(left_shift_signed(var_8bit, 1), INT8_MIN);
-	EXPECT_EQ(left_shift_signed(var_16bit, 1), INT16_MIN);
-	EXPECT_EQ(left_shift_signed(var_32bit, 1), INT32_MIN);
-}
+	// negative percent-as-ratio
+	test_randomizer(-1.0f, 0.0f);
 
-TEST(Support_left_shift_signed, NegativeOverflow)
-{
-	int8_t var_8bit = INT8_MIN;
-	int16_t var_16bit = INT16_MIN;
-	int32_t var_32bit = INT32_MIN;
-
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_8bit, 1); }, "");
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_16bit, 1); }, "");
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_32bit, 1); }, "");
-
-	var_8bit = -1;
-	var_16bit = -1;
-	var_32bit = -1;
-
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_8bit, 8); }, "");
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_16bit, 16); }, "");
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_32bit, 32); }, "");
-
-	// Shift a negative number of bits
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_8bit, -1); }, "");
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_16bit, -100); }, "");
-	EXPECT_DEBUG_DEATH({ left_shift_signed(var_32bit, -10000); }, "");
+	// postitive and negative percent-as-ratio
+	test_randomizer(-1.0f, 1.0f);
 }
 
 } // namespace

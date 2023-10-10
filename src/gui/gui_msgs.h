@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -22,9 +22,9 @@
 #define DOSBOX_GUI_MSGS_H
 
 constexpr char version_msg[] =
-        R"(dosbox (dosbox-staging), version %s
+        R"(%s, version %s
 
-Copyright (C) 2020-2021  The DOSBox Staging Team
+Copyright (C) 2020-2023  The DOSBox Staging Team
 License: GNU GPL-2.0-or-later <https://www.gnu.org/licenses/gpl-2.0.html>
 
 This is free software, and you are welcome to change and redistribute it under
@@ -35,43 +35,65 @@ There is NO WARRANTY, to the extent permitted by law.
 constexpr char help_msg[] =
         R"(Usage: dosbox [OPTION]... [FILE]
 
-These are common options:
+List of available options:
 
-  -h, --help          Displays this message.
+  --conf <config_file>     Start with the options specified in <config_file>.
+                           Multiple configuration files can be specified.
+                           Example: --conf conf1.conf --conf conf2.conf
 
-  --printconf         Prints the location of the default configuration file.
+  --printconf              Print the location of the primary configuration file.
 
-  --editconf          Open the default configuration file in a text editor.
+  --editconf               Open the primary configuration file in a text editor.
 
-  -c <command>        Runs the specified DOS command before running FILE.
-                      Multiple commands can be specified.
+  --eraseconf              Delete the primary configuration file.
 
-  -conf <configfile>  Start dosbox with the options specified in <configfile>.
-                      Multiple configfiles can be present at the commandline.
+  --noprimaryconf          Don't load or create the the primary configuration file.
 
-  -userconf           Load the configuration file located in
-                      ~/.config/dosbox. Can be combined with the -conf
-                      option.
+  --nolocalconf            Don't load the local "dosbox.conf" configuration file
+                           if present in the current working directory.
 
-  -fullscreen         Start dosbox in fullscreen mode.
+  --set <setting>=<value>  Set a configuration setting. Multiple configuration
+                           settings can be specified. Example:
+                           --set mididevice=fluidsynth --set soundfont=mysoundfont.sf2
 
-  -lang <langfile>    Start dosbox with the language specified in
-                      <langfile>.
+  --working-dir <path>     Set working directory to <path>. DOSBox will act as if
+                           started from this directory.
 
-  -machine <type>     Setup dosbox to emulate a specific type of machine.
-                      The machine type has influence on both the videocard
-                      and the emulated soundcards.  Valid choices are:
-                      hercules, cga, cga_mono, tandy, pcjr, ega, vgaonly,
-                      svga_s3 (default), svga_et3000, svga_et4000,
-                      svga_paradise, vesa_nolfb, vesa_oldvbe.
+  --list-glshaders         List all available OpenGL shaders and their paths.
+                           Results are useable in the "glshader = " config setting.
 
-  -exit               Dosbox will close itself when the DOS program
-                      specified by FILE ends.
+  --fullscreen             Start in fullscreen mode.
 
-  -v, --version       Output version information and exit.
+  --lang <lang_file>       Start with the language specified in <lang_file>.
 
-You can find full list of options in the man page: dosbox(1)
-And in file: /usr/share/doc/dosbox-staging/README
+  --machine <type>         Emulate a specific type of machine. The machine type has
+                           influence on both the emulated video and sound cards.
+                           Valid choices are: hercules, cga, cga_mono, tandy,
+                           pcjr, ega, svga_s3 (default), svga_et3000, svga_et4000,
+                           svga_paradise, vesa_nolfb, vesa_oldvbe.
+
+  -c <command>             Run the specified DOS command before running FILE.
+                           Multiple commands can be specified.
+
+  --noautoexec             Don't execute DOS commands from any [autoexec] sections.
+
+  --exit                   Exit after the DOS program specified by FILE has ended.
+                           If no FILE has been specified, execute [autoexec] and
+                           terminate.
+
+  --startmapper            Run the mapper GUI.
+
+  --erasemapper            Delete the default mapper file.
+
+  --securemode             Enable secure mode. The [config] and [autoexec] sections
+                           of the loaded configurations will be ignored, and
+                           commands such as MOUNT and IMGMOUNT are disabled.
+
+  --socket <num>           Run nullmodem on the specified socket number.
+
+  -h, --help               Print this help message and exit.
+
+  -v, --version            Print version information and exit.
 )";
 
 #endif

@@ -21,15 +21,22 @@
 #include "program_loadfix.h"
 
 #include "dosbox.h"
+#include "program_more_output.h"
 #include "shell.h"
 #include "string_utils.h"
 
 void LOADFIX::Run(void)
 {
-	Bit16u commandNr = 1;
-	Bit16u kb = 64;
+	if (HelpRequested()) {
+		MoreOutputStrings output(*this);
+		output.AddString(MSG_Get("PROGRAM_LOADFIX_HELP_LONG"));
+		output.Display();
+		return;
+	}
+	uint16_t commandNr = 1;
+	uint16_t kb = 64;
 	if (cmd->FindCommand(commandNr, temp_line)) {
-		if (temp_line[0] == '-') {
+		if (temp_line[0] == '-' || temp_line[0] == '/') {
 			const auto ch = std::toupper(temp_line[1]);
 			if ((ch == 'D') || (ch == 'F')) {
 				// Deallocate all
@@ -45,10 +52,10 @@ void LOADFIX::Run(void)
 		}
 	}
 	// Allocate Memory
-	Bit16u segment;
-	Bit16u blocks = kb*1024/16;
+	uint16_t segment;
+	uint16_t blocks = kb*1024/16;
 	if (DOS_AllocateMemory(&segment,&blocks)) {
-		DOS_MCB mcb((Bit16u)(segment-1));
+		DOS_MCB mcb((uint16_t)(segment-1));
 		mcb.SetPSPSeg(0x40);			// use fake segment
 		WriteOut(MSG_Get("PROGRAM_LOADFIX_ALLOC"),kb);
 		// Prepare commandline...
@@ -69,7 +76,7 @@ void LOADFIX::Run(void)
 			}
 			// Use shell to start program
 			DOS_Shell shell;
-			shell.Execute(filename,args);
+			shell.ExecuteProgram(filename, args);
 			DOS_FreeMemory(segment);
 			WriteOut(MSG_Get("PROGRAM_LOADFIX_DEALLOC"),kb);
 		}
@@ -78,6 +85,29 @@ void LOADFIX::Run(void)
 	}
 }
 
-void LOADFIX_ProgramStart(Program **make) {
-	*make=new LOADFIX;
+void LOADFIX::AddMessages() {
+	MSG_Add("PROGRAM_LOADFIX_HELP_LONG",
+	        "Loads a program in the specific memory region and then runs it.\n"
+	        "\n"
+	        "Usage:\n"
+	        "  [color=light-green]loadfix[reset] [color=light-cyan]GAME[reset] [color=white][PARAMETERS][reset]\n"
+	        "  [color=light-green]loadfix[reset] [/d] (or [/f])[reset]\n"
+	        "\n"
+	        "Where:\n"
+	        "  [color=light-cyan]GAME[reset] is a game or program to be loaded, optionally with parameters.\n"
+	        "\n"
+	        "Notes:\n"
+	        "  The most common use cases of this command are to fix DOS games or programs\n"
+	        "  which show either the \"[color=white]Packed File Corrupt[reset]\" or \"[color=white]Not enough memory\"[reset] (e.g.,\n"
+	        "  from some 1980's games such as California Games II) error message when run.\n"
+	        "  Running [color=light-green]loadfix[reset] without an argument simply allocates memory for your game\n"
+	        "  to run; you can free the memory with either /d or /f option when it finishes.\n"
+	        "\n"
+	        "Examples:\n"
+	        "  [color=light-green]loadfix[reset] [color=light-cyan]mygame[reset] [color=white]args[reset]\n"
+	        "  [color=light-green]loadfix[reset] /d\n");
+	MSG_Add("PROGRAM_LOADFIX_ALLOC", "%d kB allocated.\n");
+	MSG_Add("PROGRAM_LOADFIX_DEALLOC", "%d kB freed.\n");
+	MSG_Add("PROGRAM_LOADFIX_DEALLOCALL","Used memory freed.\n");
+	MSG_Add("PROGRAM_LOADFIX_ERROR","Memory allocation error.\n");
 }

@@ -1,5 +1,8 @@
 /*
- *  Copyright (C) 2002-2021  The DOSBox Team
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2019-2023  The DOSBox Staging Team
+ *  Copyright (C) 2002-2018  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,7 +19,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-/* 
+/*
 	Based of sn76496.c of the M.A.M.E. project
 */
 
@@ -52,12 +55,12 @@ reached.
 The DOSBox-X project has faithfully [*] replicated this hardware artifact using
 the following code-snippet:
 
-if (tandy.dac.dma.last_sample != 128) {
+if (dma.last_sample != 128) {
         for (Bitu ct=0; ct < length; ct++) {
-                tandy.dac.chan->AddSamples_m8(1,&tandy.dac.dma.last_sample);
-                if (tandy.dac.dma.last_sample != 128)
-                        tandy.dac.dma.last_sample =
-(Bit8u)(((((int)tandy.dac.dma.last_sample - 128) * 63) / 64) + 128);
+                channel->AddSamples_m8(1,&dma.last_sample);
+                if (dma.last_sample != 128)
+                        dma.last_sample =
+(uint8_t)(((((int)dma.last_sample - 128) * 63) / 64) + 128);
         }
 }
 
@@ -75,13 +78,15 @@ centerline.
 #include "dosbox.h"
 
 #include <algorithm>
-#include <cstring>
-#include <math.h>
+#include <array>
+#include <queue>
+#include <string_view>
 
 #include "dma.h"
 #include "hardware.h"
 #include "inout.h"
 #include "mem.h"
+#include "math_utils.h"
 #include "mixer.h"
 #include "pic.h"
 #include "setup.h"
@@ -89,129 +94,255 @@ centerline.
 #include "mame/emu.h"
 #include "mame/sn76496.h"
 
-constexpr int SOUND_CLOCK = 14318180 / 4;
-constexpr uint16_t TDAC_DMA_BUFSIZE = 1024;
+#include "residfp/resample/TwoPassSincResampler.h"
 
-static struct {
-	MixerChannel *chan = nullptr;
-	bool enabled = false;
-	Bitu last_write = 0u;
-	struct {
-		MixerChannel *chan = nullptr;
-		bool enabled = false;
-		struct {
-			Bitu base = 0u;
-			Bit8u irq = 0u;
-			Bit8u dma = 0u;
-		} hw;
-		struct {
-			Bitu rate = 0u;
-			Bit8u buf[TDAC_DMA_BUFSIZE] = {};
-			DmaChannel *chan = nullptr;
-			bool transfer_done = false;
-		} dma;
-		Bit8u mode = 0u;
-		Bit8u control = 0u;
-		Bit16u frequency = 0u;
-		Bit8u amplitude = 0u;
+using namespace std::placeholders;
+
+// Constants used by the DAC and PSG
+constexpr uint16_t card_base_offset = 288;
+constexpr auto tandy_psg_clock_hz   = 14318180 / 4;
+
+enum class ConfigProfile {
+	TandySystem,
+	PCjrSystem,
+	SoundCardOnly,
+	SoundCardRemoved,
+};
+
+static void shutdown_dac(Section*);
+
+class TandyDAC {
+public:
+	struct IOConfig {
+		uint16_t base = 0;
+		uint8_t irq = 0;
+		uint8_t dma = 0;
+	};
+	struct DMA {
+		std::array<uint8_t, 128> fifo = {};
+		DmaChannel *channel = nullptr;
+		bool is_done = false;
+	};
+	struct Registers {
+		uint16_t frequency = 0;
+		uint8_t mode = 0;
+		uint8_t control = 0;
+		uint8_t amplitude = 0;
 		bool irq_activated = false;
-	} dac = {};
-} tandy = {};
+	};
 
-static sn76496_device device_sn76496(machine_config(), 0, 0, SOUND_CLOCK );
-static ncr8496_device device_ncr8496(machine_config(), 0, 0, SOUND_CLOCK);
+	// There's only one Tandy sound's IO configuration, so make it permanent
+	static constexpr IOConfig io = {0xc4, 7, 1};
 
-static sn76496_base_device* activeDevice = &device_ncr8496;
-#define device (*activeDevice)
+	TandyDAC(const ConfigProfile config_profile,
+	         const std::string_view filter_choice);
+	~TandyDAC();
 
-static void SN76496Write(io_port_t, uint8_t data, io_width_t)
+	bool IsEnabled() const
+	{
+		return is_enabled;
+	}
+
+private:
+	void ChangeMode();
+	void DmaCallback(const DmaChannel* chan, DMAEvent event);
+	uint8_t ReadFromPort(io_port_t port, io_width_t);
+	void WriteToPort(io_port_t port, io_val_t value, io_width_t);
+	void AudioCallback(uint16_t requested);
+	TandyDAC() = delete;
+
+	DMA dma = {};
+
+	// Managed objects
+	mixer_channel_t channel = nullptr;
+	IO_ReadHandleObject read_handler = {};
+	IO_WriteHandleObject write_handlers[2] = {};
+
+	// States
+	Registers regs = {};
+	int sample_rate = 0;
+	bool is_enabled = false;
+};
+
+class TandyPSG {
+public:
+	TandyPSG(const ConfigProfile config_profile, const bool is_dac_enabled,
+	         const std::string_view filter_choice);
+	~TandyPSG();
+
+private:
+	TandyPSG() = delete;
+	TandyPSG(const TandyPSG &) = delete;
+	TandyPSG &operator=(const TandyPSG &) = delete;
+
+	void AudioCallback(uint16_t requested_frames);
+	bool MaybeRenderFrame(float &frame);
+	void RenderUpToNow();
+	void WriteToPort(io_port_t, io_val_t value, io_width_t);
+
+	// Managed objects
+	mixer_channel_t channel                                  = nullptr;
+	IO_WriteHandleObject write_handlers[2]                   = {};
+	std::unique_ptr<sn76496_base_device> device              = {};
+	std::unique_ptr<reSIDfp::TwoPassSincResampler> resampler = {};
+	std::queue<float> fifo                                   = {};
+
+	// Static rate-related configuration
+	static constexpr auto render_divisor = 16;
+	static constexpr auto render_rate_hz = ceil_sdivide(tandy_psg_clock_hz,
+	                                                    render_divisor);
+	static constexpr auto ms_per_render  = millis_in_second / render_rate_hz;
+
+	// Runtime states
+	device_sound_interface *dsi       = nullptr;
+	double last_rendered_ms           = 0.0;
+};
+
+static void setup_filters(mixer_channel_t &channel) {
+	// The filters are meant to emulate the bandwidth limited sound of the
+	// small integrated speaker of the Tandy. This more accurately
+	// reflects people's actual experience of the Tandy sound than the raw
+	// unfiltered output, and it's a lot more pleasant to listen to,
+	// especially in headphones.
+	constexpr auto hp_order       = 3;
+	constexpr auto hp_cutoff_freq = 120;
+	channel->ConfigureHighPassFilter(hp_order, hp_cutoff_freq);
+	channel->SetHighPassFilter(FilterState::On);
+
+	constexpr auto lp_order       = 2;
+	constexpr auto lp_cutoff_freq = 4800;
+	channel->ConfigureLowPassFilter(lp_order, lp_cutoff_freq);
+	channel->SetLowPassFilter(FilterState::On);
+}
+
+TandyDAC::TandyDAC(const ConfigProfile config_profile,
+                   const std::string_view filter_choice)
 {
-	tandy.last_write = PIC_Ticks;
-	if (!tandy.enabled && tandy.chan) {
-		tandy.chan->Enable(true);
-		tandy.enabled=true;
-	}
-	device.write(data);
+	assert(config_profile != ConfigProfile::SoundCardRemoved);
 
-	//	LOG_MSG("3voice write %#" PRIxPTR " at time
-	//%7.3f",data,PIC_FullIndex());
+	// Run the audio channel at the mixer's native rate
+	const auto callback = std::bind(&TandyDAC::AudioCallback, this, _1);
+
+	channel = MIXER_AddChannel(callback,
+	                           use_mixer_rate,
+	                           "TANDYDAC",
+	                           {ChannelFeature::Sleep,
+	                            ChannelFeature::ChorusSend,
+	                            ChannelFeature::ReverbSend,
+	                            ChannelFeature::DigitalAudio});
+
+	const auto mixer_rate_hz = channel->GetSampleRate();
+	sample_rate = mixer_rate_hz;
+
+	// Setup zero-order-hold resampler to emulate the "crunchiness" of early
+	// DACs
+	channel->SetZeroOrderHoldUpsamplerTargetFreq(check_cast<uint16_t>(sample_rate));
+	channel->SetResampleMethod(ResampleMethod::ZeroOrderHoldAndResample);
+
+	// Setup filters
+	const auto filter_choice_has_bool = parse_bool_setting(filter_choice);
+
+	if (filter_choice_has_bool && *filter_choice_has_bool == true) {
+		setup_filters(channel);
+
+	} else if (!channel->TryParseAndSetCustomFilter(filter_choice)) {
+		if (!filter_choice_has_bool) {
+			LOG_WARNING("TANDYDAC: Invalid 'tandy_dac_filter' value: '%s', using 'off'",
+			            filter_choice.data());
+		}
+
+		channel->SetHighPassFilter(FilterState::Off);
+		channel->SetLowPassFilter(FilterState::Off);
+	}
+
+	// Register DAC per-port read handlers
+	const auto reader = std::bind(&TandyDAC::ReadFromPort, this, _1, _2);
+	read_handler.Install(io.base, reader, io_width_t::byte, 4);
+
+	// Register DAC per-port write handlers
+	const auto writer = std::bind(&TandyDAC::WriteToPort, this, _1, _2, _3);
+	write_handlers[0].Install(io.base, writer, io_width_t::byte, 4);
+
+	if (config_profile == ConfigProfile::SoundCardOnly)
+		write_handlers[1].Install(io.base + card_base_offset, writer,
+		                          io_width_t::byte, 4);
+
+	// Reserve the DMA channel
+	if (dma.channel = DMA_GetChannel(io.dma); dma.channel) {
+		dma.channel->ReserveFor("Tandy DAC", shutdown_dac);
+	}
+
+	is_enabled = true;
 }
 
-static void SN76496Update(uint16_t length)
+TandyDAC::~TandyDAC()
 {
-	if (!tandy.chan)
-		return;
-
-	// Disable the channel if it's been quiet for a while
-	if ((tandy.last_write + 5000) < PIC_Ticks) {
-		tandy.enabled=false;
-		tandy.chan->Enable(false);
+	if (!is_enabled) {
 		return;
 	}
-	const Bitu MAX_SAMPLES = 2048;
-	if (length > MAX_SAMPLES)
-		return;
-	Bit16s buffer[MAX_SAMPLES];
-	Bit16s* outputs = buffer;
-
-	device_sound_interface::sound_stream stream;
-	static_cast<device_sound_interface&>(device).sound_stream_update(stream, 0, &outputs, length);
-	tandy.chan->AddSamples_m16(length, buffer);
-}
-
-bool TS_Get_Address(Bitu& tsaddr, Bitu& tsirq, Bitu& tsdma) {
-	tsaddr=0;
-	tsirq =0;
-	tsdma =0;
-	if (tandy.dac.enabled) {
-		tsaddr=tandy.dac.hw.base;
-		tsirq =tandy.dac.hw.irq;
-		tsdma =tandy.dac.hw.dma;
-		return true;
+	// Stop playback
+	if (channel) {
+		channel->Enable(false);
 	}
-	return false;
-}
 
+	// Stop the game from accessing the IO ports
+	read_handler.Uninstall();
+	for (auto& handler : write_handlers) {
+		handler.Uninstall();
+	}
 
-static void TandyDAC_DMA_CallBack(DmaChannel * /*chan*/, DMAEvent event) {
-	if (event == DMA_REACHED_TC) {
-		tandy.dac.dma.transfer_done=true;
-		PIC_ActivateIRQ(tandy.dac.hw.irq);
+	// Deregister the mixer channel, after which it's cleaned up
+	assert(channel);
+	MIXER_DeregisterChannel(channel);
+
+	// Reset the DMA channel as the mixer is no longer reading samples
+	if (dma.channel) {
+		dma.channel->Reset();
 	}
 }
 
-static void TandyDACModeChanged()
+void TandyDAC::DmaCallback([[maybe_unused]] const DmaChannel*, DMAEvent event)
 {
-	if (!tandy.dac.chan) {
-		DEBUG_LOG_MSG("TANDY: Skipping mode change until the DAC is "
-		              "initialized");
+	// LOG_MSG("TANDYDAC: DMA event %d", event);
+	if (event != DMA_REACHED_TC)
 		return;
-	}
+	dma.is_done = true;
+	PIC_ActivateIRQ(io.irq);
+}
 
-	switch (tandy.dac.mode & 3) {
-	case 0:
-		// joystick mode
-		break;
+void TandyDAC::ChangeMode()
+{
+	// Avoid under or overruning the mixer with invalid frequencies
+	// Typically frequencies are in the 8 to 22 Khz range
+	constexpr auto dac_min_freq_hz = 4900;
+	constexpr auto dac_max_freq_hz = 49000;
+
+	// LOG_MSG("TANDYDAC: Mode changed to %d", regs.mode);
+	switch (regs.mode & 3) {
+	case 0: // joystick mode
 	case 1:
+	case 2: // recording
 		break;
-	case 2:
-		// recording
-		break;
-	case 3:
-		// playback
-		tandy.dac.chan->FillUp();
-		if (tandy.dac.frequency!=0) {
-			float freq=3579545.0f/((float)tandy.dac.frequency);
-			tandy.dac.chan->SetFreq((Bitu)freq);
-			float vol=((float)tandy.dac.amplitude)/7.0f;
-			tandy.dac.chan->SetVolume(vol,vol);
-			if ((tandy.dac.mode&0x0c)==0x0c) {
-				tandy.dac.dma.transfer_done=false;
-				tandy.dac.dma.chan=GetDMAChannel(tandy.dac.hw.dma);
-				if (tandy.dac.dma.chan) {
-					tandy.dac.dma.chan->Register_Callback(TandyDAC_DMA_CallBack);
-					tandy.dac.chan->Enable(true);
-//					LOG_MSG("Tandy DAC: playback started with freqency %f, volume %f",freq,vol);
+	case 3: // playback
+		if (!regs.frequency)
+			return;
+		if (const auto freq = tandy_psg_clock_hz / regs.frequency;
+		    freq > dac_min_freq_hz && freq < dac_max_freq_hz) {
+			assert(channel);
+			channel->FillUp(); // using the prior frequency
+			channel->SetSampleRate(freq);
+			const auto vol = static_cast<float>(regs.amplitude) / 7.0f;
+			channel->SetAppVolume(vol, vol);
+			if ((regs.mode & 0x0c) == 0x0c) {
+				dma.is_done = false;
+				dma.channel = DMA_GetChannel(io.dma);
+				if (dma.channel) {
+					const auto callback =
+					        std::bind(&TandyDAC::DmaCallback,
+					                  this, _1, _2);
+					dma.channel->RegisterCallback(callback);
+					channel->Enable(true);
+					// LOG_MSG("TANDYDAC: playback started with freqency %f, volume %f", freq, vol);
 				}
 			}
 		}
@@ -219,103 +350,92 @@ static void TandyDACModeChanged()
 	}
 }
 
-static void TandyDACDMAEnabled()
+uint8_t TandyDAC::ReadFromPort(io_port_t port, io_width_t)
 {
-	TandyDACModeChanged();
+	// LOG_MSG("TANDYDAC: Read from port %04x", port);
+	switch (port) {
+	case 0xc4:
+		return (regs.mode & 0x77) | (regs.irq_activated ? 0x08 : 0x00);
+	case 0xc6: return static_cast<uint8_t>(regs.frequency & 0xff);
+	case 0xc7:
+		return static_cast<uint8_t>(((regs.frequency >> 8) & 0xf) |
+		                            (regs.amplitude << 5));
+	}
+	LOG_MSG("TANDYDAC: Read from unknown %x", port);
+	return 0xff;
 }
 
-static void TandyDACDMADisabled()
-{}
-
-static void TandyDACWrite(io_port_t port, uint8_t data, io_width_t)
+void TandyDAC::WriteToPort(io_port_t port, io_val_t value, io_width_t)
 {
+	auto data = check_cast<uint8_t>(value);
+	const auto previous_mode = regs.mode;
+
 	switch (port) {
-	case 0xc4: {
-		Bitu oldmode = tandy.dac.mode;
-		tandy.dac.mode = data;
-		if ((data&3)!=(oldmode&3)) {
-			TandyDACModeChanged();
+	case 0xc4:
+		regs.mode = data;
+		if ((data & 3) != (previous_mode & 3)) {
+			ChangeMode();
 		}
-		if (((data&0x0c)==0x0c) && ((oldmode&0x0c)!=0x0c)) {
-			TandyDACDMAEnabled();
-		} else if (((data&0x0c)!=0x0c) && ((oldmode&0x0c)==0x0c)) {
-			TandyDACDMADisabled();
-		}
+		if ((data & 0x0c) == 0x0c && (previous_mode & 0x0c) != 0x0c) {
+			ChangeMode(); // DAC DMA is enabled
+		} else if ((data & 0x0c) != 0x0c && (previous_mode & 0x0c) == 0x0c) {
+			// DAC DMA is disabled
 		}
 		break;
 	case 0xc5:
-		switch (tandy.dac.mode&3) {
-		case 0:
-			// joystick mode
-			break;
-		case 1: tandy.dac.control = data; break;
+		switch (regs.mode & 3) {
+		case 1: regs.control = data; break;
+		case 0: // joystick mode
 		case 2:
-			break;
-		case 3:
-			// direct output
+		case 3: // direct output
 			break;
 		}
 		break;
 	case 0xc6:
-		tandy.dac.frequency = (tandy.dac.frequency & 0xf00) | data;
-		switch (tandy.dac.mode&3) {
+		regs.frequency = (regs.frequency & 0xf00) | data;
+		switch (regs.mode & 3) {
+		case 0: // joystick mode
+			break;
+		case 1:
+		case 2:
+		case 3: ChangeMode(); break;
+		}
+		break;
+	case 0xc7:
+		regs.frequency = static_cast<uint16_t>((regs.frequency & 0x00ff) |
+		                                       ((data & 0xf) << 8));
+		regs.amplitude = data >> 5;
+		switch (regs.mode & 3) {
 		case 0:
 			// joystick mode
 			break;
 		case 1:
 		case 2:
-		case 3:
-			TandyDACModeChanged();
-			break;
-		}
-		break;
-	case 0xc7:
-		tandy.dac.frequency = static_cast<uint16_t>((tandy.dac.frequency & 0x00ff) | ((data & 0xf) << 8));
-		tandy.dac.amplitude = data >> 5;
-		switch (tandy.dac.mode & 3) {
-		case 0:
-			// joystick mode
-			break;
-		case 1:
-		case 2:
-		case 3:
-			TandyDACModeChanged();
-			break;
+		case 3: ChangeMode(); break;
 		}
 		break;
 	}
+	// LOG_MSG("TANDYDAC: Write %02x to port %04x", data, port);
+	// LOG_MSG("TANDYDAC: Mode %02x, Control %02x, Frequency %04x, Amplitude %02x",
+	//        regs.mode, regs.control, regs.frequency, regs.amplitude);
 }
 
-static uint8_t TandyDACRead(io_port_t port, io_width_t)
+void TandyDAC::AudioCallback(uint16_t requested)
 {
-	switch (port) {
-	case 0xc4:
-		return (tandy.dac.mode&0x77) | (tandy.dac.irq_activated ? 0x08 : 0x00);
-	case 0xc6: return static_cast<uint8_t>(tandy.dac.frequency & 0xff);
-	case 0xc7:
-		return static_cast<uint8_t>(((tandy.dac.frequency >> 8) & 0xf) | (tandy.dac.amplitude << 5));
-	}
-	LOG_MSG("Tandy DAC: Read from unknown %x", port);
-	return 0xff;
-}
-
-static void TandyDACUpdate(uint16_t requested)
-{
-	if (!tandy.dac.chan || !tandy.dac.dma.chan) {
-		DEBUG_LOG_MSG(
-		        "TANDY: Skipping update until the DAC is initialized");
+	if (!channel || !dma.channel) {
+		LOG_DEBUG("TANDY: Skipping update until the DAC is initialized");
 		return;
 	}
+	const bool should_read = is_enabled && (regs.mode & 0x0c) == 0x0c &&
+	                         !dma.is_done;
 
-	const bool should_read = tandy.dac.enabled &&
-	                         (tandy.dac.mode & 0x0c) == 0x0c &&
-	                         !tandy.dac.dma.transfer_done;
-
-	auto buf = tandy.dac.dma.buf;
+	const auto buf = dma.fifo.data();
+	const auto buf_size = check_cast<uint16_t>(dma.fifo.size());
 	while (requested) {
-		const auto bytes_to_read = std::min(requested, TDAC_DMA_BUFSIZE);
+		const auto bytes_to_read = std::min(requested, buf_size);
 
-		auto actual = should_read ? tandy.dac.dma.chan->Read(bytes_to_read, buf) : 0u;
+		auto actual = should_read ? dma.channel->Read(bytes_to_read, buf)
+		                          : 0u;
 
 		// If we came up short, move back one to terminate the tail in silence
 		if (actual && actual < bytes_to_read)
@@ -323,103 +443,246 @@ static void TandyDACUpdate(uint16_t requested)
 		memset(buf + actual, 128u, bytes_to_read - actual);
 
 		// Always write the requested quantity regardless of read status
-		tandy.dac.chan->AddSamples_m8(bytes_to_read, buf);
+		channel->AddSamples_m8(bytes_to_read, buf);
 		requested -= bytes_to_read;
 	}
 }
 
-class TANDYSOUND final : public Module_base {
-private:
-	IO_WriteHandleObject WriteHandler[4];
-	IO_ReadHandleObject ReadHandler[4];
-	MixerObject MixerChan;
-	MixerObject MixerChanDAC;
-public:
-	TANDYSOUND(Section *configuration)
-	        : Module_base(configuration),
-	          MixerChan(),
-	          MixerChanDAC()
-	{
-		Section_prop *section = static_cast<Section_prop *>(configuration);
+TandyPSG::TandyPSG(const ConfigProfile config_profile, const bool is_dac_enabled,
+                   const std::string_view filter_choice)
+{
+	assert(config_profile != ConfigProfile::SoundCardRemoved);
 
-		bool enable_hw_tandy_dac=true;
-		uint16_t sbport;
-		uint8_t sbirq;
-		uint8_t sbdma;
-		if (SB_Get_Address(sbport, sbirq, sbdma)) {
-			enable_hw_tandy_dac=false;
+	// Instantiate the MAME PSG device
+	constexpr auto rounded_psg_clock = render_rate_hz * render_divisor;
+	if (config_profile == ConfigProfile::PCjrSystem)
+		device = std::make_unique<sn76496_device>(machine_config(),
+		                                          "SN76489", nullptr,
+		                                          rounded_psg_clock);
+	else
+		device = std::make_unique<ncr8496_device>(machine_config(),
+		                                          "NCR 8496", nullptr,
+		                                          rounded_psg_clock);
+	// Register the write ports
+	constexpr io_port_t base_addr = 0xc0;
+	const auto writer = std::bind(&TandyPSG::WriteToPort, this, _1, _2, _3);
+
+	write_handlers[0].Install(base_addr, writer, io_width_t::byte, 2);
+
+	if (config_profile == ConfigProfile::SoundCardOnly && is_dac_enabled)
+		write_handlers[1].Install(base_addr + card_base_offset, writer,
+		                          io_width_t::byte, 2);
+
+	// Run the audio channel at the mixer's native rate
+	const auto callback = std::bind(&TandyPSG::AudioCallback, this, _1);
+
+	channel = MIXER_AddChannel(callback,
+	                           use_mixer_rate,
+	                           "TANDY",
+	                           {ChannelFeature::Sleep,
+	                            ChannelFeature::ReverbSend,
+	                            ChannelFeature::ChorusSend,
+	                            ChannelFeature::Synthesizer});
+
+	// Setup filters
+	const auto filter_choice_has_bool = parse_bool_setting(filter_choice);
+
+	if (filter_choice_has_bool && *filter_choice_has_bool == true) {
+		setup_filters(channel);
+
+	} else if (!channel->TryParseAndSetCustomFilter(filter_choice)) {
+		if (!filter_choice_has_bool) {
+			LOG_WARNING("TANDY: Invalid 'tandy_filter' value: '%s', using 'off'",
+			            filter_choice.data());
 		}
 
-		//Select the correct tandy chip implementation
-		if (machine == MCH_PCJR) activeDevice = &device_sn76496;
-		else activeDevice = &device_ncr8496;
-
-		real_writeb(0x40,0xd4,0x00);
-		if (IS_TANDY_ARCH) {
-			/* enable tandy sound if tandy=true/auto */
-			if ((strcmp(section->Get_string("tandy"),"true")!=0) &&
-				(strcmp(section->Get_string("tandy"),"on")!=0) &&
-				(strcmp(section->Get_string("tandy"),"auto")!=0)) return;
-		} else {
-			/* only enable tandy sound if tandy=true */
-			if ((strcmp(section->Get_string("tandy"),"true")!=0) &&
-				(strcmp(section->Get_string("tandy"),"on")!=0)) return;
-
-			/* ports from second DMA controller conflict with tandy ports */
-			CloseSecondDMAController();
-
-			if (enable_hw_tandy_dac) {
-				WriteHandler[2].Install(0x1e0, SN76496Write, io_width_t::byte, 2);
-				WriteHandler[3].Install(0x1e4, TandyDACWrite, io_width_t::byte, 4);
-				//				ReadHandler[3].Install(0x1e4,TandyDACRead,io_width_t::byte,4);
-			}
-		}
-
-		const auto sample_rate = static_cast<uint32_t>(section->Get_int("tandyrate"));
-		tandy.chan=MixerChan.Install(&SN76496Update,sample_rate,"TANDY");
-
-		WriteHandler[0].Install(0xc0, SN76496Write, io_width_t::byte, 2);
-
-		if (enable_hw_tandy_dac) {
-			// enable low-level Tandy DAC emulation
-			WriteHandler[1].Install(0xc4, TandyDACWrite, io_width_t::byte, 4);
-			ReadHandler[1].Install(0xc4, TandyDACRead, io_width_t::byte, 4);
-
-			tandy.dac.enabled=true;
-			tandy.dac.chan=MixerChanDAC.Install(&TandyDACUpdate,sample_rate,"TANDYDAC");
-
-			tandy.dac.hw.base=0xc4;
-			tandy.dac.hw.irq =7;
-			tandy.dac.hw.dma =1;
-		} else {
-			tandy.dac.enabled=false;
-			tandy.dac.hw.base=0;
-			tandy.dac.hw.irq =0;
-			tandy.dac.hw.dma =0;
-		}
-
-		tandy.dac.control=0;
-		tandy.dac.mode   =0;
-		tandy.dac.irq_activated=false;
-		tandy.dac.frequency=0;
-		tandy.dac.amplitude = 0;
-
-		tandy.enabled=false;
-		real_writeb(0x40,0xd4,0xff);	/* BIOS Tandy DAC initialization value */
-
-		((device_t&)device).device_start();
-		device.convert_samplerate(static_cast<int>(sample_rate));
+		channel->SetHighPassFilter(FilterState::Off);
+		channel->SetLowPassFilter(FilterState::Off);
 	}
-	~TANDYSOUND(){ }
-};
 
-static TANDYSOUND* test;
+	// Setup the resampler
+	const auto sample_rate = channel->GetSampleRate();
+	const auto max_freq    = std::max(sample_rate * 0.9 / 2, 8000.0);
+	resampler.reset(reSIDfp::TwoPassSincResampler::create(render_rate_hz,
+	                                                      sample_rate,
+	                                                      max_freq));
 
-void TANDYSOUND_ShutDown(Section* /*sec*/) {
-	delete test;	
+	// Configure and start the MAME device
+	dsi = static_cast<device_sound_interface *>(device.get());
+	const auto base_device = static_cast<device_t *>(device.get());
+	base_device->device_start();
+	device->convert_samplerate(render_rate_hz);
+
+	LOG_MSG("TANDY: Initialised audio card with a TI %s PSG %s",
+	        base_device->shortName,
+	        is_dac_enabled ? "and 8-bit DAC" : "but without DAC");
 }
 
-void TANDYSOUND_Init(Section* sec) {
-	test = new TANDYSOUND(sec);
-	sec->AddDestroyFunction(&TANDYSOUND_ShutDown,true);
+TandyPSG::~TandyPSG()
+{
+	// Stop playback
+	if (channel) {
+		channel->Enable(false);
+	}
+
+	// Stop the game from accessing the IO ports
+	for (auto& handler : write_handlers) {
+		handler.Uninstall();
+	}
+
+	// Deregister the mixer channel, after which it's cleaned up
+	assert(channel);
+	MIXER_DeregisterChannel(channel);
+}
+
+bool TandyPSG::MaybeRenderFrame(float& frame)
+{
+	assert(dsi);
+	assert(resampler);
+
+	// Request a frame from the audio device
+	static int16_t sample;
+	static int16_t *buf[] = {&sample, nullptr};
+	static device_sound_interface::sound_stream ss;
+	dsi->sound_stream_update(ss, nullptr, buf, 1);
+
+	const auto frame_is_ready = resampler->input(sample);
+
+	// Get the frame
+	if (frame_is_ready)
+		frame = static_cast<float>(resampler->output());
+
+	return frame_is_ready;
+}
+
+void TandyPSG::RenderUpToNow()
+{
+	const auto now = PIC_FullIndex();
+
+	// Wake up the channel and update the last rendered time datum.
+	assert(channel);
+	if (channel->WakeUp()) {
+		last_rendered_ms = now;
+		return;
+	}
+	// Keep rendering until we're current
+	while (last_rendered_ms < now) {
+		last_rendered_ms += ms_per_render;
+		if (float frame = 0.0f; MaybeRenderFrame(frame))
+			fifo.emplace(frame);
+	}
+}
+
+void TandyPSG::WriteToPort(io_port_t, io_val_t value, io_width_t)
+{
+	RenderUpToNow();
+
+	const auto data = check_cast<uint8_t>(value);
+	device->write(data);
+}
+
+void TandyPSG::AudioCallback(const uint16_t requested_frames)
+{
+	assert(channel);
+
+	//if (fifo.size())
+	//	LOG_MSG("TANDY: Queued %2lu cycle-accurate frames", fifo.size());
+
+	auto frames_remaining = requested_frames;
+
+	// First, send any frames we've queued since the last callback
+	while (frames_remaining && fifo.size()) {
+		channel->AddSamples_mfloat(1, &fifo.front());
+		fifo.pop();
+		--frames_remaining;
+	}
+	// If the queue's run dry, render the remainder and sync-up our time datum
+	while (frames_remaining) {
+		if (float frame = 0.0f; MaybeRenderFrame(frame)) {
+			channel->AddSamples_mfloat(1, &frame);
+		}
+		--frames_remaining;
+	}
+	last_rendered_ms = PIC_FullIndex();
+}
+
+// The Tandy DAC and PSG (programmable sound generator) managed pointers
+std::unique_ptr<TandyDAC> tandy_dac = {};
+std::unique_ptr<TandyPSG> tandy_psg = {};
+
+bool TS_Get_Address(Bitu &tsaddr, Bitu &tsirq, Bitu &tsdma)
+{
+	if (!tandy_dac || !tandy_dac->IsEnabled()) {
+		tsaddr = 0;
+		tsirq = 0;
+		tsdma = 0;
+		return false;
+	}
+
+	assert(tandy_dac && tandy_dac->IsEnabled());
+	tsaddr = TandyDAC::io.base;
+	tsirq  = TandyDAC::io.irq;
+	tsdma  = TandyDAC::io.dma;
+	return true;
+}
+
+static void set_tandy_sound_flag_in_bios(const bool is_enabled)
+{
+	real_writeb(0x40, 0xd4, is_enabled ? 0xff : 0x00);
+}
+
+static void shutdown_dac(Section*)
+{
+	if (tandy_dac) {
+		LOG_MSG("TANDY: Shutting down DAC");
+		tandy_dac.reset();
+	}
+}
+
+void TANDYSOUND_ShutDown(Section*)
+{
+	if (tandy_psg || tandy_dac) {
+		LOG_MSG("TANDY: Shutting down");
+		set_tandy_sound_flag_in_bios(false);
+		tandy_dac.reset();
+		tandy_psg.reset();
+	}
+}
+
+void TANDYSOUND_Init(Section *section)
+{
+	assert(section);
+	const auto prop = static_cast<Section_prop*>(section);
+	const auto pref = std::string_view(prop->Get_string("tandy"));
+	if (has_false(pref) || (!IS_TANDY_ARCH && pref == "auto")) {
+		set_tandy_sound_flag_in_bios(false);
+		return;
+	}
+
+	ConfigProfile cfg;
+	switch (machine) {
+	case MCH_PCJR: cfg = ConfigProfile::PCjrSystem; break;
+	case MCH_TANDY: cfg = ConfigProfile::TandySystem; break;
+	default: cfg = ConfigProfile::SoundCardOnly; break;
+	}
+
+	// The second DMA controller conflicts with the tandy sound's base IO
+	// ports 0xc0. Closing the controller itself means that all the high DMA
+	// ports (4 through 7) get automatically shutdown as well.
+	//
+	DMA_ShutdownSecondaryController();
+
+	const auto wants_dac = has_true(pref) || (IS_TANDY_ARCH && pref == "auto");
+	if (wants_dac) {
+		tandy_dac = std::make_unique<TandyDAC>(
+		        cfg, prop->Get_string("tandy_dac_filter"));
+	}
+	tandy_psg = std::make_unique<TandyPSG>(cfg,
+	                                       wants_dac,
+	                                       prop->Get_string("tandy_filter"));
+
+	set_tandy_sound_flag_in_bios(true);
+
+	constexpr auto changeable_at_runtime = true;
+	section->AddDestroyFunction(&TANDYSOUND_ShutDown, changeable_at_runtime);
 }

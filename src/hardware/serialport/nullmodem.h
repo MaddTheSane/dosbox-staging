@@ -39,21 +39,23 @@ public:
 	CNullModem &operator=(const CNullModem &) = delete; // prevent assignment
 
 	CNullModem(const uint8_t port_idx, CommandLine *cmd);
-	~CNullModem();
+	~CNullModem() override;
 
-	void updatePortConfig(uint16_t divider, uint8_t lcr);
-	void updateMSR();
-	void transmitByte(uint8_t val, bool first);
-	void setBreak(bool value);
+	void updatePortConfig(uint16_t divider, uint8_t lcr) override;
+	void updateMSR() override;
+	void transmitByte(uint8_t val, bool first) override;
+	void setBreak(bool value) override;
 	
-	void setRTSDTR(bool rts, bool dtr);
-	void setRTS(bool val);
-	void setDTR(bool val);
-	void handleUpperEvent(uint16_t type);
+	void setRTSDTR(bool rts, bool dtr) override;
+	void setRTS(bool val) override;
+	void setDTR(bool val) override;
+	void handleUpperEvent(uint16_t type) override;
+
+	SocketType socketType = SocketType::Tcp;
 
 private:
-	TCPServerSocket *serversocket = nullptr;
-	TCPClientSocket *clientsocket = nullptr;
+	NETServerSocket *serversocket = nullptr;
+	NETClientSocket *clientsocket = nullptr;
 
 	uint16_t serverport = 0; // we are a server if this is nonzero
 	uint16_t clientport = 0;
@@ -68,7 +70,7 @@ private:
 #define N_RX_DISC		4
 
 	bool doReceive();
-	bool ClientConnect(TCPClientSocket* newsocket);
+	bool ClientConnect(NETClientSocket *newsocket);
 	bool ServerListen();
 	bool ServerConnect();
     void Disconnect();

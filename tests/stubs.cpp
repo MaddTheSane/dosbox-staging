@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2021-2021  The DOSBox Staging Team
+ *  Copyright (C) 2021-2022  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -23,23 +23,15 @@
 #include "control.h"
 #include "logging.h"
 
-// This global variable should be setup/torn down per test.
-Config *control = nullptr;
-
 // During testing we never want to log to stdout/stderr, as it could
 // negatively affect test harness.
 void GFX_ShowMsg(const char *, ...) {}
 void DEBUG_ShowMsg(const char *, ...) {}
 
-void DEBUG_HeavyWriteLogInstruction(){}
-void MSG_Add(const char *, const char *){}
-const char *MSG_Get(char const *)
-{
-	return nullptr;
-}
+void DEBUG_HeavyWriteLogInstruction() {}
 
 #if C_DEBUG
-void LOG::operator()(MAYBE_UNUSED char const *buf, ...)
+void LOG::operator()([[maybe_unused]] char const *buf, ...)
 {
 	(void)d_type;     // Deliberately unused.
 	(void)d_severity; // Deliberately unused.

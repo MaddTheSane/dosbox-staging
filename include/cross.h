@@ -1,4 +1,7 @@
 /*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -22,22 +25,23 @@
 #include "dosbox.h"
 
 #include <cstdio>
-#include <string>
 #include <ctime>
+#include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <vector>
 
 #if defined (_MSC_VER)						/* MS Visual C++ */
 #include <direct.h>
 #include <io.h>
 #define LONGTYPE(a) a##i64
-#define snprintf _snprintf
-#define vsnprintf _vsnprintf
 #else										/* LINUX / GCC */
 #include <dirent.h>
 #include <unistd.h>
 #define LONGTYPE(a) a##LL
 #endif
+
+#include "std_filesystem.h"
 
 #define CROSS_LEN 512						/* Maximum filename size */
 
@@ -54,8 +58,26 @@
 #define CROSS_FILE	1
 #define CROSS_DIR	2
 
-#if defined (WIN32)
+#if defined (WIN32) && !defined (__MINGW32__)
 #define ftruncate(blah,blah2) chsize(blah,blah2)
+#endif
+
+/* Large file support */
+#if defined(_MSC_VER)
+	// MSVC doesn't support the posix fstream functions,
+	// typedef their equivalents
+	#define cross_ftello _ftelli64
+	#define cross_fseeko _fseeki64
+	#define cross_off_t __int64
+#else
+	// All other platforms should have POSIX fstream 'o' support
+	// Note: Meson automatically sets preprocessor defines for us
+
+	// Check that off_t is 64 bits
+	static_assert(sizeof(off_t) == sizeof(int64_t), "off_t not 64 bits");
+	#define cross_ftello ftello
+	#define cross_fseeko fseeko
+	#define cross_off_t off_t
 #endif
 
 // fileno is a POSIX function (not mentioned in ISO/C++), which means it might
@@ -84,18 +106,15 @@ constexpr auto localtime_r = ::localtime_r;
 
 } // namespace cross
 
-void CROSS_DetermineConfigPaths();
-std::string CROSS_GetPlatformConfigDir();
-std::string CROSS_ResolveHome(const std::string &str);
+// Create or determine the location of the config directory (e.g., in portable
+// mode, the config directory is the executable dir). Must be called before
+// calling GetConfigDir().
+void InitConfigDir();
 
-class Cross {
-public:
-	static void GetPlatformConfigDir(std::string& in);
-	static void GetPlatformConfigName(std::string& in);
-	static void CreatePlatformConfigDir(std::string& in);
-	static void ResolveHomedir(std::string & temp_line);
-	static bool IsPathAbsolute(std::string const& in);
-};
+std_fs::path GetConfigDir();
+std::string GetPrimaryConfigName();
+
+std_fs::path resolve_home(const std::string &str) noexcept;
 
 #if defined (WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -127,5 +146,16 @@ bool read_directory_next(dir_information* dirp, char* entry_name, bool& is_direc
 void close_directory(dir_information* dirp);
 
 FILE *fopen_wrap(const char *path, const char *mode);
+FILE *fopen_wrap_ro_fallback(const std::string &filename, bool &is_readonly);
+
+bool wild_match(const char *haystack, const char *needle);
+bool WildFileCmp(const char *file, const char *wild, bool long_compare = false);
+
+bool get_expanded_files(const std::string &path,
+                        std::vector<std::string> &files,
+                        bool files_only,
+                        bool skip_native_path = false) noexcept;
+
+std::string get_language_from_os();
 
 #endif

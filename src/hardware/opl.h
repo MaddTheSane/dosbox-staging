@@ -1,182 +1,155 @@
 /*
- *  SPDX-License-Identifier: LGPL-2.1-or-later
- *
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- * 
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- * 
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
- */
-
-/* OPL2/OPL3 emulation library
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
  *
- * Originally based on ADLIBEMU.C, an AdLib/OPL2 emulation library by Ken Silverman
- * Copyright (C) 1998-2001 Ken Silverman
- * Ken Silverman's official web site: "http://www.advsys.net/ken"
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
+#ifndef DOSBOX_OPL_H
+#define DOSBOX_OPL_H
 
-#include "types.h"
+#include "dosbox.h"
 
+#include <cmath>
+#include <memory>
+#include <queue>
 
-#define fltype double
+#include "adlib_gold.h"
+#include "mixer.h"
+#include "inout.h"
+#include "setup.h"
+#include "pic.h"
+#include "hardware.h"
 
-#undef NUM_CHANNELS
-#if defined(OPLTYPE_IS_OPL3)
-#define NUM_CHANNELS	18
-#else
-#define NUM_CHANNELS	9
+#include "nuked/opl3.h"
+
+class Timer {
+public:
+	Timer(int16_t micros);
+
+	bool Update(const double time);
+	void Reset();
+	void SetCounter(const uint8_t val);
+	void SetMask(const bool set);
+	void Stop();
+	void Start(const double time);
+
+private:
+	double start            = 0.0; // Rounded down start time
+	double trigger          = 0.0; // Time when you overflow
+	double clock_interval   = 0.0; // Clock interval
+	double counter_interval = 0.0; // Cycle interval
+	uint8_t counter         = 0;
+
+	bool enabled  = false;
+	bool overflow = false;
+	bool masked   = false;
+};
+
+class Chip {
+public:
+	Chip();
+
+	// Last selected register
+	Timer timer0;
+	Timer timer1;
+
+	// Check for it being a write to the timer
+	bool Write(const io_port_t addr, const uint8_t val);
+
+	// Read the current timer state, will use current double
+	uint8_t Read();
+};
+
+// The cache for 2 chips or an opl3
+typedef uint8_t RegisterCache[512];
+
+// Internal class used for dro capturing
+class Capture;
+
+enum class Mode { Opl2, DualOpl2, Opl3, Opl3Gold };
+
+class OPL {
+public:
+	mixer_channel_t channel = {};
+
+	RegisterCache cache = {};
+
+	std::unique_ptr<Capture> capture = {};
+
+	OPL(Section *configuration, const OplMode _oplmode);
+	~OPL();
+
+	// prevent copy
+	OPL(const OPL &) = delete;
+
+	// prevent assignment
+	OPL &operator=(const OPL &) = delete;
+
+private:
+	IO_ReadHandleObject ReadHandler[3];
+	IO_WriteHandleObject WriteHandler[3];
+
+	std::queue<AudioFrame> fifo = {};
+
+	Mode mode = {};
+
+	Chip chip[2] = {};
+
+	opl3_chip oplchip = {};
+	uint8_t newm      = 0;
+
+	std::unique_ptr<AdlibGold> adlib_gold = {};
+
+	// Playback related
+	double last_rendered_ms = 0.0;
+	double ms_per_frame     = 0.0;
+
+	// Last selected address in the chip for the different modes
+	union {
+		uint16_t normal = 0;
+		uint8_t dual[2];
+	} reg = {};
+
+	static constexpr auto default_volume = 0xff;
+	struct {
+		uint8_t index = 0;
+		uint8_t lvol  = default_volume;
+		uint8_t rvol  = default_volume;
+
+		bool active = false;
+		bool mixer  = false;
+	} ctrl = {};
+
+	void Init(const uint16_t sample_rate);
+
+	void AudioCallback(const uint16_t frames);
+	AudioFrame RenderFrame();
+	void RenderUpToNow();
+
+	void PortWrite(const io_port_t port, const io_val_t value,
+	               const io_width_t width);
+
+	uint8_t PortRead(const io_port_t port, const io_width_t width);
+
+	io_port_t WriteAddr(const io_port_t port, const uint8_t val);
+	void WriteReg(const io_port_t selected_reg, const uint8_t val);
+	void CacheWrite(const io_port_t port, const uint8_t val);
+	void DualWrite(const uint8_t index, const uint8_t reg, const uint8_t value);
+
+	void AdlibGoldControlWrite(const uint8_t val);
+	uint8_t AdlibGoldControlRead(void);
+};
+
 #endif
-
-#define MAXOPERATORS	(NUM_CHANNELS*2)
-
-
-#define FL05	((fltype)0.5)
-#define FL2     ((fltype)2.0)
-
-#define FIXEDPT			0x10000		// fixed-point calculations using 16+16
-#define FIXEDPT_LFO		0x1000000	// fixed-point calculations using 8+24
-
-#define WAVEPREC		1024		// waveform precision (10 bits)
-
-#define INTFREQU		((fltype)(14318180.0 / 288.0))		// clocking of the chip
-
-
-#define OF_TYPE_ATT			0
-#define OF_TYPE_DEC			1
-#define OF_TYPE_REL			2
-#define OF_TYPE_SUS			3
-#define OF_TYPE_SUS_NOKEEP	4
-#define OF_TYPE_OFF			5
-
-#define ARC_CONTROL			0x00
-#define ARC_TVS_KSR_MUL		0x20
-#define ARC_KSL_OUTLEV		0x40
-#define ARC_ATTR_DECR		0x60
-#define ARC_SUSL_RELR		0x80
-#define ARC_FREQ_NUM		0xa0
-#define ARC_KON_BNUM		0xb0
-#define ARC_PERC_MODE		0xbd
-#define ARC_FEEDBACK		0xc0
-#define ARC_WAVE_SEL		0xe0
-
-#define ARC_SECONDSET		0x100	// second operator set for OPL3
-
-
-#define OP_ACT_OFF			0x00
-#define OP_ACT_NORMAL		0x01	// regular channel activated (bitmasked)
-#define OP_ACT_PERC			0x02	// percussion channel activated (bitmasked)
-
-#define BLOCKBUF_SIZE		512
-
-
-// vibrato constants
-#define VIBTAB_SIZE			8
-#define VIBFAC				70/50000		// no braces, integer mul/div
-
-// tremolo constants and table
-#define TREMTAB_SIZE		53
-#define TREM_FREQ			((fltype)(3.7))			// tremolo at 3.7hz
-
-
-/* operator struct definition
-     For OPL2 all 9 channels consist of two operators each, carrier and modulator.
-     Channel x has operators x as modulator and operators (9+x) as carrier.
-     For OPL3 all 18 channels consist either of two operators (2op mode) or four
-     operators (4op mode) which is determined through register4 of the second
-     adlib register set.
-     Only the channels 0,1,2 (first set) and 9,10,11 (second set) can act as
-     4op channels. The two additional operators for a channel y come from the
-     2op channel y+3 so the operatorss y, (9+y), y+3, (9+y)+3 make up a 4op
-     channel.
-*/
-typedef struct operator_struct {
-	Bit32s cval, lastcval;			// current output/last output (used for feedback)
-	Bit32u tcount, wfpos, tinc;		// time (position in waveform) and time increment
-	fltype amp, step_amp;			// and amplification (envelope)
-	fltype vol;						// volume
-	fltype sustain_level;			// sustain level
-	Bit32s mfbi;					// feedback amount
-	fltype a0, a1, a2, a3;			// attack rate function coefficients
-	fltype decaymul, releasemul;	// decay/release rate functions
-	Bit32u op_state;				// current state of operator (attack/decay/sustain/release/off)
-	Bit32u toff;
-	Bit32s freq_high;				// highest three bits of the frequency, used for vibrato calculations
-	Bit16s* cur_wform;				// start of selected waveform
-	Bit32u cur_wmask;				// mask for selected waveform
-	Bit32u act_state;				// activity state (regular, percussion)
-	bool sus_keep;					// keep sustain level when decay finished
-	bool vibrato,tremolo;			// vibrato/tremolo enable bits
-	
-	// variables used to provide non-continuous envelopes
-	Bit32u generator_pos;			// for non-standard sample rates we need to determine how many samples have passed
-	Bits cur_env_step;				// current (standardized) sample position
-	Bits env_step_a,env_step_d,env_step_r;	// number of std samples of one step (for attack/decay/release mode)
-	Bit8u step_skip_pos_a;			// position of 8-cyclic step skipping (always 2^x to check against mask)
-	Bits env_step_skip_a;			// bitmask that determines if a step is skipped (respective bit is zero then)
-
-#if defined(OPLTYPE_IS_OPL3)
-	bool is_4op,is_4op_attached;	// base of a 4op channel/part of a 4op channel
-	Bit32s left_pan,right_pan;		// opl3 stereo panning amount
-#endif
-} op_type;
-
-// per-chip variables
-Bitu chip_num;
-op_type op[MAXOPERATORS];
-
-Bits int_samplerate;
-	
-Bit8u status;
-Bit32u opl_index;
-#if defined(OPLTYPE_IS_OPL3)
-Bit8u adlibreg[512];	// adlib register set (including second set)
-Bit8u wave_sel[44];		// waveform selection
-#else
-Bit8u adlibreg[256];	// adlib register set
-Bit8u wave_sel[22];		// waveform selection
-#endif
-
-
-// vibrato/tremolo increment/counter
-Bit32u vibtab_pos;
-Bit32u vibtab_add;
-Bit32u tremtab_pos;
-Bit32u tremtab_add;
-
-
-// enable an operator
-void enable_operator(Bitu regbase, op_type* op_pt);
-
-// functions to change parameters of an operator
-void change_frequency(Bitu chanbase, Bitu regbase, op_type* op_pt);
-
-void change_attackrate(Bitu regbase, op_type* op_pt);
-void change_decayrate(Bitu regbase, op_type* op_pt);
-void change_releaserate(Bitu regbase, op_type* op_pt);
-void change_sustainlevel(Bitu regbase, op_type* op_pt);
-void change_waveform(Bitu regbase, op_type* op_pt);
-void change_keepsustain(Bitu regbase, op_type* op_pt);
-void change_vibrato(Bitu regbase, op_type* op_pt);
-void change_feedback(Bitu chanbase, op_type* op_pt);
-
-// general functions
-void adlib_init(Bit32u samplerate);
-void adlib_write(io_port_t idx, Bit8u val);
-void adlib_getsample(Bit16s* sndptr, Bits numsamples);
-
-uint8_t adlib_reg_read(io_port_t port);
-void adlib_write_index(io_port_t port, uint8_t val);
-
-static Bit32u generator_add;	// should be a chip parameter

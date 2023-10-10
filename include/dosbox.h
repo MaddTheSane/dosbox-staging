@@ -23,9 +23,7 @@
 #include "compiler.h"
 #include "types.h"
 
-//--Added 2010-05-30 by Alun Bestor to ensure sdlmain function calls are replaced throughout DOSBox
-#include "BXCoalface.h"
-//--End of modifications
+#include <memory>
 
 int sdl_main(int argc, char *argv[]);
 
@@ -38,14 +36,19 @@ extern bool shutdown_requested;
 //[[noreturn]] void E_Exit(const char *message, ...)
 //        GCC_ATTRIBUTE(__format__(__printf__, 1, 2));
 
-void MSG_Add(const char*,const char*); //add messages to the internal languagefile
-const char* MSG_Get(char const *);     //get messages from the internal languagefile
+void MSG_Add(const char*,const char*); // add messages (in UTF-8) to the language file
+const char* MSG_Get(const char*); // get messages (adapted to current code page)
+                                  // from the language file
+const char* MSG_GetRaw(const char*); // get messages (in UTF-8, without ANSI
+                                     // preprocessing) from the language file
+bool MSG_Exists(const char*);
 
 class Section;
 
 typedef Bitu (LoopHandler)(void);
 
 const char *DOSBOX_GetDetailedVersion() noexcept;
+double DOSBOX_GetUptime();
 
 void DOSBOX_RunMachine();
 void DOSBOX_SetLoop(LoopHandler * handler);
@@ -54,16 +57,8 @@ void DOSBOX_SetNormalLoop();
 void DOSBOX_Init(void);
 
 class Config;
-extern Config * control;
-
-enum MachineType {
-	MCH_HERC,
-	MCH_CGA,
-	MCH_TANDY,
-	MCH_PCJR,
-	MCH_EGA,
-	MCH_VGA
-};
+using config_ptr_t = std::unique_ptr<Config>;
+extern config_ptr_t control;
 
 enum SVGACards {
 	SVGA_None,
@@ -74,18 +69,34 @@ enum SVGACards {
 }; 
 
 extern SVGACards svgaCard;
-extern MachineType machine;
 extern bool mono_cga;
 
+enum MachineType {
+	// In rough age-order: Hercules is the oldest and VGA is the newest
+	// (Tandy started out as a clone of the PCjr, so PCjr came first)
+	MCH_HERC  = 1 << 0,
+	MCH_CGA   = 1 << 1,
+	MCH_TANDY = 1 << 2,
+	MCH_PCJR  = 1 << 3,
+	MCH_EGA   = 1 << 4,
+	MCH_VGA   = 1 << 5,
+};
+
+extern MachineType machine;
+
+inline bool is_machine(const int type) {
+	return machine & type;
+}
 #define IS_TANDY_ARCH ((machine==MCH_TANDY) || (machine==MCH_PCJR))
 #define IS_EGAVGA_ARCH ((machine==MCH_EGA) || (machine==MCH_VGA))
 #define IS_VGA_ARCH (machine==MCH_VGA)
-#define TANDY_ARCH_CASE MCH_TANDY: case MCH_PCJR
-#define EGAVGA_ARCH_CASE MCH_EGA: case MCH_VGA
-#define VGA_ARCH_CASE MCH_VGA
 
 #ifndef DOSBOX_LOGGING_H
 #include "logging.h"
 #endif // the logging system.
+
+constexpr auto DefaultMt32RomsDir   = "mt32-roms";
+constexpr auto DefaultSoundfontsDir = "soundfonts";
+constexpr auto GlShadersDir         = "glshaders";
 
 #endif /* DOSBOX_DOSBOX_H */

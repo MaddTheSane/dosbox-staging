@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -24,6 +25,7 @@
 #include <string>
 #include <vector>
 
+#include "bit_view.h"
 #include "cross.h"
 #include "mem.h"
 #include "support.h"
@@ -34,40 +36,60 @@
 #define DOS_DIRDEPTH 8
 #define DOS_PATHLENGTH 80
 #define DOS_TEMPSIZE 1024
+#define DOS_MFNLENGTH 8
+#define DOS_EXTLENGTH 3
 
-enum {
-	DOS_ATTR_READ_ONLY=	0x01,
-	DOS_ATTR_HIDDEN=	0x02,
-	DOS_ATTR_SYSTEM=	0x04,
-	DOS_ATTR_VOLUME=	0x08,
-	DOS_ATTR_DIRECTORY=	0x10,
-	DOS_ATTR_ARCHIVE=	0x20,
-	DOS_ATTR_DEVICE=	0x40
+#define LFN_NAMELENGTH 255
+
+constexpr auto CurrentDirectory = ".";
+constexpr auto ParentDirectory  = "..";
+constexpr auto DosSeparator     = '\\';
+
+// obsolete - TODO: remove
+enum FatAttributeFlagsValues : uint8_t { // 7-bit
+	DOS_ATTR_READ_ONLY = 0b000'0001,
+	DOS_ATTR_HIDDEN    = 0b000'0010,
+	DOS_ATTR_SYSTEM    = 0b000'0100,
+	DOS_ATTR_VOLUME    = 0b000'1000,
+	DOS_ATTR_DIRECTORY = 0b001'0000,
+	DOS_ATTR_ARCHIVE   = 0b010'0000,
+	DOS_ATTR_DEVICE    = 0b100'0000,
+};
+
+union FatAttributeFlags {
+	uint8_t _data = 0;
+
+	bit_view<0, 1> read_only;
+	bit_view<1, 1> hidden;
+	bit_view<2, 1> system;
+	bit_view<3, 1> volume;
+	bit_view<4, 1> directory;
+	bit_view<5, 1> archive;
+	bit_view<6, 1> device;
+	bit_view<7, 1> unused;
+
+	FatAttributeFlags() : _data(0) {}
+	FatAttributeFlags(const uint8_t data) : _data(data) {}
+	FatAttributeFlags(const FatAttributeFlags& other) : _data(other._data) {}
+	FatAttributeFlags& operator=(const FatAttributeFlags& other)
+	{
+		_data = other._data;
+		return *this;
+	}
 };
 
 struct FileStat_Block {
-	Bit32u size;
-	Bit16u time;
-	Bit16u date;
-	Bit16u attr;
+	uint32_t size;
+	uint16_t time;
+	uint16_t date;
+	uint16_t attr;
 };
 
 class DOS_DTA;
 
 class DOS_File {
 public:
-	DOS_File()
-	        : flags(0),
-	          time(0),
-	          date(0),
-	          attr(0),
-	          refCtr(0),
-	          open(false),
-	          name(""),
-	          newtime(false),
-	          hdrive(0xff)
-	{}
-
+	DOS_File() = default;
 	DOS_File(const DOS_File &orig) = default;
 	DOS_File &operator=(const DOS_File &orig);
 
@@ -82,11 +104,11 @@ public:
 		return !name.empty() && (strcasecmp(name.c_str(), str) == 0);
 	}
 
-	virtual bool	Read(Bit8u * data,Bit16u * size)=0;
-	virtual bool	Write(Bit8u * data,Bit16u * size)=0;
-	virtual bool	Seek(Bit32u * pos,Bit32u type)=0;
+	virtual bool	Read(uint8_t * data,uint16_t * size)=0;
+	virtual bool	Write(uint8_t * data,uint16_t * size)=0;
+	virtual bool	Seek(uint32_t * pos,uint32_t type)=0;
 	virtual bool	Close()=0;
-	virtual Bit16u	GetInformation(void)=0;
+	virtual uint16_t	GetInformation(void)=0;
 
 	virtual bool IsOpen() { return open; }
 	virtual void AddRef() { refCtr++; }
@@ -98,19 +120,19 @@ public:
 	//--End of modifications
 	virtual void SetFlagReadOnlyMedium() {}
 
-	void SetDrive(Bit8u drv) { hdrive=drv;}
-	Bit8u GetDrive(void) { return hdrive;}
-	Bit32u flags;
-	Bit16u time;
-	Bit16u date;
-	Bit16u attr;
-	Bits refCtr;
-	bool open;
-	std::string name;
-	bool newtime;
+	void SetDrive(uint8_t drv) { hdrive=drv;}
+	uint8_t GetDrive(void) { return hdrive;}
+	uint32_t flags   = 0;
+	uint16_t time    = 0;
+	uint16_t date    = 0;
+	uint16_t attr    = 0;
+	Bits refCtr      = 0;
+	bool open        = false;
+	std::string name = {};
+	bool newtime     = false;
 	/* Some Device Specific Stuff */
 private:
-	Bit8u hdrive;
+	uint8_t hdrive = 0xff;
 };
 
 class DOS_Device : public DOS_File {
@@ -132,45 +154,69 @@ public:
 		return *this;
 	}
 
-	virtual bool	Read(Bit8u * data,Bit16u * size);
-	virtual bool	Write(Bit8u * data,Bit16u * size);
-	virtual bool	Seek(Bit32u * pos,Bit32u type);
-	virtual bool	Close();
-	virtual Bit16u	GetInformation(void);
-	virtual bool	ReadFromControlChannel(PhysPt bufptr,Bit16u size,Bit16u * retcode);
-	virtual bool	WriteToControlChannel(PhysPt bufptr,Bit16u size,Bit16u * retcode);
-	void SetDeviceNumber(Bitu num) { devnum=num;}
+	bool Read(uint8_t* data, uint16_t* size) override;
+	bool Write(uint8_t* data, uint16_t* size) override;
+	bool Seek(uint32_t* pos, uint32_t type) override;
+	bool Close() override;
+	uint16_t GetInformation(void) override;
+	virtual bool ReadFromControlChannel(PhysPt bufptr, uint16_t size,
+	                                    uint16_t* retcode);
+	virtual bool WriteToControlChannel(PhysPt bufptr, uint16_t size,
+	                                   uint16_t* retcode);
+	virtual uint8_t GetStatus(bool input_flag);
+	void SetDeviceNumber(Bitu num)
+	{
+		devnum = num;
+	}
+
 private:
 	Bitu devnum;
 };
 
 class localFile : public DOS_File {
 public:
-	localFile(const char *name, FILE *handle, const char *basedir);
-	localFile(const localFile &) = delete;            // prevent copying
-	localFile &operator=(const localFile &) = delete; // prevent assignment
-	bool Read(uint8_t *data, uint16_t *size);
-	bool Write(uint8_t *data, uint16_t *size);
-	bool Seek(uint32_t *pos, uint32_t type);
-	bool Close();
-	uint16_t GetInformation();
-	bool UpdateDateTimeFromHost();
+	localFile(const char* name, const std_fs::path& path, FILE* handle,
+	          const char* basedir);
+	localFile(const localFile&)            = delete; // prevent copying
+	localFile& operator=(const localFile&) = delete; // prevent assignment
+	bool Read(uint8_t* data, uint16_t* size) override;
+	bool Write(uint8_t* data, uint16_t* size) override;
+	bool Seek(uint32_t* pos, uint32_t type) override;
+	bool Close() override;
+	uint16_t GetInformation() override;
+	bool UpdateDateTimeFromHost() override;
 	void Flush();
 	//--Added 2011-11-03 by Alun Bestor to let Boxer inform open file handles
 	//that their physical backing media will be removed.
-	void willBecomeUnavailable(void);
+	void willBecomeUnavailable(void) override;
 	//--End of modifications
-	void SetFlagReadOnlyMedium() { read_only_medium = true; }
-	const char *GetBaseDir() const { return basedir; }
-	FILE *fhandle = nullptr; // todo handle this properly
+	void SetFlagReadOnlyMedium() override
+	{
+		read_only_medium = true;
+	}
+	const char* GetBaseDir() const
+	{
+		return basedir;
+	}
+	std_fs::path GetPath() const
+	{
+		return path;
+	}
+	FILE* fhandle = nullptr; // todo handle this properly
 private:
-	const char *basedir;
-	long stream_pos = 0;
+	const std_fs::path path = {};
+	const char* basedir     = nullptr;
+	long stream_pos         = 0;
+
 	bool ftell_and_check();
 	void fseek_and_check(int whence);
 	bool fseek_to_and_check(long pos, int whence);
-	bool read_only_medium;
-	enum { NONE,READ,WRITE } last_action;
+
+	bool read_only_medium     = false;
+	bool set_archive_on_close = false;
+
+	enum class LastAction : uint8_t { None, Read, Write };
+	LastAction last_action = LastAction::None;
 };
 
 /* The following variable can be lowered to free up some memory.
@@ -191,15 +237,15 @@ public:
 	void SetBaseDir(const char *path);
 	void SetDirSort(TDirSort sort) { sortDirType = sort; }
 
-	bool  OpenDir              (const char* path, Bit16u& id);
-	bool  ReadDir              (Bit16u id, char* &result);
+	bool  OpenDir              (const char* path, uint16_t& id);
+	bool  ReadDir              (uint16_t id, char* &result);
 
-	void  ExpandName           (char* path);
-	char* GetExpandName        (const char* path);
-	bool  GetShortName         (const char* fullname, char* shortname);
+	void ExpandNameAndNormaliseCase(char* path);
+	char* GetExpandNameAndNormaliseCase(const char* path);
+	bool GetShortName(const char* fullname, char* shortname);
 
-	bool  FindFirst            (char* path, Bit16u& id);
-	bool  FindNext             (Bit16u id, char* &result);
+	bool  FindFirst            (char* path, uint16_t& id);
+	bool  FindNext             (uint16_t id, char* &result);
 
 	void  CacheOut             (const char* path, bool ignoreLastDir = false);
 	void  AddEntry             (const char* path, bool checkExist = false);
@@ -238,7 +284,7 @@ public:
 		char        shortname[DOS_NAMELENGTH_ASCII];
 		bool        isOverlayDir;
 		bool        isDir;
-		Bit16u      id;
+		uint16_t      id;
 		Bitu        nextEntry;
 		unsigned    shortNr;
 		// contents
@@ -259,10 +305,10 @@ private:
 	bool		IsCachedIn		(CFileInfo* dir);
 	CFileInfo*	FindDirInfo		(const char* path, char* expandedPath);
 	bool		RemoveSpaces		(char* str);
-	bool		OpenDir			(CFileInfo* dir, const char* path, Bit16u& id);
+	bool		OpenDir			(CFileInfo* dir, const char* path, uint16_t& id);
 	void		CreateEntry		(CFileInfo* dir, const char* name, bool is_directory);
 	void		CopyEntry		(CFileInfo* dir, CFileInfo* from);
-	Bit16u		GetFreeID		(CFileInfo* dir);
+	uint16_t		GetFreeID		(CFileInfo* dir);
 	void		Clear			(void);
 
 	CFileInfo*	dirBase;
@@ -273,13 +319,22 @@ private:
 	char		save_path			[CROSS_LEN];
 	char		save_expanded		[CROSS_LEN];
 
-	Bit16u		srchNr;
+	uint16_t		srchNr;
 	CFileInfo*	dirSearch			[MAX_OPENDIRS];
 	CFileInfo*	dirFindFirst		[MAX_OPENDIRS];
-	Bit16u		nextFreeFindFirst;
+	uint16_t		nextFreeFindFirst;
 
 	char		label				[CROSS_LEN];
 	bool		updatelabel;
+};
+
+enum class DosDriveType : uint16_t {
+	Unknown = 0,
+	Local   = 1,
+	Cdrom   = 2,
+	Fat     = 3,
+	Iso     = 4,
+	Virtual = 5,
 };
 
 class DOS_Drive {
@@ -287,30 +342,58 @@ public:
 	DOS_Drive();
 	virtual ~DOS_Drive() = default;
 
-	virtual bool FileOpen(DOS_File * * file,char * name,Bit32u flags)=0;
-	virtual bool FileCreate(DOS_File * * file,char * name,Bit16u attributes)=0;
-	virtual bool FileUnlink(char * _name)=0;
+	virtual bool FileOpen(DOS_File** file, char* name, uint32_t flags) = 0;
+	virtual bool FileCreate(DOS_File** file, char* name,
+	                        FatAttributeFlags attributes) = 0;
+	virtual bool FileUnlink(char* _name)=0;
 	virtual bool RemoveDir(char * _dir)=0;
 	virtual bool MakeDir(char * _dir)=0;
 	virtual bool TestDir(char * _dir)=0;
 	virtual bool FindFirst(char * _dir,DOS_DTA & dta,bool fcb_findfirst=false)=0;
 	virtual bool FindNext(DOS_DTA & dta)=0;
-	virtual bool GetFileAttr(char * name,Bit16u * attr)=0;
-	virtual bool Rename(char * oldname,char * newname)=0;
-	virtual bool AllocationInfo(Bit16u * _bytes_sector,Bit8u * _sectors_cluster,Bit16u * _total_clusters,Bit16u * _free_clusters)=0;
+	virtual bool GetFileAttr(char* name, FatAttributeFlags* attr) = 0;
+	virtual bool SetFileAttr(const char* name, const FatAttributeFlags attr) = 0;
+	virtual bool Rename(char* oldname, char* newname) = 0;
+	virtual bool AllocationInfo(uint16_t* _bytes_sector, uint8_t* _sectors_cluster,
+	                            uint16_t* _total_clusters,
+	                            uint16_t* _free_clusters) = 0;
 	virtual bool FileExists(const char* name)=0;
 	virtual bool FileStat(const char* name, FileStat_Block * const stat_block)=0;
-	virtual Bit8u GetMediaByte(void)=0;
+	virtual uint8_t GetMediaByte(void)=0;
 	virtual void SetDir(const char *path);
 	virtual void EmptyCache() { dirCache.EmptyCache(); }
 	virtual bool isRemote(void)=0;
 	virtual bool isRemovable(void)=0;
 	virtual Bits UnMount(void)=0;
 
-	const char * GetInfo() const { return info; }
+	DosDriveType GetType() const
+	{
+		return type;
+	}
+	const char *GetInfo() const
+	{
+		return info;
+	}
+	std::string GetInfoString() const
+	{
+		switch (type) {
+		case DosDriveType::Local:
+			return MSG_Get("MOUNT_TYPE_LOCAL_DIRECTORY") +
+			       std::string(" ") + info;
+		case DosDriveType::Cdrom:
+			return MSG_Get("MOUNT_TYPE_CDROM") + std::string(" ") + info;
+		case DosDriveType::Fat:
+			return MSG_Get("MOUNT_TYPE_FAT") + std::string(" ") + info;
+		case DosDriveType::Iso:
+			return MSG_Get("MOUNT_TYPE_ISO") + std::string(" ") + info;
+		case DosDriveType::Virtual: return MSG_Get("MOUNT_TYPE_VIRTUAL");
+		default: return MSG_Get("MOUNT_TYPE_UNKNOWN");
+		}
+	}
 
 	char curdir[DOS_PATHLENGTH];
 	char info[256];
+	DosDriveType type = DosDriveType::Unknown;
 
 	// Can be overridden for example in iso images
 	virtual const char *GetLabel() { return dirCache.GetLabel(); }
@@ -330,24 +413,49 @@ public:
 	virtual void Activate() {}
 };
 
-enum { OPEN_READ=0, OPEN_WRITE=1, OPEN_READWRITE=2, OPEN_READ_NO_MOD=4, DOS_NOT_INHERIT=128};
-enum { DOS_SEEK_SET=0,DOS_SEEK_CUR=1,DOS_SEEK_END=2};
+enum FatPermissionFlags : uint8_t { // 8-bit
+	OPEN_READ        = 0b0000'0000,
+	OPEN_WRITE       = 0b0000'0001,
+	OPEN_READWRITE   = 0b0000'0010,
+	OPEN_READ_NO_MOD = 0b0000'0100,
+	DOS_NOT_INHERIT  = 0b1000'0000,
+};
 
+enum SeekType : uint8_t {
+	DOS_SEEK_SET = 0,
+	DOS_SEEK_CUR = 1,
+	DOS_SEEK_END = 2,
+};
 
-/*
- A multiplex handler should read the registers to check what function is being called
- If the handler returns false dos will stop checking other handlers
-*/
+// A multiplex handler should read the registers to check what function is being
+// called. If the handler returns false DOS will stop checking other handlers.
 
 typedef bool (MultiplexHandler)(void);
-void DOS_AddMultiplexHandler(MultiplexHandler * handler);
-void DOS_DelMultiplexHandler(MultiplexHandler * handler);
+void DOS_AddMultiplexHandler(MultiplexHandler* handler);
+void DOS_DeleteMultiplexHandler(MultiplexHandler* const handler);
 
 /* AddDevice stores the pointer to a created device */
 void DOS_AddDevice(DOS_Device * adddev);
 /* DelDevice destroys the device that is pointed to. */
 void DOS_DelDevice(DOS_Device * dev);
 
-void VFILE_Register(const char * name,Bit8u * data,Bit32u size);
+// Get, append, and query the DOS device header linked list
+RealPt DOS_GetNextDevice(const RealPt rp);
+RealPt DOS_GetLastDevice();
+void DOS_AppendDevice(const uint16_t segment, const uint16_t offset = 0);
+bool DOS_IsLastDevice(const RealPt rp);
+bool DOS_DeviceHasName(const RealPt rp, const std::string_view req_name);
+bool DOS_DeviceHasAttributes(const RealPt rp, const uint16_t attributes);
+uint16_t DOS_GetDeviceStrategy(const RealPt rp);
+uint16_t DOS_GetDeviceInterrupt(const RealPt rp);
+
+void VFILE_Register(const char *name,
+                    const uint8_t *data,
+                    const uint32_t size,
+                    const char *dir = "");
+void VFILE_Register(const char* name, const std::vector<uint8_t>& blob,
+                    const char* dir = "");
+void VFILE_Update(const char* name, std::vector<uint8_t> blob, const char* dir = "");
+void VFILE_Remove(const char* name, const char* dir = "");
 
 #endif

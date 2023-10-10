@@ -1,10 +1,10 @@
-# This file uses configuration options available in clang-format 8.0.
+# This file uses configuration options available in clang-format 15.0.
 #
 # More detailed description of all options:
-# https://releases.llvm.org/9.0.0/tools/clang/docs/ClangFormatStyleOptions.html
-# 
+# https://releases.llvm.org/15.0.0/tools/clang/docs/ClangFormatStyleOptions.html
+#
 # Note that version of clang-format provided by your distribution might be
-# newer and provide additional options, that won't work in 8.x.
+# newer and provide additional options, that won't work in 15.x.
 #
 # This style definition should only be understood as a hint
 # for writing new code. The rules are still work-in-progress and do
@@ -25,9 +25,15 @@ ColumnLimit: 80
 # C/C++ Language specifics
 #
 Language: Cpp
-# in clang-format 9.x "Cpp11" covers formatting for C++11 and C++14
-# in clang-format 10.x: switch to "c++14"
-Standard: c++14
+Standard: c++17
+
+# Align qualifiers with the type instead of the variable name
+# int* var; // 'var' is a pointer-to-int
+# int& var; // 'var' is a reference-to-int
+# const int& var; // 'var' is a constant-reference-to-int
+PointerAlignment: Left
+ReferenceAlignment: Left
+QualifierAlignment: Left
 
 # The extra indent or outdent of class access modifiers, e.g. public:
 #
@@ -40,7 +46,7 @@ AccessModifierOffset: -8
 #
 AlignAfterOpenBracket: Align
 
-# If true, aligns consecutive C/C++ preprocessor macros.
+# If Consecutive, aligns consecutive C/C++ preprocessor macros.
 #
 # This will align the C/C++ preprocessor macros of consecutive lines. This will
 # result in formattings like
@@ -51,20 +57,62 @@ AlignAfterOpenBracket: Align
 # #define foo(x)           (x * x)
 # #define bar(y, z)        (y + z)
 #
-AlignConsecutiveMacros: true
+AlignConsecutiveMacros: Consecutive
 
 # Don't align backslash character in macros, as it's unexpected during review
 # and does not look right when user changes the tab size character in their editor.
 #
 AlignEscapedNewlines: DontAlign
 
-# Allow short functions defined inside a class to be put on a single line
-#
-# class Foo {
-# 	void f() { foo(); }
+##
+# This will align the assignment operators of consecutive lines.
+# enum Enum {
+#    ONE   = 1,
+#    TWO   = 2,
+#    THREE = 3,
+#    FOUR  = 4,
+#    FIVE  = 5,
+#    SIX   = 6,
+#    SEVEN = 7
 # };
+AlignConsecutiveAssignments: Consecutive
+
+##
+#  the operator is un-indented so that the wrapped operand is aligned with the operand on the first line.
 #
-AllowShortFunctionsOnASingleLine: InlineOnly
+#  int aaa = bbbbbbbbbbbbbbb
+#          + ccccccccccccccc;
+#
+AlignOperands:  AlignAfterOperator
+
+##
+#   // Indents directives after the hash.
+#
+#   #if FOO
+#   #  if BAR
+#   #    include <foo>
+#   #  else
+#   #    include <other>
+#   #  endif
+#   #endif
+#
+#   // This much easier to see what's happening versus:
+#
+#   #if FOO
+#   #if BAR
+#   #include <foo>
+#   #else
+#   #include <other>
+#   #endif
+#   #endif
+#
+IndentPPDirectives: None
+
+# Always place function bodies on their own lines because
+# it makes a mess when some are on the same line and others are
+# on separate lines.
+#
+AllowShortFunctionsOnASingleLine: Empty
 
 # Short case labels in switch can be contracted to a single line
 #
@@ -73,6 +121,11 @@ AllowShortFunctionsOnASingleLine: InlineOnly
 # };
 #
 AllowShortCaseLabelsOnASingleLine: true
+
+# Always place if/else and loops bodies on the subsequent line
+#
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
 
 # Always place parameter declarations in a separate line:
 #
@@ -105,6 +158,36 @@ AlwaysBreakTemplateDeclarations: Yes
 #             "eeee";
 #
 # AlwaysBreakBeforeMultilineStrings: true
+
+# Insert braces after control statements (``if``, ``else``, ``for``, ``do``,
+#  and ``while``) in C++ unless the control statements are inside macro
+#  definitions or the braces would enclose preprocessor directives.
+#
+#   == WARNING ==
+#   Setting this option to `true` could lead to incorrect code formatting due
+#   to clang-format's lack of complete semantic information. As such, extra
+#   care should be taken to review code changes made by this option.
+#
+#    false:                                    true:
+#
+#    if (isa<FunctionDecl>(D))        vs.      if (isa<FunctionDecl>(D)) {
+#      handleFunctionDecl(D);                    handleFunctionDecl(D);
+#    else if (isa<VarDecl>(D))                 } else if (isa<VarDecl>(D)) {
+#      handleVarDecl(D);                         handleVarDecl(D);
+#    else                                      } else {
+#      return;                                   return;
+#                                              }
+#
+#    while (i--)                      vs.      while (i--) {
+#      for (auto *A : D.attrs())                 for (auto *A : D.attrs()) {
+#        handleAttr(A);                            handleAttr(A);
+#                                                }
+#                                              }
+#    do                               vs.      do {
+#      --i;                                      --i;
+#    while (i);
+#
+InsertBraces: true
 
 # Attach braces to surrounding context except break before braces on function
 # definitions (also known as K&R indentation style). This is C-derived style,
@@ -157,7 +240,7 @@ AlwaysBreakTemplateDeclarations: Yes
 BreakBeforeBraces: Custom
 BraceWrapping:
   AfterClass: false
-  AfterControlStatement: false
+  AfterControlStatement: Never
   AfterEnum: false
   AfterFunction: true
   AfterNamespace: false
@@ -191,7 +274,17 @@ BreakStringLiterals: false
 # 	// …
 # }
 #
-BinPackParameters: false
+# Place paramaters on their own lines, like:
+# constexpr std::array<uint32_t, 9> debuggers_events = {
+#   SDL_WINDOWEVENT,
+#   SDL_KEYDOWN,
+#   SDL_KEYUP,
+#   SDL_MOUSEMOTION,
+# };
+# BinPackParameters: false
+BinPackArguments: false
+ExperimentalAutoDetectBinPacking: false
+AllowAllParametersOfDeclarationOnNextLine: false
 
 # Emulates dosbox-staging constructor formatting rules; initializer list
 # is treated as continuation, therefore initializers are indented with spaces.
@@ -292,7 +385,7 @@ KeepEmptyLinesAtTheStartOfBlocks: false
 #
 # This decides what order things should be done if a line is too long
 #
-# clang-format iterates through various versions the long line can be formatted 
+# clang-format iterates through various versions the long line can be formatted
 # and selects the one with smallest penalty score.
 #
 # Small ExcessCharacter penalty prevents breaking line is longer than
@@ -314,4 +407,4 @@ PenaltyReturnTypeOnItsOwnLine: 200
 #
 # See https://github.com/dosbox-staging/dosbox-staging/issues/196 for details.
 #
-SortIncludes: false
+# SortIncludes: false

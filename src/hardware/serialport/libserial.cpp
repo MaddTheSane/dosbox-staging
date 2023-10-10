@@ -21,9 +21,11 @@
 #include "config.h"
 
 #ifdef WIN32
-
+// clang-format off
+// 'windows.h' must be included first, otherwise we'll get compilation errors
 #include <windows.h>
 #include <stdio.h>
+// clang-format on
 
 #include "string_utils.h"
 
@@ -36,7 +38,7 @@ struct _COMPORT {
 bool SERIAL_open(const char* portname, COMPORT* port) {
 	// allocate COMPORT structure
 	COMPORT cp = (_COMPORT*)malloc(sizeof(_COMPORT));
-	if(cp == NULL) return false;
+	if(cp == nullptr) return false;
 	
 	cp->breakstatus=false;
 
@@ -54,10 +56,10 @@ bool SERIAL_open(const char* portname, COMPORT* port) {
 	cp->porthandle = CreateFile (extended_portname,
 					   GENERIC_READ | GENERIC_WRITE, 0,
 									  // must be opened with exclusive-access
-	                   NULL,          // no security attributes
+	                   nullptr,          // no security attributes
 	                   OPEN_EXISTING, // must use OPEN_EXISTING
 	                   0,             // non overlapped I/O
-	                   NULL           // hTemplate must be NULL for comm devices
+	                   nullptr           // hTemplate must be NULL for comm devices
 	                  );
 
 	if (cp->porthandle == INVALID_HANDLE_VALUE) goto cleanup_error;
@@ -105,7 +107,7 @@ bool SERIAL_open(const char* portname, COMPORT* port) {
 		//goto cleanup_error;
 	}
 	DWORD errors;
-	if(!ClearCommError(cp->porthandle, &errors, NULL)) {
+	if(!ClearCommError(cp->porthandle, &errors, nullptr)) {
 		goto cleanup_error;
 	}
 	*port = cp;
@@ -133,11 +135,11 @@ void SERIAL_getErrorString(char* buffer, size_t length) {
 	// get the error message text from the operating system
 	LPVOID sysmessagebuffer;
 	FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
-		NULL,
+		nullptr,
 		error,
 		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
 		(LPTSTR) &sysmessagebuffer,
-		0,NULL);
+		0,nullptr);
 
 	const char* err5text = "The specified port is already in use.\n";
 	const char* err2text = "The specified port does not exist.\n";
@@ -189,7 +191,7 @@ bool SERIAL_sendchar(COMPORT port, char data) {
 	// mean bug: with break = 1, WriteFile will never return.
 	if(port->breakstatus) return true; // true or false?!
 
-	WriteFile (port->porthandle, &data, 1, &bytesWritten, NULL);
+	WriteFile (port->porthandle, &data, 1, &bytesWritten, nullptr);
 	if(bytesWritten==1) return true;
 	else return false;
 }
@@ -202,10 +204,10 @@ int SERIAL_getextchar(COMPORT port) {
 
 	int retval = 0;
 	// receive a byte; TODO communicate failure
-	if (ReadFile (port->porthandle, &chRead, 1, &dwRead, NULL)) {
+	if (ReadFile (port->porthandle, &chRead, 1, &dwRead, nullptr)) {
 		if (dwRead) {
 			// check for errors
-			ClearCommError(port->porthandle, &errors, NULL);
+			ClearCommError(port->porthandle, &errors, nullptr);
 			// mask bits are identical
 			errors &= CE_BREAK|CE_FRAME|CE_RXPARITY|CE_OVERRUN;
 			retval |= (errors<<8);
@@ -260,6 +262,8 @@ bool SERIAL_setCommParameters(COMPORT port,
 
 #if defined (LINUX) || defined (MACOSX) || defined (BSD)
 
+#include "logging.h"
+
 #include <string.h> // safe_strlen
 #include <stdlib.h>
 
@@ -280,11 +284,23 @@ struct _COMPORT {
 	termios backup;
 };
 
-bool SERIAL_open(const char* portname, COMPORT* port) {
+static void log_ioctl_if_error(const int retval, const char* action_description)
+{
+	// On error, -1 is returned, and errno is set to indicate the error.
+	// Ref: https://man7.org/linux/man-pages/man2/ioctl.2.html
+	//
+	if (retval == -1) {
+		LOG_WARNING("SERIAL: ioctl reported error '%s' while %s, continuing.",
+		            strerror(errno), action_description);
+	}
+}
+
+bool SERIAL_open(const char* portname, COMPORT* port)
+{
 	int result;
 	// allocate COMPORT structure
 	COMPORT cp = (_COMPORT*)malloc(sizeof(_COMPORT));
-	if(cp == NULL) return false;
+	if(cp == nullptr) return false;
 
 	cp->breakstatus=false;
 
@@ -322,7 +338,10 @@ bool SERIAL_open(const char* portname, COMPORT* port) {
 	return true;
 
 cleanup_error:
-	if (cp->porthandle != 0) close(cp->porthandle);
+	// Only close the handle if it's valid
+	if (cp->porthandle > 0)
+		close(cp->porthandle);
+
 	free(cp);
 	return false;
 }
@@ -363,7 +382,9 @@ void SERIAL_getErrorString(char* buffer, size_t length) {
 
 int SERIAL_getmodemstatus(COMPORT port) {
 	long flags = 0;
-	ioctl (port->porthandle, TIOCMGET, &flags);
+	const auto rcode = ioctl(port->porthandle, TIOCMGET, &flags);
+	log_ioctl_if_error(rcode, "getting MODEM status");
+
 	int retval = 0;
 	if (flags & TIOCM_CTS) retval |= SERIAL_CTS;
 	if (flags & TIOCM_DSR) retval |= SERIAL_DSR;
@@ -389,12 +410,13 @@ int SERIAL_getextchar(COMPORT port) {
 	if (dwRead==1) {
 		if(chRead==0xff) // error escape
 		{
-			dwRead=read(port->porthandle,&chRead,1);
-			if(chRead==0x00) // an error 
+			dwRead = read(port->porthandle, &chRead, 1);
+			if (dwRead && chRead == 0x00) // an error
 			{
 				dwRead=read(port->porthandle,&chRead,1);
-				if(chRead==0x0) error=SERIAL_BREAK_ERR;
-				else error=SERIAL_FRAMING_ERR;
+				error = (!dwRead || chRead == 0x0)
+				              ? SERIAL_BREAK_ERR
+				              : SERIAL_FRAMING_ERR;
 			}
 		}
 		retval |= (error<<8);
@@ -465,17 +487,20 @@ bool SERIAL_setCommParameters(COMPORT port,
 }
 
 void SERIAL_setBREAK(COMPORT port, bool value) {
-	ioctl(port->porthandle, value?TIOCSBRK:TIOCCBRK);
+	const auto rcode = ioctl(port->porthandle, value ? TIOCSBRK : TIOCCBRK);
+	log_ioctl_if_error(rcode, "setting break");
 }
 
 void SERIAL_setDTR(COMPORT port, bool value) {
 	long flag = TIOCM_DTR;
-	ioctl(port->porthandle, value?TIOCMBIS:TIOCMBIC, &flag);
+	const auto rcode = ioctl(port->porthandle, value ? TIOCMBIS : TIOCMBIC, &flag);
+	log_ioctl_if_error(rcode, "setting data-terminal-ready (DTR)");
 }
 
 void SERIAL_setRTS(COMPORT port, bool value) {
 	long flag = TIOCM_RTS;
-	ioctl(port->porthandle, value?TIOCMBIS:TIOCMBIC, &flag);
+	const auto rcode = ioctl(port->porthandle, value ? TIOCMBIS : TIOCMBIC, &flag);
+	log_ioctl_if_error(rcode, "setting request-to-send (RTS)");
 }
 
 #endif

@@ -1,6 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -25,11 +26,19 @@
 
 class MOUNT final : public Program {
     public:
-        void Move_Z(char new_z);
-        void ListMounts();
-        void Run(void);
+	    MOUNT()
+	    {
+		    AddMessages();
+		    help_detail = {HELP_Filter::Common,
+		                   HELP_Category::Dosbox,
+		                   HELP_CmdType::Program,
+		                   "MOUNT"};
+	    }
+	    void Move_Z(char new_z);
+	    void ListMounts();
+	    void Run() override;
+    private:
+        static void AddMessages();
 };
-
-void MOUNT_ProgramStart(Program **make);
 
 #endif // DOSBOX_PROGRAM_MOUNT_H

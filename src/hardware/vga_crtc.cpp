@@ -1,4 +1,7 @@
 /*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -32,11 +35,11 @@
 void VGA_MapMMIO(void);
 void VGA_UnmapMMIO(void);
 
-void vga_write_p3d5(io_port_t port, uint8_t val, io_width_t);
-Bitu DEBUG_EnableDebugger(void);
+void vga_write_p3d5(io_port_t port, io_val_t value, io_width_t);
 
-void vga_write_p3d4(io_port_t, uint8_t val, io_width_t)
+void vga_write_p3d4(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	crtc(index) = val;
 }
 
@@ -45,8 +48,9 @@ uint8_t vga_read_p3d4(io_port_t, io_width_t)
 	return crtc(index);
 }
 
-void vga_write_p3d5(io_port_t, uint8_t val, io_width_t)
+void vga_write_p3d5(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	//	if (crtc(index) > 0x18) LOG_MSG("VGA CRCT write %" sBitfs(X) " to reg %X",val,crtc(index));
 	switch (crtc(index)) {
 	case 0x00: /* Horizontal Total Register */
@@ -140,39 +144,15 @@ void vga_write_p3d5(io_port_t, uint8_t val, io_width_t)
 				(3C0h index 13h).
 		*/
 		break;
-	case 0x09: /* Maximum Scan Line Register */
-		if (IS_VGA_ARCH)
-			vga.config.line_compare=(vga.config.line_compare & 0x5ff)|(val&0x40)<<3;
-
-		if (IS_VGA_ARCH && (svgaCard==SVGA_None) && (vga.mode==M_EGA || vga.mode==M_VGA)) {
-			// in vgaonly mode we take special care of line repeats (excluding CGA modes)
-			if ((vga.crtc.maximum_scan_line ^ val) & 0x20) {
-				crtc(maximum_scan_line)=val;
-				VGA_StartResize();
-			} else {
-				crtc(maximum_scan_line)=val;
-			}
-			vga.draw.address_line_total = (val &0x1F) + 1;
-			if (val&0x80) vga.draw.address_line_total*=2;
-		} else {
-			if ((vga.crtc.maximum_scan_line ^ val) & 0xbf) {
-				crtc(maximum_scan_line)=val;
-				VGA_StartResize();
-			} else {
-				crtc(maximum_scan_line)=val;
-			}
+	case 0x09:
+		if (IS_VGA_ARCH) {
+			vga.config.line_compare = (vga.config.line_compare & 0x5ff) |
+			                          (val & 0x40) << 3;
 		}
-		/*
-			0-4	Number of scan lines in a character row -1. In graphics modes this is
-				the number of times (-1) the line is displayed before passing on to
-				the next line (0: normal, 1: double, 2: triple...).
-				This is independent of bit 7, except in CGA modes which seems to
-				require this field to be 1 and bit 7 to be set to work.
-			5	Bit 9 of Start Vertical Blanking
-			6	Bit 9 of Line Compare Register
-			7	Doubles each scan line if set. I.e. displays 200 lines on a 400 display.
-		*/
+		vga.crtc.maximum_scan_line.data = val;
+		VGA_StartResize();
 		break;
+
 	case 0x0A:	/* Cursor Start Register */
 		crtc(cursor_start)=val;
 		vga.draw.cursor.sline=val&0x1f;
@@ -252,7 +232,7 @@ void vga_write_p3d5(io_port_t, uint8_t val, io_width_t)
 				PIC_RemoveEvents(VGA_SetupDrawing);
 				vga.draw.resizing=false;
 				crtc(vertical_display_end)=val;
-				VGA_StartResize(150);
+				VGA_StartResizeAfter(150);
 			} else {
 				crtc(vertical_display_end)=val;
 				VGA_StartResize();
@@ -280,7 +260,7 @@ void vga_write_p3d5(io_port_t, uint8_t val, io_width_t)
 			//Byte,word,dword mode
 			if ( crtc(underline_location) & 0x20 )
 				vga.config.addr_shift = 2;
-			else if ( crtc( mode_control) & 0x40 )
+			else if (vga.crtc.mode_control.word_byte_mode_select)
 				vga.config.addr_shift = 0;
 			else
 				vga.config.addr_shift = 1;
@@ -315,42 +295,31 @@ void vga_write_p3d5(io_port_t, uint8_t val, io_width_t)
 				IBM actually says bits 0-7.
 		*/
 		break;
-	case 0x17:	/* Mode Control Register */
-		crtc(mode_control)=val;
-		vga.tandy.line_mask = (~val) & 3;
-		//Byte,word,dword mode
-		if ( crtc(underline_location) & 0x20 )
-			vga.config.addr_shift = 2;
-		else if ( crtc( mode_control) & 0x40 )
-			vga.config.addr_shift = 0;
-		else
-			vga.config.addr_shift = 1;
 
-		if ( vga.tandy.line_mask ) {
-			vga.tandy.line_shift = 13;
-			vga.tandy.addr_mask = (1 << 13) - 1;
+	case 0x17:
+		vga.crtc.mode_control.data = val;
+		vga.tandy.line_mask        = (~val) & 3;
+
+		// Byte, word, dword mode
+		if (vga.crtc.underline_location & 0x20) {
+			vga.config.addr_shift = 2;
+		} else if (vga.crtc.mode_control.word_byte_mode_select) {
+			vga.config.addr_shift = 0;
 		} else {
-			vga.tandy.addr_mask = ~0;
+			vga.config.addr_shift = 1;
+		}
+
+		if (vga.tandy.line_mask) {
+			vga.tandy.line_shift = 13;
+			vga.tandy.addr_mask  = (1 << 13) - 1;
+		} else {
+			vga.tandy.addr_mask  = ~0;
 			vga.tandy.line_shift = 0;
 		}
-		//Should we really need to do a determinemode here?
-//		VGA_DetermineMode();
-		/*
-			0	If clear use CGA compatible memory addressing system
-				by substituting character row scan counter bit 0 for address bit 13,
-				thus creating 2 banks for even and odd scan lines.
-			1	If clear use Hercules compatible memory addressing system by
-				substituting character row scan counter bit 1 for address bit 14,
-				thus creating 4 banks.
-			2	If set increase scan line counter only every second line.
-			3	If set increase memory address counter only every other character clock.
-			5	When in Word Mode bit 15 is rotated to bit 0 if this bit is set else
-				bit 13 is rotated into bit 0.
-			6	If clear system is in word mode. Addresses are rotated 1 position up
-				bringing either bit 13 or 15 into bit 0.
-			7	Clearing this bit will reset the display system until the bit is set again.
-		*/
+		// Should we really need to do a determinemode here?
+		// VGA_DetermineMode();
 		break;
+
 	case 0x18:	/* Line Compare Register */
 		crtc(line_compare)=val;
 		vga.config.line_compare=(vga.config.line_compare & 0x700) | val;
@@ -375,39 +344,37 @@ uint8_t vga_read_p3d5(io_port_t, io_width_t)
 {
 	//	LOG_MSG("VGA CRCT read from reg %X",crtc(index));
 	switch (crtc(index)) {
-	case 0x00: /* Horizontal Total Register */ return crtc(horizontal_total);
-	case 0x01: /* Horizontal Display End Register */ return crtc(horizontal_display_end);
-	case 0x02: /* Start Horizontal Blanking Register */ return crtc(start_horizontal_blanking);
-	case 0x03: /* End Horizontal Blanking Register */ return crtc(end_horizontal_blanking);
-	case 0x04: /* Start Horizontal Retrace Register */ return crtc(start_horizontal_retrace);
-	case 0x05: /* End Horizontal Retrace Register */ return crtc(end_horizontal_retrace);
-	case 0x06: /* Vertical Total Register */ return crtc(vertical_total);
-	case 0x07: /* Overflow Register */ return crtc(overflow);
-	case 0x08: /* Preset Row Scan Register */ return crtc(preset_row_scan);
-	case 0x09: /* Maximum Scan Line Register */ return crtc(maximum_scan_line);
-	case 0x0A: /* Cursor Start Register */ return crtc(cursor_start);
-	case 0x0B: /* Cursor End Register */ return crtc(cursor_end);
-	case 0x0C: /* Start Address High Register */ return crtc(start_address_high);
-	case 0x0D: /* Start Address Low Register */ return crtc(start_address_low);
-	case 0x0E: /*Cursor Location High Register */ return crtc(cursor_location_high);
-	case 0x0F: /* Cursor Location Low Register */ return crtc(cursor_location_low);
-	case 0x10: /* Vertical Retrace Start Register */ return crtc(vertical_retrace_start);
-	case 0x11: /* Vertical Retrace End Register */ return crtc(vertical_retrace_end);
-	case 0x12: /* Vertical Display End Register */ return crtc(vertical_display_end);
-	case 0x13: /* Offset register */ return crtc(offset);
-	case 0x14: /* Underline Location Register */ return crtc(underline_location);
-	case 0x15: /* Start Vertical Blank Register */ return crtc(start_vertical_blanking);
-	case 0x16:	/*  End Vertical Blank Register */
-		return crtc(end_vertical_blanking);
-	case 0x17:	/* Mode Control Register */
-		return crtc(mode_control);
-	case 0x18:	/* Line Compare Register */
-		return crtc(line_compare);
+	case 0x00: return crtc(horizontal_total);
+	case 0x01: return crtc(horizontal_display_end);
+	case 0x02: return crtc(start_horizontal_blanking);
+	case 0x03: return crtc(end_horizontal_blanking);
+	case 0x04: return crtc(start_horizontal_retrace);
+	case 0x05: return crtc(end_horizontal_retrace);
+	case 0x06: return crtc(vertical_total);
+	case 0x07: return crtc(overflow);
+	case 0x08: return crtc(preset_row_scan);
+	case 0x09: return vga.crtc.maximum_scan_line.data;
+	case 0x0A: return crtc(cursor_start);
+	case 0x0B: return crtc(cursor_end);
+	case 0x0C: return crtc(start_address_high);
+	case 0x0D: return crtc(start_address_low);
+	case 0x0E: return crtc(cursor_location_high);
+	case 0x0F: return crtc(cursor_location_low);
+	case 0x10: return crtc(vertical_retrace_start);
+	case 0x11: return crtc(vertical_retrace_end);
+	case 0x12: return crtc(vertical_display_end);
+	case 0x13: return crtc(offset);
+	case 0x14: return crtc(underline_location);
+	case 0x15: return crtc(start_vertical_blanking);
+	case 0x16: return crtc(end_vertical_blanking);
+	case 0x17: return vga.crtc.mode_control.data;
+	case 0x18: return crtc(line_compare);
 	default:
 		if (svga.read_p3d5) {
 			return svga.read_p3d5(crtc(index), io_width_t::byte);
 		} else {
-			LOG(LOG_VGAMISC,LOG_NORMAL)("VGA:CRTC:Read from unknown index %X",crtc(index));
+			LOG(LOG_VGAMISC, LOG_NORMAL)
+			("VGA:CRTC:Read from unknown index %X", crtc(index));
 			return 0x0;
 		}
 	}

@@ -84,11 +84,11 @@ enum Typeface
 class CPrinter {
 public:
 
-	CPrinter (Bit16u dpi, Bit16u width, Bit16u height, char* output, bool multipageOutput);
+	CPrinter (int16_t dpi, int16_t width, int16_t height, char* output, bool multipageOutput);
 	virtual ~CPrinter();
 
 	// Process one character sent to virtual printer
-	void printChar(Bit8u ch);
+	void printChar(uint8_t ch);
 
 	// Hard Reset (like switching printer off and on)
 	void resetPrinterHard();
@@ -114,12 +114,12 @@ public:
 private:
 
 	// used to fill the color "sub-pallettes"
-	void FillPalette(Bit8u redmax, Bit8u greenmax, Bit8u bluemax, Bit8u colorID,
+	void FillPalette(uint8_t redmax, uint8_t greenmax, uint8_t bluemax, uint8_t colorID,
 							SDL_Palette* pal);
 
     // Checks if given char belongs to a command and process it. If false, the character
 	// should be printed
-	bool processCommandChar(Bit8u ch);
+	bool processCommandChar(uint8_t ch);
 
 	// Resets the printer to the factory settings
 	void resetPrinter();
@@ -132,51 +132,51 @@ private:
 
 	// Blits the given glyph on the page surface. If add is true, the values of bitmap are
 	// added to the values of the pixels in the page
-	void blitGlyph(FT_Bitmap bitmap, Bit16u destx, Bit16u desty, bool add);
+	void blitGlyph(FT_Bitmap bitmap, int16_t destx, int16_t desty, bool add);
 
 	// Draws an anti-aliased line from (fromx, y) to (tox, y). If broken is true, gaps are included
 	void drawLine(Bitu fromx, Bitu tox, Bitu y, bool broken);
 
 	// Setup the bitGraph structure
-	void setupBitImage(Bit8u dens, Bit16u numCols);
+	void setupBitImage(uint8_t dens, int16_t numCols);
 
 	// Process a character that is part of bit image. Must be called iff bitGraph.remBytes > 0.
-	void printBitGraph(Bit8u ch);
+	void printBitGraph(uint8_t ch);
 
 	// Copies the codepage mapping from the constant array to CurMap
-	void selectCodepage(Bit16u cp);
+	void selectCodepage(int16_t cp);
 
 	// Output current page 
 	void outputPage();
 
 	// Prints out a byte using ASCII85 encoding (only outputs something every four bytes). When b>255, closes the ASCII85 string
-	void fprintASCII85(FILE* f, Bit16u b);
+	void fprintASCII85(FILE* f, int16_t b);
 
 	// Closes a multipage document
 	void finishMultipage();
 
 	// Returns value of the num-th pixel (couting left-right, top-down) in a safe way
-	Bit8u getPixel(Bit32u num);
+	uint8_t getPixel(uint32_t num);
 
 	FT_Library FTlib;					// FreeType2 library used to render the characters
 
 	SDL_Surface* page;					// Surface representing the current page
 	FT_Face curFont;					// The font currently used to render characters
-	Bit8u color;
+	uint8_t color;
 
 	Real64 curX, curY;					// Position of the print head (in inch)
 
-	Bit16u dpi;							// dpi of the page
-	Bit16u ESCCmd;						// ESC-command that is currently processed
+	int16_t dpi;							// dpi of the page
+	int16_t ESCCmd;						// ESC-command that is currently processed
 	bool ESCSeen;						// True if last read character was an ESC (0x1B)
 	bool FSSeen;						// True if last read character was an FS (0x1C) (IBM commands)
 
-	Bit8u numParam, neededParam;		// Numbers of parameters already read/needed to process command
+	uint8_t numParam, neededParam;		// Numbers of parameters already read/needed to process command
 
-	Bit8u params[20];					// Buffer for the read params
-	Bit16u style;						// Style of font (see STYLE_* constants)
+	uint8_t params[20];					// Buffer for the read params
+	int16_t style;						// Style of font (see STYLE_* constants)
 	Real64 cpi, actcpi;					// CPI value set by program and the actual one (taking in account font types)
-	Bit8u score;						// Score for lines (see SCORE_* constants)
+	uint8_t score;						// Score for lines (see SCORE_* constants)
 
 	Real64 topMargin, bottomMargin, rightMargin, leftMargin;	// Margins of the page (in inch)
 	Real64 pageWidth, pageHeight;								// Size of page (in inch)
@@ -184,13 +184,13 @@ private:
 	Real64 lineSpacing;											// Size of one line (in inch)
 
 	Real64 horiztabs[32];				// Stores the set horizontal tabs (in inch)
-	Bit8u numHorizTabs;					// Number of configured tabs
+	uint8_t numHorizTabs;					// Number of configured tabs
 
 	Real64 verttabs[16];				// Stores the set vertical tabs (in inch)
-	Bit8u numVertTabs;					// Number of configured tabs
+	uint8_t numVertTabs;					// Number of configured tabs
 
-	Bit8u curCharTable;					// Currently used char table und charset
-	Bit8u printQuality;					// Print quality (see QUALITY_* constants)
+	uint8_t curCharTable;					// Currently used char table und charset
+	uint8_t printQuality;					// Print quality (see QUALITY_* constants)
 
 	Typeface LQtypeFace;				// Typeface used in LQ printing mode
 
@@ -202,18 +202,18 @@ private:
 
 	struct bitGraphicParams				// Holds information about printing bit images
 	{
-		Bit16u horizDens, vertDens;		// Density of image to print (in dpi)
+		int16_t horizDens, vertDens;		// Density of image to print (in dpi)
 		bool adjacent;					// Print adjacent pixels? (ignored)
-		Bit8u bytesColumn;				// Bytes per column
-		Bit16u remBytes;				// Bytes left to read before image is done
-		Bit8u column[6];				// Bytes of the current and last column
-		Bit8u readBytesColumn;			// Bytes read so far for the current column
+		uint8_t bytesColumn;				// Bytes per column
+		int16_t remBytes;				// Bytes left to read before image is done
+		uint8_t column[6];				// Bytes of the current and last column
+		uint8_t readBytesColumn;			// Bytes read so far for the current column
 	} bitGraph;
 
-	Bit8u densk, densl, densy, densz;	// Image density modes used in ESC K/L/Y/Z commands
+	uint8_t densk, densl, densy, densz;	// Image density modes used in ESC K/L/Y/Z commands
 
-	Bit16u curMap[256];					// Currently used ASCII => Unicode mapping
-	Bit16u charTables[4];				// Charactertables
+	int16_t curMap[256];					// Currently used ASCII => Unicode mapping
+	int16_t charTables[4];				// Charactertables
 
 	Real64 definedUnit;					// Unit used by some ESC/P2 commands (negative => use default)
 
@@ -223,8 +223,8 @@ private:
 
 	Real64 hmi;							// Horizontal motion index (in inch; overrides CPI settings)
 
-	Bit8u msb;							// MSB mode
-	Bit16u numPrintAsChar;				// Number of bytes to print as characters (even when normally control codes)
+	uint8_t msb;							// MSB mode
+	int16_t numPrintAsChar;				// Number of bytes to print as characters (even when normally control codes)
 
 #if defined (WIN32)
 	HDC printerDC;						// Win32 printer device
@@ -233,11 +233,11 @@ private:
 	char* output;						// Output method selected by user
 	void* outputHandle;					// If not null, additional pages will be appended to the given handle
 	bool multipageOutput;				// If true, all pages are combined to one file/print job etc. until the "eject page" button is pressed
-	Bit16u multiPageCounter;			// Current page (when printing multipages)
+	int16_t multiPageCounter;			// Current page (when printing multipages)
 
-	Bit8u ASCII85Buffer[4];				// Buffer used in ASCII85 encoding
-	Bit8u ASCII85BufferPos;				// Position in ASCII85 encode buffer
-	Bit8u ASCII85CurCol;				// Columns printed so far in the current lines
+	uint8_t ASCII85Buffer[4];				// Buffer used in ASCII85 encoding
+	uint8_t ASCII85BufferPos;				// Position in ASCII85 encode buffer
+	uint8_t ASCII85CurCol;				// Columns printed so far in the current lines
 };
 
 #endif

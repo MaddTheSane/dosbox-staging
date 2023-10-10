@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -319,14 +320,14 @@ switch (inst.code.op) {
 		break;
 	case O_XCHG_AX:
 		{
-			Bit16u temp=reg_ax;
+			uint16_t temp=reg_ax;
 			reg_ax=inst_op1_w;
 			inst_op1_w=temp;
 			break;
 		}
 	case O_XCHG_EAX:
 		{
-			Bit32u temp=reg_eax;
+			uint32_t temp=reg_eax;
 			reg_eax=inst_op1_d;
 			inst_op1_d=temp;
 			break;
@@ -397,10 +398,10 @@ switch (inst.code.op) {
 		if ((reg_flags & FLAG_VM) || (!cpu.pmode)) goto illegalopcode;
 		switch (inst.rm_index) {
 		case 0x00:	/* SLDT */
-			inst_op1_d=(Bit32u)CPU_SLDT();
+			inst_op1_d=(uint32_t)CPU_SLDT();
 			break;
 		case 0x01:	/* STR */
-			inst_op1_d=(Bit32u)CPU_STR();
+			inst_op1_d=(uint32_t)CPU_STR();
 			break;
 		case 0x02:	/* LLDT */
 			if (cpu.cpl) EXCEPTION(EXCEPTION_GP);
@@ -479,21 +480,21 @@ switch (inst.code.op) {
 		{
 			Bitu ar=inst_op2_d;
 			CPU_LAR(inst_op1_w,ar);
-			inst_op1_d=(Bit32u)ar;
+			inst_op1_d=(uint32_t)ar;
 		}
 		break;
 	case O_LSL:
 		{
 			Bitu limit=inst_op2_d;
 			CPU_LSL(inst_op1_w,limit);
-			inst_op1_d=(Bit32u)limit;
+			inst_op1_d=(uint32_t)limit;
 		}
 		break;
 	case O_ARPL:
 		{
 			Bitu new_sel=inst_op1_d;
 			CPU_ARPL(new_sel,inst_op2_d);
-			inst_op1_d=(Bit32u)new_sel;
+			inst_op1_d=(uint32_t)new_sel;
 		}
 		break;
 	case O_BSFw:
@@ -603,15 +604,15 @@ switch (inst.code.op) {
 		inst_op1_d&=~(1 << (inst_op2_d & 31));
 		break;
 	case O_BSWAPw:
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegalopcode;
+		if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegalopcode;
 		BSWAPW(inst_op1_w);
 		break;
 	case O_BSWAPd:
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegalopcode;
+		if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegalopcode;
 		BSWAPD(inst_op1_d);
 		break;
 	case O_CMPXCHG:
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_486NEWSLOW) goto illegalopcode;
+		if (CPU_ArchitectureType<ArchitectureType::Intel486NewSlow) goto illegalopcode;
 		FillFlags();
 		if (inst_op1_d==reg_eax) {
 			inst_op1_d=reg_32(inst.rm_index);
@@ -651,10 +652,20 @@ switch (inst.code.op) {
 #endif
 	case O_BOUNDw:
 		{
-			Bit16s bound_min, bound_max;
-			bound_min=LoadMw(inst.rm_eaa);
-			bound_max=LoadMw(inst.rm_eaa+2);
-			if ( (((Bit16s)inst_op1_w) < bound_min) || (((Bit16s)inst_op1_w) > bound_max) ) {
+			if (inst.rm>=0xc0) goto illegalopcode;
+			const auto bound_min=LoadMws(inst.rm_eaa);
+			const auto bound_max=LoadMws(inst.rm_eaa+2);
+			if ( (inst_op1_ws < bound_min) || (inst_op1_ws > bound_max) ) {
+				EXCEPTION(5);
+			}
+		}
+		break;
+	case O_BOUNDd:
+		{
+			if (inst.rm>=0xc0) goto illegalopcode;
+			const auto bound_min=LoadMds(inst.rm_eaa);
+			const auto bound_max=LoadMds(inst.rm_eaa+4);
+			if ( (inst_op1_ds < bound_min) || (inst_op1_ds > bound_max) ) {
 				EXCEPTION(5);
 			}
 		}

@@ -16,7 +16,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
+#include "../string_ops.h"
 
 /*
 	This file provides some definitions and basic level functions
@@ -60,17 +60,6 @@ enum BranchTypes {
 	BR_L,BR_NL,BR_LE,BR_NLE
 };
 
-// string instructions
-enum StringOps {
-	STR_OUTSB=0,STR_OUTSW,STR_OUTSD,
-	STR_INSB=4,STR_INSW,STR_INSD,
-	STR_MOVSB=8,STR_MOVSW,STR_MOVSD,
-	STR_LODSB=12,STR_LODSW,STR_LODSD,
-	STR_STOSB=16,STR_STOSW,STR_STOSD,
-	STR_SCASB=20,STR_SCASW,STR_SCASD,
-	STR_CMPSB=24,STR_CMPSW,STR_CMPSD
-};
-
 // repeat prefix type (for string operations)
 enum REP_Type {
 	REP_NONE=0,REP_NZ,REP_Z
@@ -102,7 +91,7 @@ static struct DynDecode {
 	REP_Type rep;			// current repeat prefix
 	Bitu cycles;			// number cycles used by currently translated code
 	bool seg_prefix_used;	// segment overridden
-	Bit8u seg_prefix;		// segment prefix (if seg_prefix_used==true)
+	uint8_t seg_prefix;		// segment prefix (if seg_prefix_used==true)
 
 	// block that contains the first instruction translated
 	CacheBlock *block;
@@ -113,23 +102,23 @@ static struct DynDecode {
 	struct {
 		CodePageHandler *code;
 		Bitu index;		// index to the current byte of the instruction stream
-		Bit8u * wmap;	// write map that indicates code presence for every byte of this page
-		Bit8u * invmap;	// invalidation map
+		uint8_t * wmap;	// write map that indicates code presence for every byte of this page
+		uint8_t * invmap;	// invalidation map
 		Bitu first;		// page number 
 	} page;
 
 	// modrm state of the current instruction (if used)
 	struct {
 //		Bitu val;
-		Bitu mod;
-		Bitu rm;
-		Bitu reg;
+		uint_fast8_t mod;
+		uint_fast8_t rm;
+		uint_fast8_t reg;
 	} modrm;
 } decode;
 
 static bool MakeCodePage(Bitu lin_addr, CodePageHandler *&cph)
 {
-	Bit8u rdval;
+	uint8_t rdval;
 	const Bitu cflag = cpu.code.big ? PFLAG_HASCODE32:PFLAG_HASCODE16;
 	//Ensure page contains memory:
 	if (GCC_UNLIKELY(mem_readb_checked(lin_addr,&rdval))) return true;
@@ -137,8 +126,15 @@ static bool MakeCodePage(Bitu lin_addr, CodePageHandler *&cph)
 	PageHandler * handler=get_tlb_readhandler(lin_addr);
 	if (handler->flags & PFLAG_HASCODE) {
 		// this is a codepage handler, make sure it matches current code size
-		cph = (CodePageHandler *)handler;
-		return false;
+		cph = static_cast<CodePageHandler *>(handler);
+		if (CPU_ReuseCodepages || (handler->flags & cflag)) {
+			return false;
+		}
+		// wrong code size/stale dynamic code, drop it
+		cph->ClearRelease();
+		cph = nullptr;
+		// handler was changed, refresh
+		handler = get_tlb_readhandler(lin_addr);
 	}
 	if (handler->flags & PFLAG_NOCODE) {
 		if (PAGING_ForcePageInit(lin_addr)) {
@@ -147,13 +143,13 @@ static bool MakeCodePage(Bitu lin_addr, CodePageHandler *&cph)
 				cph = (CodePageHandler *)handler;
 				if (handler->flags & cflag) return false;
 				cph->ClearRelease();
-				cph=0;
-				handler=get_tlb_readhandler(lin_addr);
+				cph = nullptr;
+				handler=get_tlb_readhandler(static_cast<PhysPt>(lin_addr));
 			}
 		}
 		if (handler->flags & PFLAG_NOCODE) {
 			LOG_MSG("DYNREC:Can't run code in this page");
-			cph=0;
+			cph = nullptr;
 			return false;
 		}
 	} 
@@ -162,7 +158,7 @@ static bool MakeCodePage(Bitu lin_addr, CodePageHandler *&cph)
 	// find the physical page that the linear page is mapped to
 	if (!PAGING_MakePhysPage(phys_page)) {
 		LOG_MSG("DYNREC:Can't find physpage");
-		cph=0;
+		cph = nullptr;
 		return false;
 	}
 	// find a free CodePage
@@ -183,7 +179,7 @@ static bool MakeCodePage(Bitu lin_addr, CodePageHandler *&cph)
 
 	// adjust previous and next page pointer
 	cpagehandler->prev=cache.last_page;
-	cpagehandler->next=0;
+	cpagehandler->next=nullptr;
 	if (cache.last_page) cache.last_page->next=cpagehandler;
 	cache.last_page=cpagehandler;
 	if (!cache.used_pages) cache.used_pages=cpagehandler;
@@ -216,7 +212,7 @@ static void decode_advancepage(void) {
 }
 
 // fetch the next byte of the instruction stream
-static Bit8u decode_fetchb(void) {
+static uint8_t decode_fetchb(void) {
 	if (GCC_UNLIKELY(decode.page.index>=4096)) {
 		decode_advancepage();
 	}
@@ -226,9 +222,9 @@ static Bit8u decode_fetchb(void) {
 	return mem_readb(decode.code-1);
 }
 // fetch the next word of the instruction stream
-static Bit16u decode_fetchw(void) {
+static uint16_t decode_fetchw(void) {
 	if (GCC_UNLIKELY(decode.page.index>=4095)) {
-   		Bit16u val=decode_fetchb();
+   		uint16_t val=decode_fetchb();
 		val|=decode_fetchb() << 8;
 		return val;
 	}
@@ -237,9 +233,9 @@ static Bit16u decode_fetchw(void) {
 	return mem_readw(decode.code-2);
 }
 // fetch the next dword of the instruction stream
-static Bit32u decode_fetchd(void) {
+static uint32_t decode_fetchd(void) {
 	if (GCC_UNLIKELY(decode.page.index>=4093)) {
-   		Bit32u val=decode_fetchb();
+   		uint32_t val=decode_fetchb();
 		val|=decode_fetchb() << 8;
 		val|=decode_fetchb() << 16;
 		val|=decode_fetchb() << 24;
@@ -255,35 +251,27 @@ static Bit32u decode_fetchd(void) {
 
 // adjust writemap mask to care for map holes due to special
 // codefetch functions
-static void INLINE decode_increase_wmapmask(Bitu size) {
-	Bitu mapidx;
-	CacheBlock *activecb = decode.active_block;
+static void inline decode_increase_wmapmask(Bitu size) {
+	size_t mapidx        = 0;
+	CacheBlock* activecb = decode.active_block;
 	if (GCC_UNLIKELY(!activecb->cache.wmapmask)) {
-		// no mask memory yet allocated, start with a small buffer
-		activecb->cache.wmapmask=(Bit8u*)malloc(START_WMMEM);
-		memset(activecb->cache.wmapmask,0,START_WMMEM);
-		activecb->cache.maskstart=decode.page.index;	// start of buffer is current code position
-		activecb->cache.masklen=START_WMMEM;
-		mapidx=0;
+		activecb->GrowWriteMask(START_WMMEM);
+		activecb->cache.maskstart = decode.page.index;
 	} else {
-		mapidx=decode.page.index-activecb->cache.maskstart;
-		if (GCC_UNLIKELY(mapidx+size>=activecb->cache.masklen)) {
-			// mask buffer too small, increase
-			Bitu newmasklen=activecb->cache.masklen*4;
-			if (newmasklen<mapidx+size) newmasklen=((mapidx+size)&~3)*2;
-			Bit8u* tempmem=(Bit8u*)malloc(newmasklen);
-			memset(tempmem,0,newmasklen);
-			memcpy(tempmem,activecb->cache.wmapmask,activecb->cache.masklen);
-			free(activecb->cache.wmapmask);
-			activecb->cache.wmapmask=tempmem;
-			activecb->cache.masklen=newmasklen;
+		mapidx = decode.page.index - activecb->cache.maskstart;
+		if (GCC_UNLIKELY(mapidx + size >= activecb->cache.masklen)) {
+			size_t new_mask_len = activecb->cache.masklen * 4;
+			if (new_mask_len < mapidx + size) {
+				new_mask_len = ((mapidx + size) & ~3) * 2;
+			}
+			activecb->GrowWriteMask(new_mask_len);
 		}
 	}
 	// update mask entries
 	switch (size) {
-		case 1 : activecb->cache.wmapmask[mapidx]+=0x01; break;
-		case 2 : add_to_unaligned_uint16(&activecb->cache.wmapmask[mapidx], 0x0101); break;
-		case 4 : add_to_unaligned_uint32(&activecb->cache.wmapmask[mapidx], 0x01010101); break;
+	case 1: activecb->cache.wmapmask[mapidx] += 0x01; break;
+	case 2: add_to_unaligned_uint16(&activecb->cache.wmapmask[mapidx], 0x0101); break;
+	case 4: add_to_unaligned_uint32(&activecb->cache.wmapmask[mapidx], 0x01010101); break;
 	}
 }
 
@@ -294,10 +282,10 @@ static bool decode_fetchb_imm(Bitu & val) {
 		decode_advancepage();
 	}
 	// see if position is directly accessible
-	if (decode.page.invmap != NULL) {
+	if (decode.page.invmap != nullptr) {
 		if (decode.page.invmap[decode.page.index] == 0) {
 			// position not yet modified
-			val=(Bit32u)decode_fetchb();
+			val=(uint32_t)decode_fetchb();
 			return false;
 		}
 
@@ -311,7 +299,7 @@ static bool decode_fetchb_imm(Bitu & val) {
 		}
 	}
 	// first time decoding or not directly accessible, just fetch the value
-	val=(Bit32u)decode_fetchb();
+	val=(uint32_t)decode_fetchb();
 	return false;
 }
 
@@ -319,7 +307,7 @@ static bool decode_fetchb_imm(Bitu & val) {
 // otherwise val contains the current value read from the position
 static bool decode_fetchw_imm(Bitu & val) {
 	if (decode.page.index<4095) {
-		if (decode.page.invmap != NULL) {
+		if (decode.page.invmap != nullptr) {
 			if ((decode.page.invmap[decode.page.index] == 0) &&
 				(decode.page.invmap[decode.page.index + 1] == 0)) {
 				// position not yet modified
@@ -347,7 +335,7 @@ static bool decode_fetchw_imm(Bitu & val) {
 // otherwise val contains the current value read from the position
 static bool decode_fetchd_imm(Bitu & val) {
 	if (decode.page.index<4093) {
-		if (decode.page.invmap != NULL) {
+		if (decode.page.invmap != nullptr) {
 			if ((decode.page.invmap[decode.page.index] == 0) &&
 				(decode.page.invmap[decode.page.index + 1] == 0) &&
 				(decode.page.invmap[decode.page.index + 2] == 0) &&
@@ -373,10 +361,9 @@ static bool decode_fetchd_imm(Bitu & val) {
 	return false;
 }
 
-
 // modrm decoding helper
-static void INLINE dyn_get_modrm(void) {
-	Bitu val=decode_fetchb();
+static void inline dyn_get_modrm(void) {
+	const auto val=decode_fetchb();
 	decode.modrm.mod=(val >> 6) & 3;
 	decode.modrm.reg=(val >> 3) & 7;
 	decode.modrm.rm=(val & 7);
@@ -476,27 +463,27 @@ static void dyn_reduce_cycles(void) {
 
 // set reg to the start of the next instruction
 // set reg_eip to the start of the current instruction
-static INLINE void dyn_set_eip_last_end(HostReg reg) {
+static inline void dyn_set_eip_last_end(HostReg reg) {
 	gen_mov_word_to_reg(reg,&reg_eip,true);
-	gen_add_imm(reg,(Bit32u)(decode.code-decode.code_start));
+	gen_add_imm(reg,(uint32_t)(decode.code-decode.code_start));
 	gen_add_direct_word(&reg_eip,decode.op_start-decode.code_start,decode.big_op);
 }
 
 // set reg_eip to the start of the current instruction
-static INLINE void dyn_set_eip_last(void) {
+static inline void dyn_set_eip_last(void) {
 	gen_add_direct_word(&reg_eip,decode.op_start-decode.code_start,cpu.code.big);
 }
 
 // set reg_eip to the start of the next instruction
-static INLINE void dyn_set_eip_end(void) {
+static inline void dyn_set_eip_end(void) {
 	gen_add_direct_word(&reg_eip,decode.code-decode.code_start,cpu.code.big);
 }
 
 // set reg_eip to the start of the next instruction plus an offset (imm)
-static INLINE void dyn_set_eip_end(HostReg reg,Bit32u imm=0) {
+static inline void dyn_set_eip_end(HostReg reg,uint32_t imm=0) {
 	gen_mov_word_to_reg(reg,&reg_eip,true); //get_extend_word will mask off the upper bits
 	//gen_mov_word_to_reg(reg,&reg_eip,decode.big_op);
-	gen_add_imm(reg,(Bit32u)(decode.code-decode.code_start+imm));
+	gen_add_imm(reg,(uint32_t)(decode.code-decode.code_start+imm));
 }
 
 
@@ -506,72 +493,72 @@ static INLINE void dyn_set_eip_end(HostReg reg,Bit32u imm=0) {
 // is architecture dependent
 // R=host register; I=32bit immediate value; A=address value; m=memory
 
-static INLINE const Bit8u* gen_call_function_R(void * func,Bitu op) {
+static inline const uint8_t* gen_call_function_R(void * func,Bitu op) {
 	gen_load_param_reg(op,0);
 	return gen_call_function_setup(func, 1);
 }
 
-static INLINE const Bit8u* gen_call_function_R3(void * func,Bitu op) {
+static inline const uint8_t* gen_call_function_R3(void * func,Bitu op) {
 	gen_load_param_reg(op,2);
 	return gen_call_function_setup(func, 3, true);
 }
 
-static INLINE const Bit8u* gen_call_function_RI(void * func,Bitu op1,Bitu op2) {
+static inline const uint8_t* gen_call_function_RI(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_imm(op2,1);
 	gen_load_param_reg(op1,0);
 	return gen_call_function_setup(func, 2);
 }
 
-static INLINE const Bit8u* gen_call_function_RA(void * func,Bitu op1,Bitu op2) {
+static inline const uint8_t* gen_call_function_RA(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_addr(op2,1);
 	gen_load_param_reg(op1,0);
 	return gen_call_function_setup(func, 2);
 }
 
-static INLINE const Bit8u* gen_call_function_RR(void * func,Bitu op1,Bitu op2) {
+static inline const uint8_t* gen_call_function_RR(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_reg(op2,1);
 	gen_load_param_reg(op1,0);
 	return gen_call_function_setup(func, 2);
 }
 
-static INLINE const Bit8u* gen_call_function_IR(void * func,Bitu op1,Bitu op2) {
+static inline const uint8_t* gen_call_function_IR(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_reg(op2,1);
 	gen_load_param_imm(op1,0);
 	return gen_call_function_setup(func, 2);
 }
 
-static INLINE const Bit8u* gen_call_function_I(void * func,Bitu op) {
+static inline const uint8_t* gen_call_function_I(void * func,Bitu op) {
 	gen_load_param_imm(op,0);
 	return gen_call_function_setup(func, 1);
 }
 
-static INLINE const Bit8u* gen_call_function_II(void * func,Bitu op1,Bitu op2) {
+static inline const uint8_t* gen_call_function_II(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_imm(op2,1);
 	gen_load_param_imm(op1,0);
 	return gen_call_function_setup(func, 2);
 }
 
-static INLINE const Bit8u* gen_call_function_III(void * func,Bitu op1,Bitu op2,Bitu op3) {
+static inline const uint8_t* gen_call_function_III(void * func,Bitu op1,Bitu op2,Bitu op3) {
 	gen_load_param_imm(op3,2);
 	gen_load_param_imm(op2,1);
 	gen_load_param_imm(op1,0);
 	return gen_call_function_setup(func, 3);
 }
 
-static INLINE const Bit8u* gen_call_function_IA(void * func,Bitu op1,Bitu op2) {
+static inline const uint8_t* gen_call_function_IA(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_addr(op2,1);
 	gen_load_param_imm(op1,0);
 	return gen_call_function_setup(func, 2);
 }
 
-static INLINE const Bit8u* gen_call_function_IIR(void * func,Bitu op1,Bitu op2,Bitu op3) {
+static inline const uint8_t* gen_call_function_IIR(void * func,Bitu op1,Bitu op2,Bitu op3) {
 	gen_load_param_reg(op3,2);
 	gen_load_param_imm(op2,1);
 	gen_load_param_imm(op1,0);
 	return gen_call_function_setup(func, 3);
 }
 
-static INLINE const Bit8u* gen_call_function_IIIR(void * func,Bitu op1,Bitu op2,Bitu op3,Bitu op4) {
+static inline const uint8_t* gen_call_function_IIIR(void * func,Bitu op1,Bitu op2,Bitu op3,Bitu op4) {
 	gen_load_param_reg(op4,3);
 	gen_load_param_imm(op3,2);
 	gen_load_param_imm(op2,1);
@@ -579,7 +566,7 @@ static INLINE const Bit8u* gen_call_function_IIIR(void * func,Bitu op1,Bitu op2,
 	return gen_call_function_setup(func, 4);
 }
 
-static INLINE const Bit8u* gen_call_function_IRRR(void * func,Bitu op1,Bitu op2,Bitu op3,Bitu op4) {
+static inline const uint8_t* gen_call_function_IRRR(void * func,Bitu op1,Bitu op2,Bitu op3,Bitu op4) {
 	gen_load_param_reg(op4,3);
 	gen_load_param_reg(op3,2);
 	gen_load_param_reg(op2,1);
@@ -587,12 +574,12 @@ static INLINE const Bit8u* gen_call_function_IRRR(void * func,Bitu op1,Bitu op2,
 	return gen_call_function_setup(func, 4);
 }
 
-static INLINE const Bit8u* gen_call_function_m(void * func,Bitu op) {
+static inline const uint8_t* gen_call_function_m(void * func,Bitu op) {
 	gen_load_param_mem(op,2);
 	return gen_call_function_setup(func, 3, true);
 }
 
-static INLINE const Bit8u* gen_call_function_mm(void * func,Bitu op1,Bitu op2) {
+static inline const uint8_t* gen_call_function_mm(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_mem(op2,3);
 	gen_load_param_mem(op1,2);
 	return gen_call_function_setup(func, 4, true);
@@ -604,7 +591,7 @@ enum save_info_type {db_exception, cycle_check, string_break};
 
 
 // function that is called on exceptions
-static BlockReturn DynRunException(Bit32u eip_add,Bit32u cycle_sub) {
+static BlockReturn DynRunException(uint32_t eip_add,uint32_t cycle_sub) {
 	reg_eip+=eip_add;
 	CPU_Cycles-=cycle_sub;
 	if (cpu.exception.which==SMC_CURRENT_BLOCK) return BR_SMCBlock;
@@ -617,8 +604,8 @@ static BlockReturn DynRunException(Bit32u eip_add,Bit32u cycle_sub) {
 // end of a cache block because it is rarely reached (like exceptions)
 static struct {
 	save_info_type type;
-	const Bit8u* branch_pos;
-	Bit32u eip_change;
+	const uint8_t* branch_pos;
+	uint32_t eip_change;
 	Bitu cycles;
 } save_info_dynrec[512];
 
@@ -695,7 +682,7 @@ bool DRC_CALL_CONV mem_readb_checked_drc(PhysPt address) {
 		memcpy(&core_dynrec.readdata, &byte, sizeof(byte));
 		return false;
 	} else {
-		return get_tlb_readhandler(address)->readb_checked(address, (Bit8u*)(&core_dynrec.readdata));
+		return get_tlb_readhandler(address)->readb_checked(address, (uint8_t*)(&core_dynrec.readdata));
 	}
 }
 
@@ -707,8 +694,8 @@ bool DRC_CALL_CONV mem_readw_checked_drc(PhysPt address) {
 			const uint16_t word = host_readw(tlb_addr + address);
 			memcpy(&core_dynrec.readdata, &word, sizeof(word));
 			return false;
-		} else return get_tlb_readhandler(address)->readw_checked(address, (Bit16u*)(&core_dynrec.readdata));
-	} else return mem_unalignedreadw_checked(address, ((Bit16u*)(&core_dynrec.readdata)));
+		} else return get_tlb_readhandler(address)->readw_checked(address, (uint16_t*)(&core_dynrec.readdata));
+	} else return mem_unalignedreadw_checked(address, ((uint16_t*)(&core_dynrec.readdata)));
 }
 
 bool DRC_CALL_CONV mem_readd_checked_drc(PhysPt address) DRC_FC;
@@ -719,12 +706,12 @@ bool DRC_CALL_CONV mem_readd_checked_drc(PhysPt address) {
 			const uint32_t dword = host_readd(tlb_addr + address);
 			memcpy(&core_dynrec.readdata, &dword, sizeof(dword));
 			return false;
-		} else return get_tlb_readhandler(address)->readd_checked(address, (Bit32u*)(&core_dynrec.readdata));
-	} else return mem_unalignedreadd_checked(address, ((Bit32u*)(&core_dynrec.readdata)));
+		} else return get_tlb_readhandler(address)->readd_checked(address, (uint32_t*)(&core_dynrec.readdata));
+	} else return mem_unalignedreadd_checked(address, ((uint32_t*)(&core_dynrec.readdata)));
 }
 
-bool DRC_CALL_CONV mem_writeb_checked_drc(PhysPt address, Bit8u val) DRC_FC;
-bool DRC_CALL_CONV mem_writeb_checked_drc(PhysPt address, Bit8u val)
+bool DRC_CALL_CONV mem_writeb_checked_drc(PhysPt address, uint8_t val) DRC_FC;
+bool DRC_CALL_CONV mem_writeb_checked_drc(PhysPt address, uint8_t val)
 {
 	HostPt tlb_addr = get_tlb_write(address);
 	if (tlb_addr) {
@@ -735,8 +722,8 @@ bool DRC_CALL_CONV mem_writeb_checked_drc(PhysPt address, Bit8u val)
 	}
 }
 
-bool DRC_CALL_CONV mem_writew_checked_drc(PhysPt address,Bit16u val) DRC_FC;
-bool DRC_CALL_CONV mem_writew_checked_drc(PhysPt address,Bit16u val) {
+bool DRC_CALL_CONV mem_writew_checked_drc(PhysPt address,uint16_t val) DRC_FC;
+bool DRC_CALL_CONV mem_writew_checked_drc(PhysPt address,uint16_t val) {
 	if ((address & 0xfff)<0xfff) {
 		HostPt tlb_addr=get_tlb_write(address);
 		if (tlb_addr) {
@@ -746,8 +733,8 @@ bool DRC_CALL_CONV mem_writew_checked_drc(PhysPt address,Bit16u val) {
 	} else return mem_unalignedwritew_checked(address,val);
 }
 
-bool DRC_CALL_CONV mem_writed_checked_drc(PhysPt address,Bit32u val) DRC_FC;
-bool DRC_CALL_CONV mem_writed_checked_drc(PhysPt address,Bit32u val) {
+bool DRC_CALL_CONV mem_writed_checked_drc(PhysPt address,uint32_t val) DRC_FC;
+bool DRC_CALL_CONV mem_writed_checked_drc(PhysPt address,uint32_t val) {
 	if ((address & 0xfff)<0xffd) {
 		HostPt tlb_addr=get_tlb_write(address);
 		if (tlb_addr) {
@@ -805,14 +792,14 @@ static void dyn_write_word(HostReg reg_addr,HostReg reg_val,bool dword) {
 
 // effective address calculation helper, op2 has to be present!
 // loads op1 into ea_reg and adds the scaled op2 and the immediate to it
-MAYBE_UNUSED static void dyn_lea_mem_mem(HostReg ea_reg,
+[[maybe_unused]] static void dyn_lea_mem_mem(HostReg ea_reg,
                                          void *op1,
                                          void *op2,
                                          Bitu scale,
                                          Bits imm)
 {
 	if (scale || imm) {
-		if (op1!=NULL) {
+		if (op1!=nullptr) {
 			gen_mov_word_to_reg(ea_reg,op1,true);
 			gen_mov_word_to_reg(TEMP_REG_DRC,op2,true);
 
@@ -823,7 +810,7 @@ MAYBE_UNUSED static void dyn_lea_mem_mem(HostReg ea_reg,
 		}
 	} else {
 		gen_mov_word_to_reg(ea_reg,op2,true);
-		if (op1!=NULL) gen_add(ea_reg,op1);
+		if (op1!=nullptr) gen_add(ea_reg,op1);
 	}
 }
 
@@ -848,7 +835,7 @@ static void dyn_lea_regval_regval(HostReg ea_reg,Bitu op1_index,Bitu op2_index,B
 // op2 is cpu_regs[op2_index] 
 static void dyn_lea_mem_regval(HostReg ea_reg,void* op1,Bitu op2_index,Bitu scale,Bits imm) {
 	if (scale || imm) {
-		if (op1!=NULL) {
+		if (op1!=nullptr) {
 			gen_mov_word_to_reg(ea_reg,op1,true);
 			MOV_REG_VAL_TO_HOST_REG(TEMP_REG_DRC,op2_index);
 
@@ -859,7 +846,7 @@ static void dyn_lea_mem_regval(HostReg ea_reg,void* op1,Bitu op2_index,Bitu scal
 		}
 	} else {
 		MOV_REG_VAL_TO_HOST_REG(ea_reg,op2_index);
-		if (op1!=NULL) gen_add(ea_reg,op1);
+		if (op1!=nullptr) gen_add(ea_reg,op1);
 	}
 }
 #endif
@@ -902,13 +889,13 @@ static void dyn_lea_segphys_mem(HostReg ea_reg,Bitu op1_index,void* op2,Bitu sca
 
 // calculate the effective address and store it in ea_reg
 static void dyn_fill_ea(HostReg ea_reg,bool addseg=true) {
-	Bit8u seg_base=DRC_SEG_DS;
+	uint8_t seg_base=DRC_SEG_DS;
 	if (!decode.big_addr) {
 		Bits imm = 0;
 		switch (decode.modrm.mod) {
 		case 0:imm=0;break;
-		case 1:imm=(Bit8s)decode_fetchb();break;
-		case 2:imm=(Bit16s)decode_fetchw();break;
+		case 1:imm=(int8_t)decode_fetchb();break;
+		case 2:imm=(int16_t)decode_fetchw();break;
 		}
 		switch (decode.modrm.rm) {
 		case 0:// BX+SI
@@ -927,26 +914,26 @@ static void dyn_fill_ea(HostReg ea_reg,bool addseg=true) {
 			break;
 		case 4:// SI
 			MOV_REG_VAL_TO_HOST_REG(ea_reg,DRC_REG_ESI);
-			if (imm) gen_add_imm(ea_reg,(Bit32u)imm);
+			if (imm) gen_add_imm(ea_reg,(uint32_t)imm);
 			break;
 		case 5:// DI
 			MOV_REG_VAL_TO_HOST_REG(ea_reg,DRC_REG_EDI);
-			if (imm) gen_add_imm(ea_reg,(Bit32u)imm);
+			if (imm) gen_add_imm(ea_reg,(uint32_t)imm);
 			break;
 		case 6:// imm/BP
 			if (!decode.modrm.mod) {
 				imm=decode_fetchw();
-				gen_mov_dword_to_reg_imm(ea_reg,(Bit32u)imm);
+				gen_mov_dword_to_reg_imm(ea_reg,(uint32_t)imm);
 				goto skip_extend_word;
 			} else {
 				MOV_REG_VAL_TO_HOST_REG(ea_reg,DRC_REG_EBP);
-				gen_add_imm(ea_reg,(Bit32u)imm);
+				gen_add_imm(ea_reg,(uint32_t)imm);
 				seg_base=DRC_SEG_SS;
 			}
 			break;
 		case 7: // BX
 			MOV_REG_VAL_TO_HOST_REG(ea_reg,DRC_REG_EBX);
-			if (imm) gen_add_imm(ea_reg,(Bit32u)imm);
+			if (imm) gen_add_imm(ea_reg,(uint32_t)imm);
 			break;
 		}
 		// zero out the high 16bit so ea_reg can be used as full register
@@ -958,8 +945,8 @@ skip_extend_word:
 		}
 	} else {
 		Bits imm = 0;
-		Bit8u base_reg = 0;
-		Bit8u scaled_reg = 0;
+		uint8_t base_reg = 0;
+		uint8_t scaled_reg = 0;
 		Bitu scale = 0;
 		switch (decode.modrm.rm) {
 		case 0:base_reg=DRC_REG_EAX;break;
@@ -970,7 +957,7 @@ skip_extend_word:
 			{
 				Bitu sib=decode_fetchb();
 				bool scaled_reg_used=false;
-				static Bit8u scaledtable[8]={
+				static uint8_t scaledtable[8]={
 					DRC_REG_EAX,DRC_REG_ECX,DRC_REG_EDX,DRC_REG_EBX,
 							0,DRC_REG_EBP,DRC_REG_ESI,DRC_REG_EDI
 				};
@@ -998,7 +985,7 @@ skip_extend_word:
 								if (!scaled_reg_used) {
 									gen_mov_LE_word_to_reg(ea_reg,(void*)val,true);
 								} else {
-									DYN_LEA_MEM_REG_VAL(ea_reg,NULL,scaled_reg,scale,0);
+									DYN_LEA_MEM_REG_VAL(ea_reg,nullptr,scaled_reg,scale,0);
 									gen_add_LE(ea_reg,(void*)val);
 								}
 							} else {
@@ -1012,18 +999,18 @@ skip_extend_word:
 							return;
 						}
 						// couldn't get a pointer, use the current value
-						imm=(Bit32s)val;
+						imm=(int32_t)val;
 
 						if (!addseg) {
 							if (!scaled_reg_used) {
-								gen_mov_dword_to_reg_imm(ea_reg,(Bit32u)imm);
+								gen_mov_dword_to_reg_imm(ea_reg,(uint32_t)imm);
 							} else {
-								DYN_LEA_MEM_REG_VAL(ea_reg,NULL,scaled_reg,scale,imm);
+								DYN_LEA_MEM_REG_VAL(ea_reg,nullptr,scaled_reg,scale,imm);
 							}
 						} else {
 							if (!scaled_reg_used) {
 								MOV_SEG_PHYS_TO_HOST_REG(ea_reg,(decode.seg_prefix_used ? decode.seg_prefix : seg_base));
-								if (imm) gen_add_imm(ea_reg,(Bit32u)imm);
+								if (imm) gen_add_imm(ea_reg,(uint32_t)imm);
 							} else {
 								DYN_LEA_SEG_PHYS_REG_VAL(ea_reg,(decode.seg_prefix_used ? decode.seg_prefix : seg_base),scaled_reg,scale,imm);
 							}
@@ -1038,7 +1025,7 @@ skip_extend_word:
 				// basereg, maybe scalereg
 				switch (decode.modrm.mod) {
 				case 1:
-					imm=(Bit8s)decode_fetchb();
+					imm=(int8_t)decode_fetchb();
 					break;
 				case 2: {
 					Bitu val;
@@ -1065,7 +1052,7 @@ skip_extend_word:
 						return;
 					}
 					// couldn't get a pointer, use the current value
-					imm=(Bit32s)val;
+					imm=(int32_t)val;
 					break;
 					}
 				}
@@ -1073,7 +1060,7 @@ skip_extend_word:
 				if (!addseg) {
 					if (!scaled_reg_used) {
 						MOV_REG_VAL_TO_HOST_REG(ea_reg,base_reg);
-						gen_add_imm(ea_reg,(Bit32u)imm);
+						gen_add_imm(ea_reg,(uint32_t)imm);
 					} else {
 						DYN_LEA_REG_VAL_REG_VAL(ea_reg,base_reg,scaled_reg,scale,imm);
 					}
@@ -1081,7 +1068,7 @@ skip_extend_word:
 					if (!scaled_reg_used) {
 						MOV_SEG_PHYS_TO_HOST_REG(ea_reg,(decode.seg_prefix_used ? decode.seg_prefix : seg_base));
 						ADD_REG_VAL_TO_HOST_REG(ea_reg,base_reg);
-						if (imm) gen_add_imm(ea_reg,(Bit32u)imm);
+						if (imm) gen_add_imm(ea_reg,(uint32_t)imm);
 					} else {
 						DYN_LEA_SEG_PHYS_REG_VAL(ea_reg,(decode.seg_prefix_used ? decode.seg_prefix : seg_base),scaled_reg,scale,imm);
 						ADD_REG_VAL_TO_HOST_REG(ea_reg,base_reg);
@@ -1097,12 +1084,12 @@ skip_extend_word:
 			} else {
 				// no base, no scalereg
 
-				imm=(Bit32s)decode_fetchd();
+				imm=(int32_t)decode_fetchd();
 				if (!addseg) {
-					gen_mov_dword_to_reg_imm(ea_reg,(Bit32u)imm);
+					gen_mov_dword_to_reg_imm(ea_reg,(uint32_t)imm);
 				} else {
 					MOV_SEG_PHYS_TO_HOST_REG(ea_reg,(decode.seg_prefix_used ? decode.seg_prefix : seg_base));
-					if (imm) gen_add_imm(ea_reg,(Bit32u)imm);
+					if (imm) gen_add_imm(ea_reg,(uint32_t)imm);
 				}
 
 				return;
@@ -1116,7 +1103,7 @@ skip_extend_word:
 
 		switch (decode.modrm.mod) {
 		case 1:
-			imm=(Bit8s)decode_fetchb();
+			imm=(int8_t)decode_fetchb();
 			break;
 		case 2: {
 			Bitu val;
@@ -1134,18 +1121,18 @@ skip_extend_word:
 				return;
 			}
 			// couldn't get a pointer, use the current value
-			imm=(Bit32s)val;
+			imm=(int32_t)val;
 			break;
 			}
 		}
 
 		if (!addseg) {
 			MOV_REG_VAL_TO_HOST_REG(ea_reg,base_reg);
-			if (imm) gen_add_imm(ea_reg,(Bit32u)imm);
+			if (imm) gen_add_imm(ea_reg,(uint32_t)imm);
 		} else {
 			MOV_SEG_PHYS_TO_HOST_REG(ea_reg,(decode.seg_prefix_used ? decode.seg_prefix : seg_base));
 			ADD_REG_VAL_TO_HOST_REG(ea_reg,base_reg);
-			if (imm) gen_add_imm(ea_reg,(Bit32u)imm);
+			if (imm) gen_add_imm(ea_reg,(uint32_t)imm);
 		}
 	}
 }
@@ -1187,7 +1174,7 @@ static void gen_restore_reg(HostReg reg,HostReg dest_reg) {
 
 static Bitu mf_functions_num=0;
 static struct {
-	const Bit8u* pos;
+	const uint8_t* pos;
 	void* fct_ptr;
 	Bitu ftype;
 } mf_functions[64];
@@ -1238,7 +1225,7 @@ static void InvalidateFlagsPartially(void* current_simple_function,Bitu flags_ty
 // enqueue this instruction, if later an instruction is encountered that
 // destroys all condition flags and the flags weren't needed in-between
 // this function can be replaced by a simpler one as well
-static void InvalidateFlagsPartially(void* current_simple_function,const Bit8u* cpos,Bitu flags_type) {
+static void InvalidateFlagsPartially(void* current_simple_function,const uint8_t* cpos,Bitu flags_type) {
 #ifdef DRC_FLAGS_INVALIDATION
 	mf_functions[mf_functions_num].pos=cpos;
 	mf_functions[mf_functions_num].fct_ptr=current_simple_function;
@@ -1248,7 +1235,7 @@ static void InvalidateFlagsPartially(void* current_simple_function,const Bit8u* 
 }
 
 // the current function needs the condition flags thus reset the queue
-static void AcquireFlags(MAYBE_UNUSED Bitu flags_mask) {
+static void AcquireFlags([[maybe_unused]] Bitu flags_mask) {
 #ifdef DRC_FLAGS_INVALIDATION
 	mf_functions_num=0;
 #endif

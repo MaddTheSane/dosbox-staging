@@ -17,9 +17,9 @@
  */
 
 
-#define LoadMbs(off) (Bit8s)(LoadMb(off))
-#define LoadMws(off) (Bit16s)(LoadMw(off))
-#define LoadMds(off) (Bit32s)(LoadMd(off))
+#define LoadMbs(off) (int8_t)(LoadMb(off))
+#define LoadMws(off) (int16_t)(LoadMw(off))
+#define LoadMds(off) (int32_t)(LoadMd(off))
 
 #define LoadRb(reg) reg
 #define LoadRw(reg) reg
@@ -29,17 +29,19 @@
 #define SaveRw(reg,val)	reg=val
 #define SaveRd(reg,val)	reg=val
 
-static INLINE Bit8s Fetchbs() {
-	return Fetchb();
+static inline int8_t Fetchbs()
+{
+	return static_cast<int8_t>(Fetchb());
 }
-static INLINE Bit16s Fetchws() {
-	return Fetchw();
-}
-
-static INLINE Bit32s Fetchds() {
-	return Fetchd();
+static inline int16_t Fetchws()
+{
+	return static_cast<int16_t>(Fetchw());
 }
 
+static inline int32_t Fetchds()
+{
+	return static_cast<int32_t>(Fetchd());
+}
 
 #define RUNEXCEPTION() {										\
 	CPU_Exception(cpu.exception.which,cpu.exception.error);		\

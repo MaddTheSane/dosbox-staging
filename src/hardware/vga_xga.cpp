@@ -1,4 +1,7 @@
 /*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -23,13 +26,14 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "bitops.h"
 #include "callback.h"
 #include "cpu.h"		// for 0x3da delay
 #include "inout.h"
 #include "vga.h"
 
-#define XGA_SCREEN_WIDTH	vga.s3.xga_screen_width
-#define XGA_COLOR_MODE		vga.s3.xga_color_mode
+constexpr auto &XGA_SCREEN_WIDTH = vga.s3.xga_screen_width;
+constexpr auto &XGA_COLOR_MODE = vga.s3.xga_color_mode;
 
 #define XGA_SHOW_COMMAND_TRACE 0
 
@@ -41,39 +45,39 @@ constexpr uint16_t XGA_32_BIT = 0x0008;
 
 struct XGAStatus {
 	struct scissorreg {
-		Bit16u x1, y1, x2, y2;
+		uint16_t x1, y1, x2, y2;
 	} scissors;
 
-	Bit32u readmask;
-	Bit32u writemask;
+	uint32_t readmask;
+	uint32_t writemask;
 
-	Bit32u forecolor;
-	Bit32u backcolor;
+	uint32_t forecolor;
+	uint32_t backcolor;
 
 	Bitu curcommand;
 
-	Bit16u foremix;
-	Bit16u backmix;
+	uint16_t foremix;
+	uint16_t backmix;
 
-	Bit16u curx, cury;
-	Bit16u destx, desty;
+	uint16_t curx, cury;
+	uint16_t destx, desty;
 
-	Bit16u ErrTerm;
-	Bit16u MIPcount;
-	Bit16u MAPcount;
+	uint16_t ErrTerm;
+	uint16_t MIPcount;
+	uint16_t MAPcount;
 
-	Bit16u pix_cntl;
-	Bit16u control1;
-	Bit16u control2;
-	Bit16u read_sel;
+	uint16_t pix_cntl;
+	uint16_t control1;
+	uint16_t control2;
+	uint16_t read_sel;
 
 	struct XGA_WaitCmd {
 		bool newline;
 		bool wait;
-		Bit16u cmd;
-		Bit16u curx, cury;
-		Bit16u x1, y1, x2, y2, sizex, sizey;
-		Bit32u data; /* transient data passed by multiple calls */
+		uint16_t cmd;
+		uint16_t curx, cury;
+		uint16_t x1, y1, x2, y2, sizex, sizey;
+		uint32_t data; /* transient data passed by multiple calls */
 		Bitu datasize;
 		Bitu buswidth;
 	} waitcmd;
@@ -147,7 +151,7 @@ void XGA_DrawPoint(Bitu x, Bitu y, Bitu c) {
 	if(y < xga.scissors.y1) return;
 	if(y > xga.scissors.y2) return;
 
-	Bit32u memaddr = (y * XGA_SCREEN_WIDTH) + x;
+	const auto memaddr = (y * XGA_SCREEN_WIDTH) + x;
 	/* Need to zero out all unused bits in modes that have any (15-bit or "32"-bit -- the last
 	   one is actually 24-bit. Without this step there may be some graphics corruption (mainly,
 	   during windows dragging. */
@@ -158,15 +162,15 @@ void XGA_DrawPoint(Bitu x, Bitu y, Bitu c) {
 			break;
 		case M_LIN15:
 			if (GCC_UNLIKELY(memaddr*2 >= vga.vmemsize)) break;
-			((Bit16u*)(vga.mem.linear))[memaddr] = (Bit16u)(c&0x7fff);
+			((uint16_t*)(vga.mem.linear))[memaddr] = (uint16_t)(c&0x7fff);
 			break;
 		case M_LIN16:
 			if (GCC_UNLIKELY(memaddr*2 >= vga.vmemsize)) break;
-			((Bit16u*)(vga.mem.linear))[memaddr] = (Bit16u)(c&0xffff);
+			((uint16_t*)(vga.mem.linear))[memaddr] = (uint16_t)(c&0xffff);
 			break;
 		case M_LIN32:
 			if (GCC_UNLIKELY(memaddr*4 >= vga.vmemsize)) break;
-			((Bit32u*)(vga.mem.linear))[memaddr] = c;
+			((uint32_t*)(vga.mem.linear))[memaddr] = c;
 			break;
 		default:
 			break;
@@ -175,7 +179,7 @@ void XGA_DrawPoint(Bitu x, Bitu y, Bitu c) {
 }
 
 Bitu XGA_GetPoint(Bitu x, Bitu y) {
-	Bit32u memaddr = (y * XGA_SCREEN_WIDTH) + x;
+	const auto memaddr = (y * XGA_SCREEN_WIDTH) + x;
 
 	switch(XGA_COLOR_MODE) {
 	case M_LIN8:
@@ -184,10 +188,10 @@ Bitu XGA_GetPoint(Bitu x, Bitu y) {
 	case M_LIN15:
 	case M_LIN16:
 		if (GCC_UNLIKELY(memaddr*2 >= vga.vmemsize)) break;
-		return ((Bit16u*)(vga.mem.linear))[memaddr];
+		return ((uint16_t*)(vga.mem.linear))[memaddr];
 	case M_LIN32:
 		if (GCC_UNLIKELY(memaddr*4 >= vga.vmemsize)) break;
-		return ((Bit32u*)(vga.mem.linear))[memaddr];
+		return ((uint32_t*)(vga.mem.linear))[memaddr];
 	default:
 		break;
 	}
@@ -253,17 +257,14 @@ static Bitu GetMixResult(uint32_t mixmode, Bitu srcval, Bitu dstdata)
 	return destval;
 }
 
-void XGA_DrawLineVector(Bitu val) {
-	Bits xat, yat;
-	Bitu srcval = 0;
-	Bits i;
+static void XGA_DrawLineVector(const uint32_t val, const bool skip_last_pixel)
+{
+	// No work to do with a zero-length line
+	if (!xga.MAPcount)
+		return;
 
-	Bits dx, sx, sy;
-
-	dx = xga.MAPcount; 
-	xat = xga.curx;
-	yat = xga.cury;
-
+	int sx = 0;
+	int sy = 0;
 	switch((val >> 5) & 0x7) {
 		case 0x00: /* 0 degrees */
 			sx = 1;
@@ -303,7 +304,14 @@ void XGA_DrawLineVector(Bitu val) {
 			break;
 	}
 
-	for (i = 0; i <= dx; ++i) {
+
+	assert(xga.MAPcount);
+	const auto dx = xga.MAPcount - skip_last_pixel;
+	auto xat = xga.curx;
+	auto yat = xga.cury;
+	auto srcval = decltype(xga.backcolor)(0);
+
+	for (auto i = 0; i <= dx; ++i) {
 		uint32_t mixmode = (xga.pix_cntl >> 6) & 0x3;
 		Bitu dstdata;
 		Bitu destval;
@@ -341,11 +349,19 @@ void XGA_DrawLineVector(Bitu val) {
 		yat += sy;
 	}
 
-	xga.curx = xat-1;
+#if 0
+	LOG_MSG("XGA: DrawLineVector: (%d,%d) to (%d,%d), skip_last_pixel=%d",
+	        xga.curx, xga.cury, xat, yat, skip_last_pixel);
+#endif
+
+	xga.curx = xat - 1;
 	xga.cury = yat;
 }
 
-void XGA_DrawLineBresenham(Bitu val) {
+// NTS: The Windows 3.1 driver does not use this XGA command for horizontal and
+// vertical lines
+static void XGA_DrawLineBresenham(const uint32_t val, const bool skip_last_pixel)
+{
 	Bits xat, yat;
 	Bitu srcval = 0;
 	Bits i;
@@ -356,15 +372,29 @@ void XGA_DrawLineBresenham(Bitu val) {
 
 	Bits dx, sx, dy, sy, e, dmajor, dminor,destxtmp;
 
-	// Probably a lot easier way to do this, but this works.
+	// S3 Trio64 documentation: The "desty" register is both a destination Y
+	// for BitBlt (hence the name) and "Line Parameter Axial Step Constant"
+	// for line drawing, in case the name of the variable is confusing here.
+	// The "desty" variable name exists as inherited from DOSBox SVN source
+	// code.
+	//
+	// lpast = 2 * min(abs(dx),abs(dy))
 
-	dminor = (Bits)((Bit16s)xga.desty);
+	dminor = (Bits)((int16_t)xga.desty);
 	if(xga.desty&0x2000) dminor |= ~0x1fff;
 	dminor >>= 1;
 
-	destxtmp=(Bits)((Bit16s)xga.destx);
-	if(xga.destx&0x2000) destxtmp |= ~0x1fff;
+	// S3 Trio64 documentation: The "destx" register is both a destination X
+	// for BitBlt (hence the name) and "Line Parameter Diagonal Step
+	// Constant" for line drawing, in case the name of the variable is
+	// confusing here. The "destx" variable name exists as inherited from
+	// DOSBox SVN source code.
+	//
+	// lpdst = 2 * min(abs(dx),abs(dy)) - max(abs(dx),abs(dy))
 
+	destxtmp = (Bits)((int16_t)xga.destx);
+	if (xga.destx & 0x2000)
+		destxtmp |= ~0x1fff;
 
 	dmajor = -(destxtmp - (dminor << 1)) >> 1;
 	
@@ -380,7 +410,12 @@ void XGA_DrawLineBresenham(Bitu val) {
 	} else {
 		sy = -1;
 	}
-	e = (Bits)((Bit16s)xga.ErrTerm);
+
+	// S3 Trio64 documentation:
+	// if x1 < x2: 2 * min(abs(dx),abs(dy)) - max(abs(dx),abs(dy))
+	// if x1 >= x2: 2 * min(abs(dx),abs(dy)) - max(abs(dx),abs(dy)) - 1
+
+	e = (Bits)((int16_t)xga.ErrTerm);
 	if(xga.ErrTerm&0x2000) e |= ~0x1fff;
 	xat = xga.curx;
 	yat = xga.cury;
@@ -392,60 +427,68 @@ void XGA_DrawLineBresenham(Bitu val) {
 	} else {
 		steep = true;
 	}
-    
-	//LOG_MSG("XGA: Bresenham: ASC %d, LPDSC %d, sx %d, sy %d, err %d, steep %d, length %d, dmajor %d, dminor %d, xstart %d, ystart %d", dx, dy, sx, sy, e, steep, xga.MAPcount, dmajor, dminor,xat,yat);
 
-	for (i = 0; i <= xga.MAPcount; ++i) {
-			uint32_t mixmode = (xga.pix_cntl >> 6) & 0x3;
-			Bitu dstdata;
-			Bitu destval;
-			switch (mixmode) {
-				case 0x00: /* FOREMIX always used */
-					mixmode = xga.foremix;
-					switch ((mixmode >> 5) & 0x03) {
-						case 0x00: /* Src is background color */
-							srcval = xga.backcolor;
-							break;
-						case 0x01: /* Src is foreground color */
-							srcval = xga.forecolor;
-							break;
-						case 0x02: /* Src is pixel data from PIX_TRANS register */
-							//srcval = tmpval;
-							LOG_MSG("XGA: DrawRect: Wants data from PIX_TRANS register");
-							break;
-						case 0x03: /* Src is bitmap data */
-							LOG_MSG("XGA: DrawRect: Wants data from srcdata");
-							//srcval = srcdata;
-							break;
-						default:
-							LOG_MSG("XGA: DrawRect: Shouldn't be able to get here!");
-							break;
-					}
+#if 0
+	LOG_MSG("XGA: Bresenham: ASC %ld, LPDSC %ld, sx %ld, sy %ld, err %ld,"
+	" steep %ld, length %ld, dmajor %ld, dminor %ld, xstart %ld, ystart %ld, skip_last_pixel %u",
+		(signed long)dx, (signed long)dy, (signed long)sx, (signed long)sy, (signed long)e,
+		(signed long)steep, (signed long)xga.MAPcount, (signed long)dmajor, (signed long)dminor,
+		(signed long)xat, (signed long)yat, skip_last_pixel);
+#endif
 
-					if (steep)
-						dstdata = XGA_GetPoint(xat, yat);
-					else
-						dstdata = XGA_GetPoint(yat, xat);
+	const auto run = xga.MAPcount - (xga.MAPcount && skip_last_pixel);
 
-					destval = GetMixResult(mixmode, srcval, dstdata);
-
-					if(steep) {
-						XGA_DrawPoint(xat,yat, destval);
-					} else {
-						XGA_DrawPoint(yat,xat, destval);
-					}
-
-					break;
-				default: 
-					LOG_MSG("XGA: DrawLine: Needs mixmode %x", mixmode);
-					break;
+	for (i = 0; i <= run; ++i) {
+		uint32_t mixmode = (xga.pix_cntl >> 6) & 0x3;
+		Bitu dstdata;
+		Bitu destval;
+		switch (mixmode) {
+		case 0x00: /* FOREMIX always used */
+			mixmode = xga.foremix;
+			switch ((mixmode >> 5) & 0x03) {
+			case 0x00: /* Src is background color */
+				srcval = xga.backcolor;
+				break;
+			case 0x01: /* Src is foreground color */
+				srcval = xga.forecolor;
+				break;
+			case 0x02: /* Src is pixel data from PIX_TRANS register */
+				// srcval = tmpval;
+				LOG_MSG("XGA: DrawRect: Wants data from PIX_TRANS register");
+				break;
+			case 0x03: /* Src is bitmap data */
+				LOG_MSG("XGA: DrawRect: Wants data from srcdata");
+				// srcval = srcdata;
+				break;
+			default:
+				LOG_MSG("XGA: DrawRect: Shouldn't be able to get here!");
+				break;
 			}
-			while (e > 0) {
-				yat += sy;
-				e -= (dx << 1);
+
+			if (steep)
+				dstdata = XGA_GetPoint(xat, yat);
+			else
+				dstdata = XGA_GetPoint(yat, xat);
+
+			destval = GetMixResult(mixmode, srcval, dstdata);
+
+			if (steep) {
+				XGA_DrawPoint(xat, yat, destval);
+			} else {
+				XGA_DrawPoint(yat, xat, destval);
 			}
-			xat += sx;
-			e += (dy << 1);
+
+			break;
+		default:
+			LOG_MSG("XGA: DrawLine: Needs mixmode %x", mixmode);
+			break;
+		}
+		while (e > 0) {
+			yat += sy;
+			e -= (dx << 1);
+		}
+		xat += sx;
+		e += (dy << 1);
 	}
 
 	if(steep) {
@@ -455,14 +498,11 @@ void XGA_DrawLineBresenham(Bitu val) {
 		xga.curx = yat;
 		xga.cury = xat;
 	}
-	//	}
-	//}
 }
 
-void XGA_DrawRectangle(Bitu val) {
-	Bit32u xat, yat;
+static void XGA_DrawRectangle(const uint32_t val, const bool skip_last_pixel)
+{
 	Bitu srcval = 0;
-
 	Bits srcx, srcy, dx, dy;
 
 	dx = -1;
@@ -473,9 +513,14 @@ void XGA_DrawRectangle(Bitu val) {
 
 	srcy = xga.cury;
 
-	for(yat=0;yat<=xga.MIPcount;yat++) {
+	// Undocumented, but seen with Windows 3.1 drivers: Horizontal lines are
+	// drawn with this XGA command and "skip last pixel" set, else they are
+	// one pixel too wide (but don't underflow below zero).
+	const auto xrun = xga.MAPcount - (xga.MAPcount && skip_last_pixel);
+
+	for (auto yat = 0; yat <= xga.MIPcount; ++yat) {
 		srcx = xga.curx;
-		for (xat = 0; xat <= xga.MAPcount; ++xat) {
+		for (auto xat = 0; xat <= xrun; ++xat) {
 			uint32_t mixmode = (xga.pix_cntl >> 6) & 0x3;
 			Bitu dstdata;
 			Bitu destval;
@@ -516,7 +561,10 @@ void XGA_DrawRectangle(Bitu val) {
 	xga.curx = srcx;
 	xga.cury = srcy;
 
-	//LOG_MSG("XGA: Draw rect (%d, %d)-(%d, %d), %d", x1, y1, x2, y2, xga.forecolor);
+#if 0
+	LOG_MSG("XGA: DrawRectangle: %d,%d,%d,%d skip_last_pixel=%d",
+	        xga.curx, xga.cury, xga.MAPcount, xga.MIPcount, skip_last_pixel);
+#endif
 }
 
 bool XGA_CheckX(void) {
@@ -532,9 +580,9 @@ bool XGA_CheckX(void) {
 		if((xga.waitcmd.cury<2048)&&(xga.waitcmd.cury > xga.waitcmd.y2))
 			xga.waitcmd.wait = false;
 	} else if(xga.waitcmd.curx>=2048) {
-		Bit16u realx = 4096-xga.waitcmd.curx;
+		uint16_t realx = 4096-xga.waitcmd.curx;
 		if(xga.waitcmd.x2>2047) { // x end is negative too
-			Bit16u realxend=4096-xga.waitcmd.x2;
+			uint16_t realxend=4096-xga.waitcmd.x2;
 			if(realx==realxend) {
 				xga.waitcmd.curx = xga.waitcmd.x1;
 				xga.waitcmd.cury++;
@@ -699,7 +747,10 @@ void XGA_DrawWait(uint32_t val, io_width_t width)
 				xga.waitcmd.newline = false;
 				for (Bitu n = 0; n < chunksize; ++n) { // pixels
 					// This formula can rule the world ;)
-					Bitu mask = 1 << ((((n&0xF8)+(8-(n&0x7)))-1)+chunksize*k);
+					const auto lshift = (((n & 0xF8) +
+					                      (8 - (n & 0x7))) -
+					                     1) + chunksize * k;
+					const auto mask = static_cast<uint64_t>(1) << lshift;
 
 					const uint32_t mixmode = (val & mask)
 					                                 ? xga.foremix
@@ -744,7 +795,7 @@ void XGA_DrawWait(uint32_t val, io_width_t width)
 }
 
 void XGA_BlitRect(Bitu val) {
-	Bit32u xat, yat;
+	uint32_t xat, yat;
 	Bitu srcdata;
 	Bitu dstdata;
 	Bits srcx, srcy, tarx, tary, dx, dy;
@@ -906,14 +957,19 @@ void XGA_DrawPattern(Bitu val) {
 	}
 }
 
-static void XGA_DrawCmd(Bitu val)
+static void XGA_DrawCmd(const uint32_t val)
 {
-	Bit16u cmd;
+	uint16_t cmd;
 	cmd = val >> 13;
 #if XGA_SHOW_COMMAND_TRACE == 1
 	//LOG_MSG("XGA: Draw command %x", cmd);
 #endif
 	xga.curcommand = val;
+
+	// Do we skip drawing the last pixel? (bit 2), Trio64 documentation This
+	// is needed to correctly draw polylines in Windows
+	const auto skip_last_pixel = bit::is(val, bit::literals::b2);
+
 	switch(cmd) {
 		case 1: /* Draw line */
 			if((val & 0x100) == 0) {
@@ -921,12 +977,12 @@ static void XGA_DrawCmd(Bitu val)
 #if XGA_SHOW_COMMAND_TRACE == 1
 					LOG_MSG("XGA: Drawing Bresenham line");
 #endif
-                    XGA_DrawLineBresenham(val);
+					XGA_DrawLineBresenham(val, skip_last_pixel);
 				} else {
 #if XGA_SHOW_COMMAND_TRACE == 1
 					LOG_MSG("XGA: Drawing vector line");
 #endif
-					XGA_DrawLineVector(val);
+					XGA_DrawLineVector(val, skip_last_pixel);
 				}
 			} else {
 				LOG_MSG("XGA: Wants line drawn from PIX_TRANS register!");
@@ -939,7 +995,7 @@ static void XGA_DrawCmd(Bitu val)
 				LOG_MSG("XGA: Draw immediate rect: xy(%3d/%3d), len(%3d/%3d)",
 					xga.curx,xga.cury,xga.MAPcount,xga.MIPcount);
 #endif
-				XGA_DrawRectangle(val);
+				XGA_DrawRectangle(val, skip_last_pixel);
 
 			} else {
 			        uint16_t xga_bit_depth = 0;
@@ -960,8 +1016,8 @@ static void XGA_DrawCmd(Bitu val)
 			        xga.waitcmd.cury = xga.cury;
 			        xga.waitcmd.x1 = xga.curx;
 			        xga.waitcmd.y1 = xga.cury;
-			        xga.waitcmd.x2 = (Bit16u)((xga.curx + xga.MAPcount)&0x0fff);
-				xga.waitcmd.y2 = (Bit16u)((xga.cury + xga.MIPcount + 1)&0x0fff);
+			        xga.waitcmd.x2 = (uint16_t)((xga.curx + xga.MAPcount)&0x0fff);
+				xga.waitcmd.y2 = (uint16_t)((xga.cury + xga.MIPcount + 1)&0x0fff);
 				xga.waitcmd.sizex = xga.MAPcount;
 				xga.waitcmd.sizey = xga.MIPcount + 1;
 				xga.waitcmd.cmd = 2;
@@ -997,13 +1053,13 @@ static void XGA_DrawCmd(Bitu val)
 	}
 }
 
-void XGA_SetDualReg(Bit32u &reg, uint32_t val)
+void XGA_SetDualReg(uint32_t &reg, uint32_t val)
 {
 	switch (XGA_COLOR_MODE) {
-	case M_LIN8: reg = (Bit8u)(val & 0xff); break;
+	case M_LIN8: reg = (uint8_t)(val & 0xff); break;
 	case M_LIN15:
 	case M_LIN16:
-		reg = (Bit16u)(val&0xffff); break;
+		reg = (uint16_t)(val&0xffff); break;
 	case M_LIN32:
 		if (xga.control1 & 0x200)
 			reg = val;
@@ -1018,12 +1074,12 @@ void XGA_SetDualReg(Bit32u &reg, uint32_t val)
 	}
 }
 
-uint32_t XGA_GetDualReg(Bit32u reg) {
+uint32_t XGA_GetDualReg(uint32_t reg) {
 	switch(XGA_COLOR_MODE) {
 	case M_LIN8:
-		return (Bit8u)(reg&0xff);
+		return (uint8_t)(reg&0xff);
 	case M_LIN15: case M_LIN16:
-		return (Bit16u)(reg&0xffff);
+		return (uint16_t)(reg&0xffff);
 	case M_LIN32:
 		if (xga.control1 & 0x200) return reg;
 		xga.control1 ^= 0x10;
@@ -1037,13 +1093,14 @@ uint32_t XGA_GetDualReg(Bit32u reg) {
 
 extern uint8_t vga_read_p3da(io_port_t port, io_width_t width);
 
-extern void vga_write_p3d4(io_port_t port, uint8_t val, io_width_t width);
+extern void vga_write_p3d4(io_port_t port, io_val_t value, io_width_t width);
 extern uint8_t vga_read_p3d4(io_port_t port, io_width_t width);
 
-extern void vga_write_p3d5(io_port_t port, uint8_t val, io_width_t width);
+extern void vga_write_p3d5(io_port_t port, io_val_t value, io_width_t width);
 extern uint8_t vga_read_p3d5(io_port_t port, io_width_t width);
 
-void XGA_Write(io_port_t port, uint32_t val, io_width_t width)
+// Writes can range from 8bit to 32bit
+void XGA_Write(io_port_t port, io_val_t val, io_width_t width)
 {
 	//	LOG_MSG("XGA: Write to port %x, val %8x, len %x", port,val, len);
 
@@ -1147,6 +1204,7 @@ void XGA_Write(io_port_t port, uint32_t val, io_width_t width)
 		if (width == io_width_t::byte)
 			vga_write_p3d4(0, val, io_width_t::byte);
 		else if (width == io_width_t::word) {
+			LOG_WARNING("XGA 16-bit write to vga_write_p3d4, vga_write_p3d5");
 			vga_write_p3d4(0, val & 0xff, io_width_t::byte);
 			vga_write_p3d5(0, val >> 8, io_width_t::byte);
 		} else

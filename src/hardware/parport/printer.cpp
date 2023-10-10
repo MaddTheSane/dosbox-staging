@@ -38,7 +38,7 @@ static CPrinter* defaultPrinter = NULL;
 #define PIXX ((Bitu)floor(curX*dpi+0.5))
 #define PIXY ((Bitu)floor(curY*dpi+0.5))
 
-static Bit16u confdpi, confwidth, confheight;
+static int16_t confdpi, confwidth, confheight;
 static Bitu printer_timout;
 static bool timeout_dirty;
 static const char* document_path;
@@ -46,13 +46,13 @@ static const char* document_path;
 static char confoutputDevice[50];
 static bool confmultipageOutput;
 
-void CPrinter::FillPalette(Bit8u redmax, Bit8u greenmax, Bit8u bluemax, Bit8u colorID, SDL_Palette* pal)
+void CPrinter::FillPalette(uint8_t redmax, uint8_t greenmax, uint8_t bluemax, uint8_t colorID, SDL_Palette* pal)
 {
 	float red=redmax/30.9;
 	float green=greenmax/30.9;
 	float blue=bluemax/30.9;
 
-	Bit8u colormask=colorID<<=5;
+	uint8_t colormask=colorID<<=5;
 
 	for(int i = 0; i < 32;i++) {
 		pal->colors[i+colormask].r=255-(red*(float)i);
@@ -61,7 +61,7 @@ void CPrinter::FillPalette(Bit8u redmax, Bit8u greenmax, Bit8u bluemax, Bit8u co
 	}
 }
 
-CPrinter::CPrinter(Bit16u dpi, Bit16u width, Bit16u height, char* output, bool multipageOutput) 
+CPrinter::CPrinter(int16_t dpi, int16_t width, int16_t height, char* output, bool multipageOutput) 
 {
 	if (FT_Init_FreeType(&FTlib))
 	{
@@ -232,9 +232,9 @@ CPrinter::~CPrinter(void)
 #endif
 };
 
-void CPrinter::selectCodepage(Bit16u cp)
+void CPrinter::selectCodepage(int16_t cp)
 {
-	const Bit16u* mapToUse = NULL;
+	const int16_t* mapToUse = NULL;
 
 	Bitu i = 0;
 	while(charmap[i].codepage!=0) {
@@ -253,47 +253,47 @@ void CPrinter::selectCodepage(Bit16u cp)
 	{
 	case 0: // Italics, use cp437
 	case 437:
-		mapToUse = (Bit16u*)&cp437Map;
+		mapToUse = (int16_t*)&cp437Map;
 		break;
 	case 737:
-		mapToUse = (Bit16u*)&cp737Map;
+		mapToUse = (int16_t*)&cp737Map;
 		break;
 	case 775:
-		mapToUse = (Bit16u*)&cp775Map;
+		mapToUse = (int16_t*)&cp775Map;
 		break;
 	case 850:
-		mapToUse = (Bit16u*)&cp850Map;
+		mapToUse = (int16_t*)&cp850Map;
 		break;
 	case 852:
-		mapToUse = (Bit16u*)&cp852Map;
+		mapToUse = (int16_t*)&cp852Map;
 		break;
 	case 855:
-		mapToUse = (Bit16u*)&cp855Map;
+		mapToUse = (int16_t*)&cp855Map;
 		break;
 	case 857:
-		mapToUse = (Bit16u*)&cp857Map;
+		mapToUse = (int16_t*)&cp857Map;
 		break;
 	case 860:
-		mapToUse = (Bit16u*)&cp860Map;
+		mapToUse = (int16_t*)&cp860Map;
 		break;
 	case 861:
-		mapToUse = (Bit16u*)&cp861Map;
+		mapToUse = (int16_t*)&cp861Map;
 		break;
 	case 863:
-		mapToUse = (Bit16u*)&cp863Map;
+		mapToUse = (int16_t*)&cp863Map;
 		break;
 	case 864:
-		mapToUse = (Bit16u*)&cp864Map;
+		mapToUse = (int16_t*)&cp864Map;
 		break;
 	case 865:
-		mapToUse = (Bit16u*)&cp865Map;
+		mapToUse = (int16_t*)&cp865Map;
 		break;
 	case 866:
-		mapToUse = (Bit16u*)&cp866Map;
+		mapToUse = (int16_t*)&cp866Map;
 		break;
 	default:
 		LOG(LOG_MISC,LOG_WARN)("Unsupported codepage %i. Using CP437 instead.", cp);
-		mapToUse = (Bit16u*)&cp437Map;
+		mapToUse = (int16_t*)&cp437Map;
 	}*/
 
 	for (int i=0; i<256; i++)
@@ -402,7 +402,7 @@ void CPrinter::updateFont()
 		actcpi /= 2.0/3.0;
 	}
 
-	FT_Set_Char_Size(curFont, (Bit16u)horizPoints*64, (Bit16u)vertPoints*64, dpi, dpi);
+	FT_Set_Char_Size(curFont, (int16_t)horizPoints*64, (int16_t)vertPoints*64, dpi, dpi);
 	
 	if (style & STYLE_ITALICS || charTables[curCharTable] == 0)
 	{
@@ -415,7 +415,7 @@ void CPrinter::updateFont()
 	}
 }
 
-bool CPrinter::processCommandChar(Bit8u ch)
+bool CPrinter::processCommandChar(uint8_t ch)
 {
 	if (ESCSeen || FSSeen)
 	{
@@ -900,7 +900,7 @@ bool CPrinter::processCommandChar(Bit8u ch)
 			break;
 		case 0x5c: // Set relative horizontal print position (ESC \)
 			{
-				Bit16s toMove = PARAM16(0);
+				int16_t toMove = PARAM16(0);
 				Real64 unitSize = definedUnit;
 				if (unitSize < 0)
 					unitSize = (Real64)(printQuality==QUALITY_DRAFT?120.0:180.0);
@@ -1075,7 +1075,7 @@ bool CPrinter::processCommandChar(Bit8u ch)
 				Real64 unitSize = definedUnit;
 				if (unitSize < 0)
 					unitSize = (Real64)360.0;
-				Real64 newPos = curY + ((Real64)((Bit16s)PARAM16(2)) * unitSize);
+				Real64 newPos = curY + ((Real64)((int16_t)PARAM16(2)) * unitSize);
 				if (newPos > topMargin)
 				{
 					if (newPos > bottomMargin)
@@ -1118,7 +1118,7 @@ bool CPrinter::processCommandChar(Bit8u ch)
 		{
 			// Find tab right to current pos
 			Real64 moveTo = -1;
-			for (Bit8u i=0; i<numHorizTabs; i++)
+			for (uint8_t i=0; i<numHorizTabs; i++)
 				if (horiztabs[i] > curX)
 					moveTo = horiztabs[i];
 			// Nothing found => Ignore
@@ -1140,7 +1140,7 @@ bool CPrinter::processCommandChar(Bit8u ch)
 		{
 			// Find tab below current pos
 			Real64 moveTo = -1;
-			for (Bit8u i=0; i<numVertTabs; i++)
+			for (uint8_t i=0; i<numVertTabs; i++)
 				if (verttabs[i] > curY)
 					moveTo = verttabs[i];
 
@@ -1247,11 +1247,11 @@ void CPrinter::newPage(bool save, bool resetx)
 
 	/*for(int i = 0; i < 256; i++)
 	{
-        *((Bit8u*)page->pixels+i)=i;
+        *((uint8_t*)page->pixels+i)=i;
 	}*/
 }
 
-void CPrinter::printChar(Bit8u ch)
+void CPrinter::printChar(uint8_t ch)
 {
 	charRead = true;
 	if (page == NULL) return;
@@ -1286,8 +1286,8 @@ void CPrinter::printChar(Bit8u ch)
 	// Render a high-quality bitmap
 	FT_Render_Glyph(curFont->glyph, FT_RENDER_MODE_NORMAL);
 
-	Bit16u penX = PIXX + curFont->glyph->bitmap_left;
-	Bit16u penY = PIXY - curFont->glyph->bitmap_top + curFont->size->metrics.ascender/64;
+	int16_t penX = PIXX + curFont->glyph->bitmap_left;
+	int16_t penY = PIXY - curFont->glyph->bitmap_top + curFont->size->metrics.ascender/64;
 
 	if (style & STYLE_SUBSCRIPT) penY += curFont->glyph->bitmap.rows / 2;
 
@@ -1313,7 +1313,7 @@ void CPrinter::printChar(Bit8u ch)
 	SDL_UnlockSurface(page);
 
 	// For line printing
-	Bit16u lineStart = PIXX;
+	int16_t lineStart = PIXX;
 
 	// advance the cursor to the right
 	Real64 x_advance;
@@ -1331,11 +1331,11 @@ void CPrinter::printChar(Bit8u ch)
 		(STYLE_UNDERLINE|STYLE_STRIKETHROUGH|STYLE_OVERSCORE)))
 	{
 		// Find out where to put the line
-		Bit16u lineY = PIXY;
+		int16_t lineY = PIXY;
 		double height = (curFont->size->metrics.height>>6); // TODO height is fixed point madness...
 
-		if (style & STYLE_UNDERLINE) lineY = PIXY + (Bit16u)(height*0.9);
-		else if (style & STYLE_STRIKETHROUGH) lineY = PIXY + (Bit16u)(height*0.45);
+		if (style & STYLE_UNDERLINE) lineY = PIXY + (int16_t)(height*0.9);
+		else if (style & STYLE_STRIKETHROUGH) lineY = PIXY + (int16_t)(height*0.45);
 		else if (style & STYLE_OVERSCORE)
 			lineY = PIXY - (((score == SCORE_DOUBLE)||(score == SCORE_DOUBLEBROKEN))?5:0);
 
@@ -1353,15 +1353,15 @@ void CPrinter::printChar(Bit8u ch)
 	}
 }
 
-void CPrinter::blitGlyph(FT_Bitmap bitmap, Bit16u destx, Bit16u desty, bool add) {
+void CPrinter::blitGlyph(FT_Bitmap bitmap, int16_t destx, int16_t desty, bool add) {
 	for (Bitu y=0; y<bitmap.rows; y++) {
 		for (Bitu x=0; x<bitmap.width; x++) {
 			// Read pixel from glyph bitmap
-			Bit8u source = *(bitmap.buffer + x + y*bitmap.pitch);
+			uint8_t source = *(bitmap.buffer + x + y*bitmap.pitch);
 
 			// Ignore background and don't go over the border
 			if (source > 0 && (destx+x < page->w) && (desty+y < page->h) ) {
-				Bit8u* target = (Bit8u*)page->pixels + (x+destx) + (y+desty)*page->pitch;
+				uint8_t* target = (uint8_t*)page->pixels + (x+destx) + (y+desty)*page->pitch;
 				source>>=3;
 				
 				if (add) {
@@ -1391,11 +1391,11 @@ void CPrinter::drawLine(Bitu fromx, Bitu tox, Bitu y, bool broken)
 		if ((!broken || (x%breakmod <= gapstart)) && (x < page->w))
 		{
 			if (y > 0 && (y-1) < page->h)
-				*((Bit8u*)page->pixels + x + (y-1)*page->pitch) = 240;
+				*((uint8_t*)page->pixels + x + (y-1)*page->pitch) = 240;
 			if (y < page->h)
-				*((Bit8u*)page->pixels + x + y*page->pitch) = !broken?255:240;
+				*((uint8_t*)page->pixels + x + y*page->pitch) = !broken?255:240;
 			if (y+1 < page->h)
-				*((Bit8u*)page->pixels + x + (y+1)*page->pitch) = 240;
+				*((uint8_t*)page->pixels + x + (y+1)*page->pitch) = 240;
 		}
 	}
 	SDL_UnlockSurface(page);
@@ -1423,7 +1423,7 @@ bool CPrinter::ack() {
 	return false;
 }
 
-void CPrinter::setupBitImage(Bit8u dens, Bit16u numCols) {
+void CPrinter::setupBitImage(uint8_t dens, int16_t numCols) {
 	switch (dens)
 	{
 	case 0:
@@ -1518,7 +1518,7 @@ void CPrinter::setupBitImage(Bit8u dens, Bit16u numCols) {
 	bitGraph.readBytesColumn = 0;
 }
 
-void CPrinter::printBitGraph(Bit8u ch)
+void CPrinter::printBitGraph(uint8_t ch)
 {
 	bitGraph.column[bitGraph.readBytesColumn++] = ch;
 	bitGraph.remBytes--;
@@ -1550,7 +1550,7 @@ void CPrinter::printBitGraph(Bit8u ch)
 				for (Bitu xx=0; xx<pixsizeX; xx++)
 					for (Bitu yy=0; yy<pixsizeY; yy++) {
 						if (((PIXX + xx) < page->w) && ((PIXY + yy) < page->h))
-							*((Bit8u*)page->pixels + (PIXX+xx) + (PIXY+yy)*page->pitch) |= (color|0x1F);
+							*((uint8_t*)page->pixels + (PIXX+xx) + (PIXY+yy)*page->pitch) |= (color|0x1F);
 					}
 			} // else white pixel
 
@@ -1612,8 +1612,8 @@ void CPrinter::outputPage()
 		if(mouselocked)
 			 GFX_CaptureMouse();
 
-		Bit16u physW = GetDeviceCaps(printerDC, PHYSICALWIDTH);
-		Bit16u physH = GetDeviceCaps(printerDC, PHYSICALHEIGHT);
+		int16_t physW = GetDeviceCaps(printerDC, PHYSICALWIDTH);
+		int16_t physH = GetDeviceCaps(printerDC, PHYSICALHEIGHT);
 
 		Real64 scaleW, scaleH;
 
@@ -1656,15 +1656,15 @@ void CPrinter::outputPage()
 
 		SDL_Palette* sdlpal = page->format->palette;
 
-		for (Bit16u y=0; y<page->h; y++)
+		for (int16_t y=0; y<page->h; y++)
 		{
-			for (Bit16u x=0; x<page->w; x++)
+			for (int16_t x=0; x<page->w; x++)
 			{
-				Bit8u pixel = *((Bit8u*)page->pixels + x + (y*page->pitch));
-				Bit32u color = 0;
+				uint8_t pixel = *((uint8_t*)page->pixels + x + (y*page->pitch));
+				uint32_t color = 0;
 				color |= sdlpal->colors[pixel].r;
-				color |= ((Bit32u)sdlpal->colors[pixel].g) << 8;
-				color |= ((Bit32u)sdlpal->colors[pixel].b) << 16;
+				color |= ((uint32_t)sdlpal->colors[pixel].g) << 8;
+				color |= ((uint32_t)sdlpal->colors[pixel].b) << 16;
 				SetPixel(memHDC, x, y, color);
 			}
 		}
@@ -1748,7 +1748,7 @@ void CPrinter::outputPage()
 		// Allocate an array of scanline pointers
 		row_pointers = (png_bytep*)malloc(page->h*sizeof(png_bytep));
 		for (i=0; i<page->h; i++) 
-			row_pointers[i] = ((Bit8u*)page->pixels+(i*page->pitch));
+			row_pointers[i] = ((uint8_t*)page->pixels+(i*page->pitch));
 
 		// tell the png library what to encode.
 		png_set_rows(png_ptr, info_ptr, row_pointers);
@@ -1794,7 +1794,7 @@ void CPrinter::outputPage()
 			// Print header
 			fprintf(psfile, "%%!PS-Adobe-3.0\n");
 			fprintf(psfile, "%%%%Pages: (atend)\n");
-			fprintf(psfile, "%%%%BoundingBox: 0 0 %i %i\n", (Bit16u)(defaultPageWidth*74), (Bit16u)(defaultPageHeight*74));
+			fprintf(psfile, "%%%%BoundingBox: 0 0 %i %i\n", (int16_t)(defaultPageWidth*74), (int16_t)(defaultPageHeight*74));
 			fprintf(psfile, "%%%%Creator: DOSBOX Virtual Printer\n");
 			fprintf(psfile, "%%%%DocumentData: Clean7Bit\n");
 			fprintf(psfile, "%%%%LanguageLevel: 2\n");
@@ -1803,7 +1803,7 @@ void CPrinter::outputPage()
 		}
 
 		fprintf(psfile, "%%%%Page: %i %i\n", multiPageCounter, multiPageCounter);
-		fprintf(psfile, "%i %i scale\n", (Bit16u)(defaultPageWidth*74), (Bit16u)(defaultPageHeight*74));
+		fprintf(psfile, "%i %i scale\n", (int16_t)(defaultPageWidth*74), (int16_t)(defaultPageHeight*74));
 		fprintf(psfile, "%i %i 8 [%i 0 0 -%i 0 %i]\n", page->w, page->h, page->w, page->h, page->h);
 		fprintf(psfile, "currentfile\n");
 		fprintf(psfile, "/ASCII85Decode filter\n");
@@ -1812,8 +1812,8 @@ void CPrinter::outputPage()
 
 		SDL_LockSurface(page);
 
-		Bit32u pix = 0;
-		Bit32u numpix = page->h*page->w;
+		uint32_t pix = 0;
+		uint32_t numpix = page->h*page->w;
 		ASCII85BufferPos = ASCII85CurCol = 0;
 
 		while (pix < numpix)
@@ -1823,8 +1823,8 @@ void CPrinter::outputPage()
 			if ((pix < numpix-2) && (getPixel(pix) == getPixel(pix+1)) && (getPixel(pix) == getPixel(pix+2)))
 			{
 				// Found three or more pixels with the same color
-				Bit8u sameCount = 3;
-				Bit8u col = getPixel(pix);
+				uint8_t sameCount = 3;
+				uint8_t col = getPixel(pix);
 				while (sameCount < 128 && sameCount+pix < numpix && col == getPixel(pix+sameCount))
 					sameCount++;
 
@@ -1837,7 +1837,7 @@ void CPrinter::outputPage()
 			else
 			{
 				// Find end of heterogenous area
-				Bit8u diffCount = 1;
+				uint8_t diffCount = 1;
 				while (diffCount < 128 && diffCount+pix < numpix && 
 					(
 						   (diffCount+pix < numpix-2)
@@ -1847,7 +1847,7 @@ void CPrinter::outputPage()
 					diffCount++;
 
 				fprintASCII85(psfile, diffCount-1);
-				for (Bit8u i=0; i<diffCount; i++)
+				for (uint8_t i=0; i<diffCount; i++)
 					fprintASCII85(psfile, 255-getPixel(pix++));
 			}
 		}
@@ -1881,16 +1881,16 @@ void CPrinter::outputPage()
 	}
 }
 
-void CPrinter::fprintASCII85(FILE* f, Bit16u b)
+void CPrinter::fprintASCII85(FILE* f, int16_t b)
 {
 	if (b != 256)
 	{
 		if (b < 256)
-			ASCII85Buffer[ASCII85BufferPos++] = (Bit8u)b;
+			ASCII85Buffer[ASCII85BufferPos++] = (uint8_t)b;
 
 		if (ASCII85BufferPos == 4 || b == 257)
 		{
-			Bit32u num = (Bit32u)ASCII85Buffer[0] << 24 | (Bit32u)ASCII85Buffer[1] << 16 | (Bit32u)ASCII85Buffer[2] << 8 | (Bit32u)ASCII85Buffer[3];
+			uint32_t num = (uint32_t)ASCII85Buffer[0] << 24 | (uint32_t)ASCII85Buffer[1] << 16 | (uint32_t)ASCII85Buffer[2] << 8 | (uint32_t)ASCII85Buffer[3];
 
 			// Deal with special case
 			if (num == 0 && b != 257)
@@ -1905,11 +1905,11 @@ void CPrinter::fprintASCII85(FILE* f, Bit16u b)
 			else
 			{
 				char buffer[5];
-				for (Bit8s i=4; i>=0; i--)
+				for (int8_t i=4; i>=0; i--)
 				{
-					buffer[i] = (Bit8u)((Bit32u)num % (Bit32u)85);
+					buffer[i] = (uint8_t)((uint32_t)num % (uint32_t)85);
 					buffer[i] += 33;
-					num /= (Bit32u)85;
+					num /= (uint32_t)85;
 				}
 
 				// Make sure a line never starts with a % (which may be mistaken as start of a comment)
@@ -1936,7 +1936,7 @@ void CPrinter::fprintASCII85(FILE* f, Bit16u b)
 		// Partial tupel if there are still bytes in the buffer
 		if (ASCII85BufferPos > 0)
 		{
-			for (Bit8u i = ASCII85BufferPos; i < 4; i++)
+			for (uint8_t i = ASCII85BufferPos; i < 4; i++)
 				ASCII85Buffer[i] = 0;
 
 			fprintASCII85(f, 257);
@@ -1973,21 +1973,21 @@ bool CPrinter::isBlank() {
 
 	SDL_LockSurface(page);
 
-	for (Bit16u y=0; y<page->h; y++)
-		for (Bit16u x=0; x<page->w; x++)
-			if (*((Bit8u*)page->pixels + x + (y*page->pitch)) != 0)
+	for (int16_t y=0; y<page->h; y++)
+		for (int16_t x=0; x<page->w; x++)
+			if (*((uint8_t*)page->pixels + x + (y*page->pitch)) != 0)
 				blank = false;
 
 	SDL_UnlockSurface(page);
 	return blank;
 }
 
-Bit8u CPrinter::getPixel(Bit32u num) {
+uint8_t CPrinter::getPixel(uint32_t num) {
 	// Respect the pitch
-	return *((Bit8u*)page->pixels + (num % page->w) + ((num / page->w) * page->pitch));
+	return *((uint8_t*)page->pixels + (num % page->w) + ((num / page->w) * page->pitch));
 }
 
-static Bit8u dataregister; // contents of the parallel port data register
+static uint8_t dataregister; // contents of the parallel port data register
 
 Bitu PRINTER_readdata(Bitu port,Bitu iolen) {
 	return dataregister;
@@ -1996,7 +1996,7 @@ Bitu PRINTER_readdata(Bitu port,Bitu iolen) {
 void PRINTER_writedata(Bitu port,Bitu val,Bitu iolen) {
 	dataregister=val;
 }
-Bit8u controlreg = 0x04;
+uint8_t controlreg = 0x04;
 
 Bitu PRINTER_readstatus(Bitu port,Bitu iolen) {
 	//LOG_MSG("PRINTER_readstatus CS:IP %8x:%8x",SegValue(cs),reg_eip);
@@ -2006,7 +2006,7 @@ Bitu PRINTER_readstatus(Bitu port,Bitu iolen) {
 		return 0xDF;
 
 	// Printer is always online and never reports an error
-	Bit8u status =0x1f;// 0x18;
+	uint8_t status =0x1f;// 0x18;
 
 //	if (controlreg&0x08==0)
 //		status |= 0x10;

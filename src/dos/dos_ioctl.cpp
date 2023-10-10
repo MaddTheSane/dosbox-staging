@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -55,9 +56,9 @@ bool DOS_IOCTL(void) {
 	switch(reg_al) {
 	case 0x00:		/* Get Device Information */
 		if (Files[handle]->GetInformation() & 0x8000) {	//Check for device
-			reg_dx=Files[handle]->GetInformation();
+			reg_dx = Files[handle]->GetInformation() & ~EXT_DEVICE_BIT;
 		} else {
-			Bit8u hdrive=Files[handle]->GetDrive();
+			uint8_t hdrive=Files[handle]->GetDrive();
 			if (hdrive==0xff) {
 				LOG(LOG_IOCTL,LOG_NORMAL)("00:No drive set");
 				hdrive=2;	// defaulting to C:
@@ -73,7 +74,7 @@ bool DOS_IOCTL(void) {
 			return false;
 		} else {
 			if (Files[handle]->GetInformation() & 0x8000) {	//Check for device
-				reg_al=(Bit8u)(Files[handle]->GetInformation() & 0xff);
+				reg_al = reinterpret_cast<DOS_Device *>(Files[handle])->GetStatus(true);
 			} else {
 				DOS_SetError(DOSERR_FUNCTION_NUMBER_INVALID);
 				return false;
@@ -83,8 +84,8 @@ bool DOS_IOCTL(void) {
 	case 0x02:		/* Read from Device Control Channel */
 		if (Files[handle]->GetInformation() & 0xc000) {
 			/* is character device with IOCTL support */
-			PhysPt bufptr=PhysMake(SegValue(ds),reg_dx);
-			Bit16u retcode=0;
+			PhysPt bufptr=PhysicalMake(SegValue(ds),reg_dx);
+			uint16_t retcode=0;
 			if (((DOS_Device*)(Files[handle]))->ReadFromControlChannel(bufptr,reg_cx,&retcode)) {
 				reg_ax=retcode;
 				return true;
@@ -95,8 +96,8 @@ bool DOS_IOCTL(void) {
 	case 0x03:		/* Write to Device Control Channel */
 		if (Files[handle]->GetInformation() & 0xc000) {
 			/* is character device with IOCTL support */
-			PhysPt bufptr=PhysMake(SegValue(ds),reg_dx);
-			Bit16u retcode=0;
+			PhysPt bufptr=PhysicalMake(SegValue(ds),reg_dx);
+			uint16_t retcode=0;
 			if (((DOS_Device*)(Files[handle]))->WriteToControlChannel(bufptr,reg_cx,&retcode)) {
 				reg_ax=retcode;
 				return true;
@@ -108,9 +109,9 @@ bool DOS_IOCTL(void) {
 		if (Files[handle]->GetInformation() & 0x8000) {		//Check for device
 			reg_al=(Files[handle]->GetInformation() & 0x40) ? 0x0 : 0xff;
 		} else { // FILE
-			Bit32u oldlocation=0;
+			uint32_t oldlocation=0;
 			Files[handle]->Seek(&oldlocation, DOS_SEEK_CUR);
-			Bit32u endlocation=0;
+			uint32_t endlocation=0;
 			Files[handle]->Seek(&endlocation, DOS_SEEK_END);
 			if(oldlocation < endlocation){//Still data available
 				reg_al=0xff;
@@ -122,8 +123,12 @@ bool DOS_IOCTL(void) {
 		}
 		return true;
 	case 0x07:		/* Get Output Status */
-		LOG(LOG_IOCTL,LOG_NORMAL)("07:Fakes output status is ready for handle %u",handle);
-		reg_al=0xff;
+		if (Files[handle]->GetInformation() & EXT_DEVICE_BIT) {
+			reg_al = reinterpret_cast<DOS_Device *>(Files[handle])->GetStatus(false);
+			return true;
+		}
+		LOG(LOG_IOCTL, LOG_NORMAL)("07:Fakes output status is ready for handle %u", handle);
+		reg_al = 0xff;
 		return true;
 	case 0x08:		/* Check if block device removable */
 		/* cdrom drives and drive a&b are removable */
@@ -227,7 +232,7 @@ bool DOS_IOCTL(void) {
 
 
 bool DOS_GetSTDINStatus(void) {
-	Bit32u handle=RealHandle(STDIN);
+	uint32_t handle=RealHandle(STDIN);
 	if (handle==0xFF) return false;
 	if (Files[handle] && (Files[handle]->GetInformation() & 64)) return false;
 	return true;

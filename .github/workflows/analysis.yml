@@ -2,21 +2,26 @@ name: Code analysis
 
 on: [push, pull_request]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
-  CCACHE_DIR:      "/dev/shm/.ccache"
-  CCACHE_MAXSIZE:  "64M"
-  CCACHE_COMPRESS: "true"
+  CCACHE_DIR:        "/dev/shm/.ccache"
+  CCACHE_MAXSIZE:    "128M"
+  CCACHE_COMPRESS:   "true"
+  CCACHE_SLOPPINESS: "pch_defines,time_macros"
 
 jobs:
   run_linters:
     name: Script linters
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-20.04
-    if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier', github.actor) == false
     steps:
-      - name: Checkout repository and submodules
-        uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
 
       - run:  sudo apt-get update
       - name: Run shellcheck
@@ -32,7 +37,6 @@ jobs:
           sudo apt-get install ruby-full
           ruby --version
           sudo gem install mdl
-          sudo chmod go-w /usr/share/rust/.cargo/bin
       - name: Run markdownlint
         run:  ./scripts/verify-markdown.sh
       - name: Install appstream-util
@@ -45,16 +49,16 @@ jobs:
     runs-on: ubuntu-20.04
     needs: run_linters
     steps:
-      - name: Checkout repository and submodules
-        uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
 
       - run:  sudo apt-get update
 
       - name: Install dependencies
         run: |
-          sudo apt-get install clang-tools python3-bs4 $(cat .github/packages/ubuntu-20.04-apt.txt)
+          sudo apt-get install clang-tools python3-bs4 $(cat packages/ubuntu-20.04-apt.txt)
           sudo pip3 install --upgrade meson ninja
 
       - name:  Prepare compiler cache
@@ -62,11 +66,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p "${CCACHE_DIR}"
-          echo "::set-output name=dir::$CCACHE_DIR"
-          echo "::set-output name=today::$(date -I)"
-          echo "::set-output name=yesterday::$(date --date=yesterday -I)"
+          echo "dir=$CCACHE_DIR"                       >> $GITHUB_OUTPUT
+          echo "today=$(date -I)"                      >> $GITHUB_OUTPUT
+          echo "yesterday=$(date --date=yesterday -I)" >> $GITHUB_OUTPUT
 
-      - uses:  actions/cache@v2
+      - uses:  actions/cache@v3.3.2
         id:    cache-ccache
         with:
           path: ${{ steps.prep-ccache.outputs.dir }}
@@ -74,16 +78,35 @@ jobs:
           restore-keys: |
             ccache-static-clang-${{ steps.prep-ccache.outputs.yesterday }}
 
-      - name:  Cache subprojects
-        uses:  actions/cache@v2
+      - name: Cache subprojects
+        id:   cache-subprojects
+        uses: actions/cache@v3.3.2
         with:
-          path: subprojects/packagecache
-          key:  subprojects-${{ hashFiles('subprojects/*.wrap') }}
+          path: subprojects.tar
+          key: subprojects-${{ hashFiles('subprojects/*.wrap') }}-4
+          enableCrossOsArchive: true
+
+      - if:   steps.cache-subprojects.outputs.cache-hit != 'true'
+        name: Generate subprojects cache
+        run:  scripts/fetch-and-tar-subprojects.sh
+
+      - name: Extract subprojects cache
+        run:  scripts/extract-subprojects-tar.sh
 
       - name: Log environment
         run:  ./scripts/log-env.sh
 
-      - run:  meson setup build
+      - run: |
+          meson setup \
+          -Dbuildtype=debug \
+          -Duse_alsa=false \
+          -Duse_fluidsynth=false \
+          -Duse_mt32emu=false \
+          -Duse_opengl=false \
+          -Duse_sdl2_net=false \
+          -Duse_slirp=false \
+          -Dunit_tests=disabled \
+          build
 
       - name: Build and run scan-build
         run: |
@@ -92,107 +115,16 @@ jobs:
           mv build/meson-logs/scanbuild report
 
       - name: Upload report
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: clang-analysis-report
           path: report
 
       - name: Summarize report
         env:
-          MAX_BUGS: 27
+          MAX_BUGS: 3
         run: |
           # summary
           echo "Full report is included in build Artifacts"
           echo
           ./scripts/count-clang-bugs.py report/*/index.html
-
-
-  dynamic_matrix:
-    name: ${{ matrix.conf.name }}
-    needs: run_linters
-    runs-on: ubuntu-20.04
-    strategy:
-      matrix:
-        conf:
-          # AddressSanitizer is a fast memory error detector. Memory access
-          # instructions are instrumented to detect out-of-bounds and
-          # use-after-free bugs.
-          # See GCC manual to learn more.
-          - name: GCC address sanitizer
-            build_flags: -Db_sanitize=address
-            logs: gcc-asan-logs
-            max_issues: 0
-
-          # UndefinedBehaviorSanitizer is a fast undefined behavior detector.
-          # Various computations are instrumented to detect undefined behavior
-          # at runtime, such as shift operation correctness, integer division by
-          # zero, null-pointer dereference, signed integer overflow,
-          # dereferencing memory with wrong alignment, and more.
-          # See GCC manual to learn more.
-          - name: GCC undefined sanitizer
-            build_flags: -Db_sanitize=undefined
-            logs: gcc-usan-logs
-            max_issues: 0
-
-          # Clang allows enabling both AddressSanitizer and
-          # UndefinedBehaviorSanitizer at the same time.
-          # See Clang manual to learn more.
-          - name: Clang undefined+address sanitizer
-            build_flags: -Db_sanitize=address,undefined --native-file=.github/meson/native-clang.ini -Duse_mt32emu=false
-            logs: clang-uasan-logs
-            max_issues: 4
-    steps:
-      - name: Checkout repository and submodules
-        uses: actions/checkout@v2
-        with:
-          submodules: recursive
-
-      - run:  sudo apt-get update
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get install $(cat .github/packages/ubuntu-20.04-apt.txt)
-          sudo pip3 install --upgrade meson ninja
-
-      - name:  Prepare compiler cache
-        id:    prep-ccache
-        shell: bash
-        run: |
-          mkdir -p "${CCACHE_DIR}"
-          echo "::set-output name=dir::$CCACHE_DIR"
-          echo "::set-output name=today::$(date -I)"
-          echo "::set-output name=yesterday::$(date --date=yesterday -I)"
-
-      - uses:  actions/cache@v2
-        id:    cache-ccache
-        with:
-          path: ${{ steps.prep-ccache.outputs.dir }}
-          key:          ccache-sanitizers-${{ steps.prep-ccache.outputs.today }}
-          restore-keys: ccache-sanitizers-${{ steps.prep-ccache.outputs.yesterday }}
-
-      - name:  Cache subprojects
-        uses:  actions/cache@v2
-        with:
-          path: subprojects/packagecache
-          key:  subprojects-${{ hashFiles('subprojects/*.wrap') }}
-
-      - name: Log environment
-        run:  ./scripts/log-env.sh
-
-      - run:  meson setup ${{ matrix.conf.build_flags }} build
-
-      - run:  ninja -C build
-
-      - name: Run sanitizer test cases
-        run:  ./.github/scripts/run-sanitizers.sh build sanitizer-logs
-
-      - name: Upload logs
-        uses: actions/upload-artifact@v2
-        with:
-          name: ${{ matrix.conf.logs }}
-          path: sanitizer-logs
-
-      - name: Summarize issues
-        run: >
-          xzcat sanitizer-logs/EnterExit.log.xz |
-          MAX_ISSUES=${{ matrix.conf.max_issues }} ./scripts/count-xsan-issues.py -

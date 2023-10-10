@@ -26,7 +26,7 @@
 
 // Purpose of this is to pass LPT register access to the virtual printer 
 
-CPrinterRedir::CPrinterRedir(Bitu nr, Bit8u initIrq, CommandLine* cmd)
+CPrinterRedir::CPrinterRedir(Bitu nr, uint8_t initIrq, CommandLine* cmd)
                               :CParallel (cmd, nr, initIrq) {
 	InstallationSuccessful = boxer_PRINTER_isInited(nr);
 }
@@ -35,7 +35,7 @@ CPrinterRedir::~CPrinterRedir () {
 	// close file
 }
 
-bool CPrinterRedir::Putchar(Bit8u val)
+bool CPrinterRedir::Putchar(uint8_t val)
 {	
 	Write_CON(0xD4);
 	// strobe data out
@@ -69,5 +69,5 @@ void CPrinterRedir::Write_CON(Bitu val) {
 void CPrinterRedir::Write_IOSEL(Bitu val) {
 	// nothing
 }
-void CPrinterRedir::handleUpperEvent(Bit16u type) {}
+void CPrinterRedir::handleUpperEvent(int16_t type) {}
 #endif // C_PRINTER

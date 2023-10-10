@@ -2,7 +2,7 @@
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
  *  Copyright (C) 2020-2021  The DOSBox Staging Team
- *  Copyright (C) 2018-2021  Kevin R. Croft <krcroft@gmail.com>
+ *  Copyright (C) 2018-2021  kcgen <kcgen@users.noreply.github.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -36,7 +36,7 @@
 #include "config.h"
 
 #include <vector>    // provides: vector
-#include "SDL.h"     // provides: SDL_RWops
+#include <SDL.h>     // provides: SDL_RWops
 #include "archive.h" // provides: archive
 
 // Ensure we only get the API

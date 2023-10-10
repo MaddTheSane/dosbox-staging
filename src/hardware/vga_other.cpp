@@ -1,4 +1,7 @@
 /*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -23,17 +26,28 @@
 #include <cstdint>
 #include <cstring>
 
+#include "../ints/int10.h"
+#include "bitops.h"
+#include "checks.h"
 #include "control.h"
 #include "inout.h"
 #include "mapper.h"
+#include "math_utils.h"
 #include "mem.h"
 #include "pic.h"
+#include "reelmagic.h"
 #include "render.h"
-#include "support.h"
+#include "rgb888.h"
 #include "vga.h"
 
-static void write_crtc_index_other(io_port_t, uint8_t val, io_width_t)
+// CHECK_NARROWING();
+
+using namespace bit;
+using namespace bit::literals;
+
+static void write_crtc_index_other(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	// only receives 8-bit data per its IO port registration
 	vga.other.index = val;
 }
@@ -44,9 +58,10 @@ static uint8_t read_crtc_index_other(io_port_t, io_width_t)
 	return vga.other.index;
 }
 
-static void write_crtc_data_other(io_port_t, uint8_t val, io_width_t)
+static void write_crtc_data_other(io_port_t, io_val_t value, io_width_t)
 {
 	// only receives 8-bit data per its IO port registration
+	auto val = check_cast<uint8_t>(value);
 
 	switch (vga.other.index) {
 	case 0x00:		//Horizontal total
@@ -176,7 +191,7 @@ static uint8_t read_crtc_data_other(io_port_t, io_width_t)
 	return static_cast<uint8_t>(~0);
 }
 
-static void write_lightpen(io_port_t port, uint8_t /*val*/, io_width_t)
+static void write_lightpen(io_port_t port, io_val_t, io_width_t)
 {
 	// only receives 8-bit data per its IO port registration
 	switch (port) {
@@ -191,7 +206,7 @@ static void write_lightpen(io_port_t port, uint8_t /*val*/, io_width_t)
 			const auto timeInLine = fmod(timeInFrame, vga.draw.delay.htotal);
 			Bitu current_scanline = (Bitu)(timeInFrame / vga.draw.delay.htotal);
 
-			vga.other.lightpen = (Bit16u)((vga.draw.address_add/2) * (current_scanline/2));
+			vga.other.lightpen = (uint16_t)((vga.draw.address_add/2) * (current_scanline/2));
 			vga.other.lightpen += static_cast<uint16_t>(
 			        (timeInLine / vga.draw.delay.hdend) *
 			        (static_cast<double>(vga.draw.address_add / 2)));
@@ -243,178 +258,86 @@ enum class COMPOSITE_STATE : uint8_t {
 	ON,
 	OFF,
 };
+
 static COMPOSITE_STATE cga_comp = COMPOSITE_STATE::AUTO;
 static bool is_composite_new_era = false;
 
-static uint8_t herc_pal = 0;
-static uint8_t mono_cga_pal = 0;
-static uint8_t mono_cga_bright = 0;
+static MonochromePalette hercules_palette = {};
+static MonochromePalette mono_cga_palette = {};
 
-constexpr uint8_t mono_cga_palettes[8][16][3] = {
-        {
-                // 0 - green, 4-color-optimized contrast
-                {0x00, 0x00, 0x00},
-                {0x00, 0x0d, 0x03},
-                {0x01, 0x17, 0x05},
-                {0x01, 0x1a, 0x06},
-                {0x02, 0x28, 0x09},
-                {0x02, 0x2c, 0x0a},
-                {0x03, 0x39, 0x0d},
-                {0x03, 0x3c, 0x0e},
-                {0x00, 0x07, 0x01},
-                {0x01, 0x13, 0x04},
-                {0x01, 0x1f, 0x07},
-                {0x01, 0x23, 0x08},
-                {0x02, 0x31, 0x0b},
-                {0x02, 0x35, 0x0c},
-                {0x05, 0x3f, 0x11},
-                {0x0d, 0x3f, 0x17},
-        },
-        {
-                // 1 - green, 16-color-optimized contrast
-                {0x00, 0x00, 0x00},
-                {0x00, 0x0d, 0x03},
-                {0x01, 0x15, 0x05},
-                {0x01, 0x17, 0x05},
-                {0x01, 0x21, 0x08},
-                {0x01, 0x24, 0x08},
-                {0x02, 0x2e, 0x0b},
-                {0x02, 0x31, 0x0b},
-                {0x01, 0x22, 0x08},
-                {0x02, 0x28, 0x09},
-                {0x02, 0x30, 0x0b},
-                {0x02, 0x32, 0x0c},
-                {0x03, 0x39, 0x0d},
-                {0x03, 0x3b, 0x0e},
-                {0x09, 0x3f, 0x14},
-                {0x0d, 0x3f, 0x17},
-        },
-        {
-                // 2 - amber, 4-color-optimized contrast
-                {0x00, 0x00, 0x00},
-                {0x15, 0x05, 0x00},
-                {0x20, 0x0b, 0x00},
-                {0x24, 0x0d, 0x00},
-                {0x33, 0x18, 0x00},
-                {0x37, 0x1b, 0x00},
-                {0x3f, 0x26, 0x01},
-                {0x3f, 0x2b, 0x06},
-                {0x0b, 0x02, 0x00},
-                {0x1b, 0x08, 0x00},
-                {0x29, 0x11, 0x00},
-                {0x2e, 0x14, 0x00},
-                {0x3b, 0x1e, 0x00},
-                {0x3e, 0x21, 0x00},
-                {0x3f, 0x32, 0x0a},
-                {0x3f, 0x38, 0x0d},
-        },
-        {
-                // 3 - amber, 16-color-optimized contrast
-                {0x00, 0x00, 0x00},
-                {0x15, 0x05, 0x00},
-                {0x1e, 0x09, 0x00},
-                {0x21, 0x0b, 0x00},
-                {0x2b, 0x12, 0x00},
-                {0x2f, 0x15, 0x00},
-                {0x38, 0x1c, 0x00},
-                {0x3b, 0x1e, 0x00},
-                {0x2c, 0x13, 0x00},
-                {0x32, 0x17, 0x00},
-                {0x3a, 0x1e, 0x00},
-                {0x3c, 0x1f, 0x00},
-                {0x3f, 0x27, 0x01},
-                {0x3f, 0x2a, 0x04},
-                {0x3f, 0x36, 0x0c},
-                {0x3f, 0x38, 0x0d},
-        },
-        {
-                // 4 - grey, 4-color-optimized contrast
-                {0x00, 0x00, 0x00},
-                {0x0d, 0x0d, 0x0d},
-                {0x15, 0x15, 0x15},
-                {0x18, 0x18, 0x18},
-                {0x24, 0x24, 0x24},
-                {0x27, 0x27, 0x27},
-                {0x33, 0x33, 0x33},
-                {0x37, 0x37, 0x37},
-                {0x08, 0x08, 0x08},
-                {0x10, 0x10, 0x10},
-                {0x1c, 0x1c, 0x1c},
-                {0x20, 0x20, 0x20},
-                {0x2c, 0x2c, 0x2c},
-                {0x2f, 0x2f, 0x2f},
-                {0x3b, 0x3b, 0x3b},
-                {0x3f, 0x3f, 0x3f},
-        },
-        {
-                // 5 - grey, 16-color-optimized contrast
-                {0x00, 0x00, 0x00},
-                {0x0d, 0x0d, 0x0d},
-                {0x12, 0x12, 0x12},
-                {0x15, 0x15, 0x15},
-                {0x1e, 0x1e, 0x1e},
-                {0x20, 0x20, 0x20},
-                {0x29, 0x29, 0x29},
-                {0x2c, 0x2c, 0x2c},
-                {0x1f, 0x1f, 0x1f},
-                {0x23, 0x23, 0x23},
-                {0x2b, 0x2b, 0x2b},
-                {0x2d, 0x2d, 0x2d},
-                {0x34, 0x34, 0x34},
-                {0x36, 0x36, 0x36},
-                {0x3d, 0x3d, 0x3d},
-                {0x3f, 0x3f, 0x3f},
-        },
-        {
-                // 6 - paper-white, 4-color-optimized contrast
-                {0x00, 0x00, 0x00},
-                {0x0e, 0x0f, 0x10},
-                {0x15, 0x17, 0x18},
-                {0x18, 0x1a, 0x1b},
-                {0x24, 0x25, 0x25},
-                {0x27, 0x28, 0x28},
-                {0x33, 0x34, 0x32},
-                {0x37, 0x38, 0x35},
-                {0x09, 0x0a, 0x0b},
-                {0x11, 0x12, 0x13},
-                {0x1c, 0x1e, 0x1e},
-                {0x20, 0x22, 0x22},
-                {0x2c, 0x2d, 0x2c},
-                {0x2f, 0x30, 0x2f},
-                {0x3c, 0x3c, 0x38},
-                {0x3f, 0x3f, 0x3b},
-        },
-        {
-                // 7 - paper-white, 16-color-optimized contrast
-                {0x00, 0x00, 0x00},
-                {0x0e, 0x0f, 0x10},
-                {0x13, 0x14, 0x15},
-                {0x15, 0x17, 0x18},
-                {0x1e, 0x20, 0x20},
-                {0x20, 0x22, 0x22},
-                {0x29, 0x2a, 0x2a},
-                {0x2c, 0x2d, 0x2c},
-                {0x1f, 0x21, 0x21},
-                {0x23, 0x25, 0x25},
-                {0x2b, 0x2c, 0x2b},
-                {0x2d, 0x2e, 0x2d},
-                {0x34, 0x35, 0x33},
-                {0x37, 0x37, 0x34},
-                {0x3e, 0x3e, 0x3a},
-                {0x3f, 0x3f, 0x3b},
-        }};
+// clang-format off
 
-constexpr float get_rgbi_coefficient(const bool is_new_cga, const uint8_t ovescan)
+// Monochrome CGA palettes with contrast optimised for 4-colour CGA graphics modes
+static constexpr Rgb888 mono_cga_graphics_palettes[NumMonochromePalettes][NumCgaColors] = {
+	{
+		// 0 - Amber,
+		{0x00, 0x00, 0x00}, {0x15, 0x05, 0x00}, {0x20, 0x0b, 0x00}, {0x24, 0x0d, 0x00},
+		{0x33, 0x18, 0x00}, {0x37, 0x1b, 0x00}, {0x3f, 0x26, 0x01}, {0x3f, 0x2b, 0x06},
+		{0x0b, 0x02, 0x00}, {0x1b, 0x08, 0x00}, {0x29, 0x11, 0x00}, {0x2e, 0x14, 0x00},
+		{0x3b, 0x1e, 0x00}, {0x3e, 0x21, 0x00}, {0x3f, 0x32, 0x0a}, {0x3f, 0x38, 0x0d},
+	}, {
+		// 1 - Green
+		{0x00, 0x00, 0x00}, {0x00, 0x0d, 0x03}, {0x01, 0x17, 0x05}, {0x01, 0x1a, 0x06},
+		{0x02, 0x28, 0x09}, {0x02, 0x2c, 0x0a}, {0x03, 0x39, 0x0d}, {0x03, 0x3c, 0x0e},
+		{0x00, 0x07, 0x01}, {0x01, 0x13, 0x04}, {0x01, 0x1f, 0x07}, {0x01, 0x23, 0x08},
+		{0x02, 0x31, 0x0b}, {0x02, 0x35, 0x0c}, {0x05, 0x3f, 0x11}, {0x0d, 0x3f, 0x17},
+	}, {
+		// 2 - White
+		{0x00, 0x00, 0x00}, {0x0d, 0x0d, 0x0d}, {0x15, 0x15, 0x15}, {0x18, 0x18, 0x18},
+		{0x24, 0x24, 0x24}, {0x27, 0x27, 0x27}, {0x33, 0x33, 0x33}, {0x37, 0x37, 0x37},
+		{0x08, 0x08, 0x08}, {0x10, 0x10, 0x10}, {0x1c, 0x1c, 0x1c}, {0x20, 0x20, 0x20},
+		{0x2c, 0x2c, 0x2c}, {0x2f, 0x2f, 0x2f}, {0x3b, 0x3b, 0x3b}, {0x3f, 0x3f, 0x3f},
+	}, {
+		// 3 - Paperwhite
+		{0x00, 0x00, 0x00}, {0x0e, 0x0f, 0x10}, {0x15, 0x17, 0x18}, {0x18, 0x1a, 0x1b},
+		{0x24, 0x25, 0x25}, {0x27, 0x28, 0x28}, {0x33, 0x34, 0x32}, {0x37, 0x38, 0x35},
+		{0x09, 0x0a, 0x0b}, {0x11, 0x12, 0x13}, {0x1c, 0x1e, 0x1e}, {0x20, 0x22, 0x22},
+		{0x2c, 0x2d, 0x2c}, {0x2f, 0x30, 0x2f}, {0x3c, 0x3c, 0x38}, {0x3f, 0x3f, 0x3b},
+	}
+};
+
+// Monochrome CGA palettes with contrast optimised for 16-colour CGA text modes
+static constexpr Rgb888 mono_cga_text_palettes[NumMonochromePalettes][NumCgaColors] = {
+	{
+		// 0 - Amber
+		{0x00, 0x00, 0x00}, {0x15, 0x05, 0x00}, {0x1e, 0x09, 0x00}, {0x21, 0x0b, 0x00},
+		{0x2b, 0x12, 0x00}, {0x2f, 0x15, 0x00}, {0x38, 0x1c, 0x00}, {0x3b, 0x1e, 0x00},
+		{0x2c, 0x13, 0x00}, {0x32, 0x17, 0x00}, {0x3a, 0x1e, 0x00}, {0x3c, 0x1f, 0x00},
+		{0x3f, 0x27, 0x01}, {0x3f, 0x2a, 0x04}, {0x3f, 0x36, 0x0c}, {0x3f, 0x38, 0x0d},
+	}, {
+		// 1 - Green
+		{0x00, 0x00, 0x00}, {0x00, 0x0d, 0x03}, {0x01, 0x15, 0x05}, {0x01, 0x17, 0x05},
+		{0x01, 0x21, 0x08}, {0x01, 0x24, 0x08}, {0x02, 0x2e, 0x0b}, {0x02, 0x31, 0x0b},
+		{0x01, 0x22, 0x08}, {0x02, 0x28, 0x09}, {0x02, 0x30, 0x0b}, {0x02, 0x32, 0x0c},
+		{0x03, 0x39, 0x0d}, {0x03, 0x3b, 0x0e}, {0x09, 0x3f, 0x14}, {0x0d, 0x3f, 0x17},
+	}, {
+		// 2 - White
+		{0x00, 0x00, 0x00}, {0x0d, 0x0d, 0x0d}, {0x12, 0x12, 0x12}, {0x15, 0x15, 0x15},
+		{0x1e, 0x1e, 0x1e}, {0x20, 0x20, 0x20}, {0x29, 0x29, 0x29}, {0x2c, 0x2c, 0x2c},
+		{0x1f, 0x1f, 0x1f}, {0x23, 0x23, 0x23}, {0x2b, 0x2b, 0x2b}, {0x2d, 0x2d, 0x2d},
+		{0x34, 0x34, 0x34}, {0x36, 0x36, 0x36}, {0x3d, 0x3d, 0x3d}, {0x3f, 0x3f, 0x3f},
+	}, {
+		// 3 - Paperwhite
+		{0x00, 0x00, 0x00}, {0x0e, 0x0f, 0x10}, {0x13, 0x14, 0x15}, {0x15, 0x17, 0x18},
+		{0x1e, 0x20, 0x20}, {0x20, 0x22, 0x22}, {0x29, 0x2a, 0x2a}, {0x2c, 0x2d, 0x2c},
+		{0x1f, 0x21, 0x21}, {0x23, 0x25, 0x25}, {0x2b, 0x2c, 0x2b}, {0x2d, 0x2e, 0x2d},
+		{0x34, 0x35, 0x33}, {0x37, 0x37, 0x34}, {0x3e, 0x3e, 0x3a}, {0x3f, 0x3f, 0x3b},
+	}
+};
+// clang-format on
+
+static constexpr float get_rgbi_coefficient(const bool is_new_cga,
+                                            const uint8_t overscan)
 {
 	const auto r_coefficient = is_new_cga ? 0.10f : 0.0f;
 	const auto g_coefficient = is_new_cga ? 0.22f : 0.0f;
 	const auto b_coefficient = is_new_cga ? 0.07f : 0.0f;
 	const auto i_coefficient = is_new_cga ? 0.32f : 0.28f;
 
-	const auto r = (ovescan & 4) ? r_coefficient : 0.0f;
-	const auto g = (ovescan & 2) ? g_coefficient : 0.0f;
-	const auto b = (ovescan & 1) ? b_coefficient : 0.0f;
-	const auto i = (ovescan & 8) ? i_coefficient : 0.0f;
+	const auto r = (overscan & 4) ? r_coefficient : 0.0f;
+	const auto g = (overscan & 2) ? g_coefficient : 0.0f;
+	const auto b = (overscan & 1) ? b_coefficient : 0.0f;
+	const auto i = (overscan & 8) ? i_coefficient : 0.0f;
 	return r + g + b + i;
 }
 
@@ -422,8 +345,9 @@ static void update_cga16_color_pcjr()
 {
 	assert(machine == MCH_PCJR);
 
-	// First composite algorithm based on code by reenigne updated by NewRisingSun and tailored for PCjr-only
-	// composite modes (for DOSBox Staging).
+	// First composite algorithm based on code by reenigne updated by
+	// NewRisingSun and tailored for PCjr-only composite modes (for DOSBox
+	// Staging).
 	constexpr auto tau = 6.28318531f;    // == 2*pi
 	constexpr auto ns = 567.0f / 440.0f; // degrees of hue shift per nanosecond
 
@@ -431,24 +355,27 @@ static void update_cga16_color_pcjr()
 	const auto tv_saturation = saturation.as_float() / 100.0f;
 	const auto tv_contrast = (1 - tv_brightness) * contrast.as_float() / 100.0f;
 
-	const bool bw = vga.tandy.mode_control & 4;
-	const bool bpp1 = vga.tandy.gfx_control & 0x08;
+	const bool bw = vga.tandy.mode.is_black_and_white_mode;
+	const bool bpp1 = vga.tandy.mode_control.is_pcjr_640x200_2_color_graphics;
 
-	std::array<float, 16> rgbi_coefficients = {};
+	std::array<float, NumCgaColors> rgbi_coefficients = {};
 	for (uint8_t c = 0; c < rgbi_coefficients.size(); c++)
 		rgbi_coefficients[c] = get_rgbi_coefficient(is_composite_new_era, c);
 
-	// The pixel clock delay calculation is not accurate for 2bpp, but the difference is small and a more accurate
-	// calculation would be too slow.
+	// The pixel clock delay calculation is not accurate for 2bpp, but the
+	// difference is small and a more accurate calculation would be too slow.
 	constexpr auto rgbi_pixel_delay = 15.5f * ns;
-	constexpr float chroma_pixel_delays[8] = {0.0f,        // Black:   no chroma
-	                                          35.0f * ns,  // Blue:    no XORs
-	                                          44.5f * ns,  // Green:   XOR on rising and falling edges
-	                                          39.5f * ns,  // Cyan:    XOR on falling but not rising edge
-	                                          44.5f * ns,  // Red:     XOR on rising and falling edges
-	                                          39.5f * ns,  // Magenta: XOR on falling but not/ rising edge
-	                                          44.5f * ns,  // Yellow:  XOR on rising and falling edges
-	                                          39.5f * ns}; // White:   XOR on falling but not rising edge
+
+	constexpr float chroma_pixel_delays[8] = {
+	        0.0f,       // Black:   no chroma
+	        35.0f * ns, // Blue:    no XORs
+	        44.5f * ns, // Green:   XOR on rising and falling edges
+	        39.5f * ns, // Cyan:    XOR on falling but not rising edge
+	        44.5f * ns, // Red:     XOR on rising and falling edges
+	        39.5f * ns, // Magenta: XOR on falling but not/ rising edge
+	        44.5f * ns, // Yellow:  XOR on rising and falling edges
+	        39.5f * ns  // White:   XOR on falling but not rising edge
+	};
 
 	constexpr uint8_t overscan = 15;
 	constexpr auto cp_d = chroma_pixel_delays[overscan & 7];
@@ -557,32 +484,36 @@ static void update_cga16_color_pcjr()
 			const auto G = normalize_and_apply_gamma(Y - 0.2721f * I - 0.6474f * Q);
 			const auto B = normalize_and_apply_gamma(Y - 1.1069f * I + 1.7046f * Q);
 
-			auto to_8bit_without_gamma = [=](float v) -> uint8_t {
-				const auto without_gamma = clamp(powf(v, 1 / gamma), 0.0f, 1.0f);
-				return static_cast<uint8_t>(255 * without_gamma);
+			auto to_linear_rgb = [=](const float v) -> uint8_t {
+				// Only operate on reasonably positive v-values
+				if (!isnormal(v) || v <= 0.0f)
+					return 0;
+				// switch to linear RGB space and scale to the 8-bit range
+				constexpr int max_8bit = UINT8_MAX;
+				const auto linear = powf(v, 1.0f / gamma) * max_8bit;
+				const auto clamped = clamp(iroundf(linear), 0, max_8bit);
+				return check_cast<uint8_t>(clamped);
 			};
-			const auto r = to_8bit_without_gamma(1.5073f * R - 0.3725f * G - 0.0832f * B);
-			const auto g = to_8bit_without_gamma(-0.0275f * R + 0.9350f * G + 0.0670f * B);
-			const auto b = to_8bit_without_gamma(-0.0272f * R - 0.0401f * G + 1.1677f * B);
+			const auto r = to_linear_rgb(1.5073f * R - 0.3725f * G - 0.0832f * B);
+			const auto g = to_linear_rgb(-0.0275f * R + 0.9350f * G + 0.0670f * B);
+			const auto b = to_linear_rgb(-0.0272f * R - 0.0401f * G + 1.1677f * B);
 
 			const uint8_t index = bits | ((x & 1) == 0 ? 0x30 : 0x80) | ((x & 2) == 0 ? 0x40 : 0);
-			RENDER_SetPal(index, r, g, b);
+			ReelMagic_RENDER_SetPalette(index, r, g, b);
 		}
 	}
 }
 
 template <typename chroma_t>
-constexpr float new_cga_v(const chroma_t c,
-                          const float i,
-                          const float r,
-                          const float g,
-                          const float b)
+static constexpr float new_cga_v(const chroma_t c, const float i, const float r,
+                                 const float g, const float b)
 {
 	const auto c_weighted = 0.29f * c / 0.72f;
 	const auto i_weighted = 0.32f * i / 0.28f;
 	const auto r_weighted = 0.10f * r / 0.28f;
 	const auto g_weighted = 0.22f * g / 0.28f;
 	const auto b_weighted = 0.07f * b / 0.28f;
+
 	return c_weighted + i_weighted + r_weighted + g_weighted + b_weighted;
 }
 
@@ -639,13 +570,13 @@ static void update_cga16_color()
 	const auto mode_brightness = brightness.as_float() * 5 - 256 * min_v / (max_v - min_v);
 
 	const bool in_tandy_text_mode = (vga.mode == M_CGA_TEXT_COMPOSITE) &&
-	                                (vga.tandy.mode_control & 1);
+	                                (vga.tandy.mode.is_high_bandwidth);
 	const auto mode_hue = in_tandy_text_mode ? 14.0f : 4.0f;
 
 	const auto mode_saturation = saturation.as_float() * (is_composite_new_era ? 5.8f : 2.9f) / 100;
 
 	// Update the Composite CGA palette
-	const bool in_tandy_mode_4 = vga.tandy.mode_control & 4;
+	const bool in_tandy_mode_4 = vga.tandy.mode.is_black_and_white_mode;
 	for (uint16_t x = 0; x < 1024; ++x) {
 		const uint16_t right = (x >> 2) & 15;
 		const uint16_t rc = in_tandy_mode_4
@@ -700,13 +631,16 @@ static void update_cga16_color()
 	constexpr auto bi = -1.1069f;
 	constexpr auto bq = 1.7046f;
 
-	vga.ri = static_cast<int>(ri * iq_adjust_i + rq * iq_adjust_q);
-	vga.rq = static_cast<int>(-ri * iq_adjust_q + rq * iq_adjust_i);
-	vga.gi = static_cast<int>(gi * iq_adjust_i + gq * iq_adjust_q);
-	vga.gq = static_cast<int>(-gi * iq_adjust_q + gq * iq_adjust_i);
-	vga.bi = static_cast<int>(bi * iq_adjust_i + bq * iq_adjust_q);
-	vga.bq = static_cast<int>(-bi * iq_adjust_q + bq * iq_adjust_i);
-	vga.sharpness = convergence.get() * 256 / 100;
+	// clang-format off
+	vga.composite.ri = static_cast<int32_t>( ri * iq_adjust_i + rq * iq_adjust_q);
+	vga.composite.rq = static_cast<int32_t>(-ri * iq_adjust_q + rq * iq_adjust_i);
+	vga.composite.gi = static_cast<int32_t>( gi * iq_adjust_i + gq * iq_adjust_q);
+	vga.composite.gq = static_cast<int32_t>(-gi * iq_adjust_q + gq * iq_adjust_i);
+	vga.composite.bi = static_cast<int32_t>( bi * iq_adjust_i + bq * iq_adjust_q);
+	vga.composite.bq = static_cast<int32_t>(-bi * iq_adjust_q + bq * iq_adjust_i);
+	// clang-format on
+
+	vga.composite.sharpness = convergence.get() * 256 / 100;
 }
 
 enum CRT_KNOB : uint8_t {
@@ -772,7 +706,7 @@ static void write_cga_color_select(uint8_t val)
 	case M_CGA4_COMPOSITE: {
 		uint8_t base = (val & 0x10) ? 0x08 : 0;
 		uint8_t bg = val & 0xf;
-		if (vga.tandy.mode_control & 0x4) // cyan red white
+		if (vga.tandy.mode.is_black_and_white_mode) // cyan red white
 			VGA_SetCGA4Table(bg, 3 + base, 4 + base, 7 + base);
 		else if (val & 0x20) // cyan magenta white
 			VGA_SetCGA4Table(bg, 3 + base, 5 + base, 7 + base);
@@ -797,15 +731,16 @@ static void write_cga_color_select(uint8_t val)
 	}
 }
 
-static void write_cga(io_port_t port, uint8_t val, io_width_t)
+static void write_cga(io_port_t port, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	// only receives 8-bit data per its IO port registration
 	switch (port) {
 	case 0x3d8:
-		vga.tandy.mode_control = val;
+		vga.tandy.mode.data = val;
 		vga.attr.disabled = (val&0x8)? 0: 1;
-		if (vga.tandy.mode_control & 0x2) {		// graphics mode
-			if (vga.tandy.mode_control & 0x10) {// highres mode
+		if (vga.tandy.mode.is_graphics_enabled) {
+			if (vga.tandy.mode.is_tandy_640_dot_graphics) {
 				if (cga_comp == COMPOSITE_STATE::ON ||
 				    ((cga_comp == COMPOSITE_STATE::AUTO &&
 				      !(val & 0x4)) &&
@@ -856,39 +791,44 @@ static void PCJr_FindMode();
 
 static void apply_composite_state()
 {
-	// switch RGB and Composite if in graphics mode
-	if (vga.tandy.mode_control & 0x2 && machine == MCH_PCJR)
+	// Switch RGB and Composite if in graphics mode
+	if (machine == MCH_PCJR && vga.tandy.mode.is_graphics_enabled) {
 		PCJr_FindMode();
-	else
-		write_cga(0x3d8, vga.tandy.mode_control, io_width_t::byte);
+	} else {
+		write_cga(0x3d8, vga.tandy.mode.data, io_width_t::byte);
+	}
 
-/* 	if (vga.tandy.mode_control & 0x2) {
+/* 	if (vga.tandy.mode.is_graphics_enabled) {
 		if (machine == MCH_PCJR) {
 			PCJr_FindMode();
 		} else {
-			write_cga(0x3d8, vga.tandy.mode_control, io_width_t::byte);
+			write_cga(0x3d8, vga.tandy.mode.data, io_width_t::byte);
 		}
 	}
  */
 
 }
 
-static void Composite(bool pressed)
+static void toggle_cga_composite_mode(bool pressed)
 {
-	if (!pressed)
+	if (!pressed) {
 		return;
+	}
 
 	// Step through the composite modes
-	if (cga_comp == COMPOSITE_STATE::AUTO)
+	if (cga_comp == COMPOSITE_STATE::AUTO) {
 		cga_comp = COMPOSITE_STATE::ON;
-	else if (cga_comp == COMPOSITE_STATE::ON)
+	} else if (cga_comp == COMPOSITE_STATE::ON) {
 		cga_comp = COMPOSITE_STATE::OFF;
-	else
+	} else {
 		cga_comp = COMPOSITE_STATE::AUTO;
+	}
 
-	LOG_MSG("COMPOSITE: State is %s", cga_comp == COMPOSITE_STATE::AUTO ? "auto"
-	                                  : cga_comp == COMPOSITE_STATE::ON ? "on"
-	                                                                    : "off");
+	LOG_MSG("COMPOSITE: State is %s",
+	        (cga_comp == COMPOSITE_STATE::AUTO
+	                 ? "auto"
+	                 : (cga_comp == COMPOSITE_STATE::ON ? "on" : "off")));
+
 	apply_composite_state();
 }
 
@@ -901,21 +841,22 @@ static void tandy_update_palette() {
 				vga.attr.palette[vga.tandy.color_select&0xf]);
 			break;
 		case M_TANDY4:
-			if (vga.tandy.gfx_control & 0x8) {
-				// 4-color high resolution - might be an idea to introduce M_TANDY4H
+			if (vga.tandy.mode_control.is_tandy_640x200_4_color_graphics) {
 				VGA_SetCGA4Table( // function sets both medium and highres 4color tables
 					vga.attr.palette[0], vga.attr.palette[1],
 					vga.attr.palette[2], vga.attr.palette[3]);
 			} else {
 				uint8_t color_set = 0;
 				uint8_t r_mask = 0xf;
-				if (vga.tandy.color_select & 0x10)
-					color_set |= 8; // intensity
-				if (vga.tandy.color_select & 0x20)
-					color_set |= 1; // Cyan Mag. White
-				if (vga.tandy.mode_control & 0x04) { // Cyan Red White
-					color_set |= 1;
-					r_mask &= ~1;
+				if (is(vga.tandy.color_select, b4)) {
+					set(color_set, b3); // intensity
+				}
+				if (is(vga.tandy.color_select, b5)) {
+					set(color_set, b0); // Cyan Mag. White
+				}
+				if (vga.tandy.mode.is_black_and_white_mode) { // Cyan Red White
+					set(color_set, b0);
+					clear(r_mask, b0);
 				}
 				VGA_SetCGA4Table(
 					vga.attr.palette[vga.tandy.color_select&0xf],
@@ -952,13 +893,12 @@ void VGA_SetModeNow(VGAModes mode);
 
 static void TANDY_FindMode()
 {
-	if (vga.tandy.mode_control & 0x2) {
-		if (vga.tandy.gfx_control & 0x10) {
+	if (vga.tandy.mode.is_graphics_enabled) {
+		if (vga.tandy.mode_control.is_tandy_16_color_enabled) {
 			if (vga.mode==M_TANDY4) {
 				VGA_SetModeNow(M_TANDY16);
 			} else VGA_SetMode(M_TANDY16);
-		}
-		else if (vga.tandy.gfx_control & 0x08) {
+		} else if (vga.tandy.mode_control.is_tandy_640x200_4_color_graphics) {
 			if (cga_comp == COMPOSITE_STATE::ON) {
 				// composite ntsc 640x200 16 color mode
 				VGA_SetMode(M_CGA4_COMPOSITE);
@@ -966,7 +906,7 @@ static void TANDY_FindMode()
 			} else {
 				VGA_SetMode(M_TANDY4);
 			}
-		} else if (vga.tandy.mode_control & 0x10) {
+		} else if (vga.tandy.mode.is_tandy_640_dot_graphics) {
 			if (cga_comp == COMPOSITE_STATE::ON) {
 				// composite ntsc 640x200 16 color mode
 				VGA_SetMode(M_CGA2_COMPOSITE);
@@ -994,18 +934,18 @@ static void TANDY_FindMode()
 static void PCJr_FindMode()
 {
 	assert(machine == MCH_PCJR);
-	if (vga.tandy.mode_control & 0x2) {
-		if (vga.tandy.mode_control & 0x10) {
-			// bit4 of mode control 1 signals 16 colour graphics mode
-			if (vga.mode == M_TANDY4)
+	if (vga.tandy.mode.is_graphics_enabled) {
+		if (vga.tandy.mode.is_pcjr_16_color_graphics) {
+			if (vga.mode == M_TANDY4) {
 				VGA_SetModeNow(M_TANDY16); // TODO lowres mode only
-			else
+			} else {
 				VGA_SetMode(M_TANDY16);
-		} else if (vga.tandy.gfx_control & 0x08) {
+			}
+		} else if (vga.tandy.mode_control.is_pcjr_640x200_2_color_graphics) {
 			// bit3 of mode control 2 signals 2 colour graphics mode
 			if (cga_comp == COMPOSITE_STATE::ON ||
 			    (cga_comp == COMPOSITE_STATE::AUTO &&
-			     !(vga.tandy.mode_control & 0x4))) {
+			     !(vga.tandy.mode.is_black_and_white_mode))) {
 				VGA_SetMode(M_CGA16);
 			} else {
 				VGA_SetMode(M_TANDY2);
@@ -1031,8 +971,8 @@ static void PCJr_FindMode()
 static void TandyCheckLineMask(void ) {
 	if ( vga.tandy.extended_ram & 1 ) {
 		vga.tandy.line_mask = 0;
-	} else if ( vga.tandy.mode_control & 0x2) {
-		vga.tandy.line_mask |= 1;
+	} else if (vga.tandy.mode.is_graphics_enabled) {
+		set(vga.tandy.line_mask, b0);
 	}
 	if ( vga.tandy.line_mask ) {
 		vga.tandy.line_shift = 13;
@@ -1049,11 +989,13 @@ static void write_tandy_reg(uint8_t val)
 	switch (vga.tandy.reg_index) {
 	case 0x0:
 		if (machine==MCH_PCJR) {
-			vga.tandy.mode_control=val;
+			vga.tandy.mode.data = val;
 			VGA_SetBlinking(val & 0x20);
 			PCJr_FindMode();
-			if (val&0x8) vga.attr.disabled &= ~1;
-			else vga.attr.disabled |= 1;
+			if (is(val, b3))
+				clear(vga.attr.disabled, b0);
+			else
+				set(vga.attr.disabled, b0);
 		} else {
 			LOG(LOG_VGAMISC,LOG_NORMAL)("Unhandled Write %2X to tandy reg %X",val,vga.tandy.reg_index);
 		}
@@ -1066,7 +1008,7 @@ static void write_tandy_reg(uint8_t val)
 		vga.tandy.border_color=val;
 		break;
 	case 0x3:	/* More control */
-		vga.tandy.gfx_control=val;
+		vga.tandy.mode_control.data = val;
 		if (machine==MCH_TANDY) TANDY_FindMode();
 		else PCJr_FindMode();
 		break;
@@ -1087,16 +1029,19 @@ static void write_tandy_reg(uint8_t val)
 	}
 }
 
-static void write_tandy(io_port_t port, uint8_t val, io_width_t)
+static void write_tandy(io_port_t port, io_val_t value, io_width_t)
 {
+	auto val = check_cast<uint8_t>(value);
 	// only receives 8-bit data per its IO port registration
 	switch (port) {
 	case 0x3d8:
-		val &= 0x3f; // only bits 0-6 are used
-		if (vga.tandy.mode_control ^ val) {
-			vga.tandy.mode_control = val;
-			if (val&0x8) vga.attr.disabled &= ~1;
-			else vga.attr.disabled |= 1;
+		clear(val, b7 | b6); // only bits 0-5 are used
+		if (vga.tandy.mode.data ^ val) {
+			vga.tandy.mode.data = val;
+			if (is(val, b3))
+				clear(vga.attr.disabled, b0);
+			else
+				set(vga.attr.disabled, b0);
 			TandyCheckLineMask();
 			VGA_SetBlinking(val & 0x20);
 			TANDY_FindMode();
@@ -1137,18 +1082,20 @@ static void write_tandy(io_port_t port, uint8_t val, io_width_t)
 	}
 }
 
-static void write_pcjr(io_port_t port, uint8_t val, io_width_t)
+static void write_pcjr(io_port_t port, io_val_t value, io_width_t)
 {
 	// only receives 8-bit data per its IO port registration
+	const auto val = check_cast<uint8_t>(value);
 	switch (port) {
 	case 0x3da:
 		if (vga.tandy.pcjr_flipflop)
 			write_tandy_reg(val);
 		else {
 			vga.tandy.reg_index = val;
-			if (vga.tandy.reg_index & 0x10)
-				vga.attr.disabled |= 2;
-			else vga.attr.disabled &= ~2;
+			if (is(vga.tandy.reg_index, b4))
+				set(vga.attr.disabled, b1);
+			else
+				clear(vga.attr.disabled, b1);
 		}
 		vga.tandy.pcjr_flipflop=!vga.tandy.pcjr_flipflop;
 		break;
@@ -1193,121 +1140,127 @@ static void write_pcjr(io_port_t port, uint8_t val, io_width_t)
 	}
 }
 
-static uint8_t palette_num(const char *colour)
-{
-	if (strcasecmp(colour, "green") == 0)
-		return 0;
-	if (strcasecmp(colour, "amber") == 0)
-		return 1;
-	if (strcasecmp(colour, "white") == 0)
-		return 2;
-	if (strcasecmp(colour, "paperwhite") == 0)
-		return 3;
-	return 2;
-}
-
-void VGA_SetMonoPalette(const char *colour)
+void VGA_SetMonochromePalette(const enum MonochromePalette palette)
 {
 	if (machine == MCH_HERC) {
-		herc_pal = palette_num(colour);
-		Herc_Palette();
+		hercules_palette = palette;
+		VGA_SetHerculesPalette();
+
+	} else if (machine == MCH_CGA && mono_cga) {
+		mono_cga_palette = palette;
+		VGA_SetMonochromeCgaPalette();
+	}
+}
+
+static MonochromePalette cycle_forward(const MonochromePalette palette)
+{
+	auto value = (enum_val(palette) + 1) % NumMonochromePalettes;
+	return static_cast<MonochromePalette>(value);
+}
+
+static void cycle_mono_cga_palette(bool pressed)
+{
+	if (!pressed) {
 		return;
 	}
-	if (machine == MCH_CGA && mono_cga) {
-		mono_cga_pal = palette_num(colour);
-		Mono_CGA_Palette();
+
+	mono_cga_palette = cycle_forward(mono_cga_palette);
+	VGA_SetMonochromeCgaPalette();
+
+	RENDER_SyncMonochromePaletteSetting(mono_cga_palette);
+}
+
+void VGA_SetMonochromeCgaPalette()
+{
+	for (uint8_t color_idx = 0; color_idx < NumCgaColors; ++color_idx) {
+		const auto color = [&] {
+			const auto palette_idx = enum_val(mono_cga_palette);
+			if (INT10_IsTextMode(*CurMode)) {
+				return mono_cga_text_palettes[palette_idx][color_idx];
+			} else {
+				return mono_cga_graphics_palettes[palette_idx][color_idx];
+			}
+		}();
+
+		VGA_DAC_SetEntry(color_idx, color.red, color.green, color.blue);
+		VGA_DAC_CombineColor(color_idx, color_idx);
+	}
+}
+
+static void cycle_hercules_palette(bool pressed)
+{
+	if (!pressed) {
 		return;
 	}
+
+	hercules_palette = cycle_forward(hercules_palette);
+	VGA_SetHerculesPalette();
+
+	RENDER_SyncMonochromePaletteSetting(hercules_palette);
 }
 
-static void CycleMonoCGAPal(bool pressed) {
-	if (!pressed) return;
-	if (++mono_cga_pal>3) mono_cga_pal=0;
-	Mono_CGA_Palette();
-}
-
-static void CycleMonoCGABright(bool pressed) {
-	if (!pressed) return;
-	if (++mono_cga_bright>1) mono_cga_bright=0;
-	Mono_CGA_Palette();
-}
-
-void Mono_CGA_Palette()
+void VGA_SetHerculesPalette()
 {
-	for (uint8_t ct = 0; ct < 16; ++ct) {
-		VGA_DAC_SetEntry(
-		        ct,
-		        mono_cga_palettes[2 * mono_cga_pal + mono_cga_bright][ct][0],
-		        mono_cga_palettes[2 * mono_cga_pal + mono_cga_bright][ct][1],
-		        mono_cga_palettes[2 * mono_cga_pal + mono_cga_bright][ct][2]);
-		VGA_DAC_CombineColor(ct, ct);
-	}
-}
-
-static void CycleHercPal(bool pressed) {
-	if (!pressed) return;
-	if (++herc_pal>3) herc_pal=0;
-	Herc_Palette();
-	VGA_DAC_CombineColor(1,7);
-}
-
-void Herc_Palette()
-{
-	switch (herc_pal) {
-	case 0: // Green
-		VGA_DAC_SetEntry(0x7, 0x00, 0x26, 0x00);
-		VGA_DAC_SetEntry(0xf, 0x00, 0x3f, 0x00);
-		break;
-	case 1: // Amber
+	switch (hercules_palette) {
+	case MonochromePalette::Amber:
 		VGA_DAC_SetEntry(0x7, 0x34, 0x20, 0x00);
 		VGA_DAC_SetEntry(0xf, 0x3f, 0x34, 0x00);
 		break;
-	case 2: // White
+	case MonochromePalette::Green:
+		VGA_DAC_SetEntry(0x7, 0x00, 0x26, 0x00);
+		VGA_DAC_SetEntry(0xf, 0x00, 0x3f, 0x00);
+		break;
+	case MonochromePalette::White:
 		VGA_DAC_SetEntry(0x7, 0x2a, 0x2a, 0x2a);
 		VGA_DAC_SetEntry(0xf, 0x3f, 0x3f, 0x3f);
 		break;
-	case 3: // Paper-white
+	case MonochromePalette::Paperwhite:
 		VGA_DAC_SetEntry(0x7, 0x2d, 0x2e, 0x2d);
 		VGA_DAC_SetEntry(0xf, 0x3f, 0x3f, 0x3b);
 		break;
+	default: assertm(false, "Invalid MonochromePalette value");
 	}
+
+	VGA_DAC_CombineColor(0, 0);
+	VGA_DAC_CombineColor(1, 7);
 }
 
-static void write_hercules(Bitu port, uint8_t val, io_width_t)
+static void write_hercules(io_port_t port, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	switch (port) {
 	case 0x3b8: {
 		// the protected bits can always be cleared but only be set if the
 		// protection bits are set
-		if (vga.herc.mode_control&0x2) {
+		if (is(vga.herc.mode_control, b1)) {
 			// already set
-			if (!(val&0x2)) {
-				vga.herc.mode_control &= ~0x2;
+			if (cleared(val, b1)) {
+				clear(vga.herc.mode_control, b1);
 				VGA_SetMode(M_HERC_TEXT);
 			}
 		} else {
 			// not set, can only set if protection bit is set
-			if ((val & 0x2) && (vga.herc.enable_bits & 0x1)) {
-				vga.herc.mode_control |= 0x2;
+			if (is(val, b1) && is(vga.herc.enable_bits, b0)) {
+				set(vga.herc.mode_control, b1);
 				VGA_SetMode(M_HERC_GFX);
 			}
 		}
-		if (vga.herc.mode_control&0x80) {
-			if (!(val&0x80)) {
-				vga.herc.mode_control &= ~0x80;
+		if (is(vga.herc.mode_control, b7)) {
+			if (cleared(val, b7)) {
+				clear(vga.herc.mode_control, b7);
 				vga.tandy.draw_base = &vga.mem.linear[0];
 			}
 		} else {
-			if ((val & 0x80) && (vga.herc.enable_bits & 0x2)) {
-				vga.herc.mode_control |= 0x80;
-				vga.tandy.draw_base = &vga.mem.linear[32*1024];
+			if (is(val, b7) && is(vga.herc.enable_bits, b1)) {
+				set(vga.herc.mode_control, b7);
+				vga.tandy.draw_base = &vga.mem.linear[32 * 1024];
 			}
 		}
-		vga.draw.blinking = (val&0x20)!=0;
-		vga.herc.mode_control &= 0x82;
-		vga.herc.mode_control |= val & ~0x82;
+		vga.draw.blinking = is(val, b5);
+		retain(vga.herc.mode_control, b7 | b1);
+		set(vga.herc.mode_control, mask_off(val, b7 | b1));
 		break;
-		}
+	}
 	case 0x3bf:
 		if ( vga.herc.enable_bits ^ val) {
 			vga.herc.enable_bits=val;
@@ -1319,7 +1272,7 @@ static void write_hercules(Bitu port, uint8_t val, io_width_t)
 	}
 }
 
-uint8_t read_herc_status(io_port_t, io_width_t)
+static uint8_t read_herc_status(io_port_t, io_width_t)
 {
 	// only returns 8-bit data per its IO port registration
 
@@ -1352,7 +1305,24 @@ uint8_t read_herc_status(io_port_t, io_width_t)
 
 void VGA_SetupOther()
 {
-	vga.tandy = VGA_TANDY(); // reset our Tandy struct
+	// Reset our Tandy struct
+	vga.tandy.pcjr_flipflop     = 0;
+	vga.tandy.mode.data         = 0;
+	vga.tandy.color_select      = 0;
+	vga.tandy.disp_bank         = 0;
+	vga.tandy.reg_index         = 0;
+	vga.tandy.mode_control.data = 0;
+	vga.tandy.palette_mask      = 0;
+	vga.tandy.extended_ram      = 0;
+	vga.tandy.border_color      = 0;
+	vga.tandy.line_mask         = 0;
+	vga.tandy.line_shift        = 0;
+	vga.tandy.draw_bank         = 0;
+	vga.tandy.mem_bank          = 0;
+	vga.tandy.draw_base         = nullptr;
+	vga.tandy.mem_base          = nullptr;
+	vga.tandy.addr_mask         = 0;
+
 	vga.attr.disabled = 0;
 	vga.config.bytes_skip=0;
 
@@ -1380,17 +1350,18 @@ void VGA_SetupOther()
 			memcpy(&vga.draw.font[i * 32], &int10_font_14[i * 14], 14);
 		}
 		vga.draw.font_tables[0] = vga.draw.font_tables[1] = vga.draw.font;
-		MAPPER_AddHandler(CycleHercPal, SDL_SCANCODE_F11, 0,
+		MAPPER_AddHandler(cycle_hercules_palette, SDL_SCANCODE_F11, 0,
 		                  "hercpal", "Herc Pal");
 	}
 	if (machine==MCH_CGA) {
 		IO_RegisterWriteHandler(0x3d8, write_cga, io_width_t::byte);
 		IO_RegisterWriteHandler(0x3d9, write_cga, io_width_t::byte);
 		if (mono_cga) {
-			MAPPER_AddHandler(CycleMonoCGAPal, SDL_SCANCODE_F11, 0,
-			                  "monocgapal", "Mono CGA Pal");
-			MAPPER_AddHandler(CycleMonoCGABright, SDL_SCANCODE_F11, MMOD2,
-			                  "monocgabright", "Mono CGA Bright");
+			MAPPER_AddHandler(cycle_mono_cga_palette,
+			                  SDL_SCANCODE_F11,
+			                  0,
+			                  "monocgapal",
+			                  "Mono CGA Pal");
 		}
 	}
 	if (machine==MCH_TANDY) {
@@ -1416,47 +1387,43 @@ void VGA_SetupOther()
 		                  "incval", "Inc Knob");
 		MAPPER_AddHandler(turn_crt_knob_negative, SDL_SCANCODE_F11,
 		                  MMOD2, "decval", "Dec Knob");
-		MAPPER_AddHandler(Composite, SDL_SCANCODE_F12, 0, "cgacomp",
+		MAPPER_AddHandler(toggle_cga_composite_mode, SDL_SCANCODE_F12, 0, "cgacomp",
 		                  "CGA Comp");
 	}
-	if (machine == MCH_HERC) {
-		constexpr uint16_t base = 0x3b0;
-		for (uint8_t i = 0; i < 4; ++i) {
-			// The registers are repeated as the address is not decoded properly;
-			// The official ports are 3b4, 3b5
-			const uint16_t index_port = base + i * 2u;
+
+	auto register_crtc_port_handlers_at_base = [](const io_port_t base) {
+		for (io_port_t i = 0; i < 4; ++i) {
+			const auto index_port = check_cast<io_port_t>(base + 2 * i);
 			IO_RegisterWriteHandler(index_port, write_crtc_index_other, io_width_t::byte);
 			IO_RegisterReadHandler(index_port, read_crtc_index_other, io_width_t::byte);
 
-			const uint16_t data_port = index_port + 1u;
+			const auto data_port = check_cast<io_port_t>(index_port + 1);
 			IO_RegisterWriteHandler(data_port, write_crtc_data_other, io_width_t::byte);
 			IO_RegisterReadHandler(data_port, read_crtc_data_other, io_width_t::byte);
 		}
-		vga.herc.enable_bits=0;
-		vga.herc.mode_control=0xa; // first mode written will be text mode
+	};
+
+	if (machine == MCH_HERC) {
+		vga.herc.enable_bits = 0;
+		vga.herc.mode_control = 0xa; // first mode written will be text mode
 		vga.crtc.underline_location = 13;
 		IO_RegisterWriteHandler(0x3b8, write_hercules, io_width_t::byte);
 		IO_RegisterWriteHandler(0x3bf, write_hercules, io_width_t::byte);
 		IO_RegisterReadHandler(0x3ba, read_herc_status, io_width_t::byte);
+		register_crtc_port_handlers_at_base(0x3b0);
 	} else if (!IS_EGAVGA_ARCH) {
-		constexpr uint16_t base = 0x3d0;
-		for (uint8_t port_ct = 0; port_ct < 4; ++port_ct) {
-			IO_RegisterWriteHandler(base + port_ct * 2, write_crtc_index_other, io_width_t::byte);
-			IO_RegisterWriteHandler(base + port_ct * 2 + 1, write_crtc_data_other, io_width_t::byte);
-			IO_RegisterReadHandler(base + port_ct * 2, read_crtc_index_other, io_width_t::byte);
-			IO_RegisterReadHandler(base + port_ct * 2 + 1, read_crtc_data_other, io_width_t::byte);
-		}
+		register_crtc_port_handlers_at_base(0x3d0);
 	}
 }
 
 
 //--Added 2013-02-10 by Alun Bestor to give Boxer control over Hercules graphics options
-Bit8u boxer_herculesTintMode()
+uint8_t boxer_herculesTintMode()
 {
     return herc_pal;
 }
 
-void boxer_setHerculesTintMode(Bit8u mode)
+void boxer_setHerculesTintMode(uint8_t mode)
 {
     if (herc_pal != mode)
     {
@@ -1487,17 +1454,17 @@ void boxer_setCGACompositeHueOffset(double offset)
 }
 
 //--Added 2019-10-18 by C.W. Betts to give Boxer control over CGA composite mode
-Bit8u boxer_CGAComponentMode(void)
+uint8_t boxer_CGAComponentMode(void)
 {
-	return (Bit8u)cga_comp;
+	return (uint8_t)cga_comp;
 }
 
-void boxer_setCGAComponentMode(Bit8u newCGA)
+void boxer_setCGAComponentMode(uint8_t newCGA)
 {
 	cga_comp = COMPOSITE_STATE(newCGA);
-	if ((Bit8u)cga_comp>2) cga_comp=COMPOSITE_STATE::AUTO;
-	if (vga.tandy.mode_control & 0x2) {
-		write_cga(0x3d8,vga.tandy.mode_control, io_width_t::byte);
+	if ((uint8_t)cga_comp>2) cga_comp=COMPOSITE_STATE::AUTO;
+	if (vga.tandy.mode_control.is_tandy_border_enabled) {
+		write_cga(0x3d8,vga.tandy.mode_control.data, io_width_t::byte);
 	}
 }
 //--End of modifications
@@ -1515,10 +1482,21 @@ static void composite_init(Section *sec)
 	assert(sec);
 	const auto conf = static_cast<Section_prop *>(sec);
 	assert(conf);
-	const std::string state = conf->Get_string("composite");
-	cga_comp = (state == "auto" ? COMPOSITE_STATE::AUTO
-	            : state == "on" ? COMPOSITE_STATE::ON
-	                            : COMPOSITE_STATE::OFF);
+	const std::string_view state = conf->Get_string("composite");
+
+	if (state == "auto") {
+		cga_comp = COMPOSITE_STATE::AUTO;
+	} else {
+		const auto state_has_bool = parse_bool_setting(state);
+		if (state_has_bool) {
+			cga_comp = *state_has_bool ? COMPOSITE_STATE::ON
+			                           : COMPOSITE_STATE::OFF;
+		} else {
+			LOG_WARNING("COMPOSITE: Invalid 'composite' value: '%s', using 'off'",
+			            state.data());
+			cga_comp = COMPOSITE_STATE::OFF;
+		}
+	}
 
 	const auto era_choice = std::string(conf->Get_string("era"));
 	is_composite_new_era = era_choice == "new" ||
@@ -1542,22 +1520,24 @@ static void composite_settings(Section_prop &secprop)
 {
 	constexpr auto when_idle = Property::Changeable::WhenIdle;
 
-	const char *states[] = {"auto", "on", "off", 0};
+	const char* states[] = {"auto", "on", "off", nullptr};
 	auto str_prop = secprop.Add_string("composite", when_idle, "auto");
 	str_prop->Set_values(states);
-	str_prop->Set_help("Enable composite mode on start. 'auto' lets the program decide.\n"
-	                   "Note: Fine-tune the settings below (ie: hue) using the composite hotkeys.\n"
-	                   "      Then read the new settings from your console and enter them here.");
-
-	const char *eras[] = {"auto", "old", "new", 0};
-	str_prop = secprop.Add_string("era", when_idle, "auto");
-	str_prop->Set_values(eras);
 	str_prop->Set_help(
-	        "Era of composite technology. When 'auto', PCjr uses new and CGA/Tandy use old.");
+	        "Enable composite mode on start ('auto' by default).\n"
+	        "'auto' lets the program decide.\n"
+	        "Note: Fine-tune the settings below (i.e., hue) using the composite hotkeys,\n"
+	        "      then read the new settings from your console and enter them here.");
+
+	const char* eras[] = {"auto", "old", "new", nullptr};
+	str_prop           = secprop.Add_string("era", when_idle, "auto");
+	str_prop->Set_values(eras);
+	str_prop->Set_help("Era of composite technology ('auto' by default).\n"
+	                   "When 'auto', PCjr uses 'new', and CGA/Tandy use 'old'.");
 
 	auto int_prop = secprop.Add_int("hue", when_idle, hue.get_default());
 	int_prop->SetMinMax(hue.get_min(), hue.get_max());
-	int_prop->Set_help("Appearance of RGB palette. For example, adjust until sky is blue.");
+	int_prop->Set_help("Appearance of RGB palette. For example, adjust until the sky is blue.");
 
 	int_prop = secprop.Add_int("saturation", when_idle, saturation.get_default());
 	int_prop->SetMinMax(saturation.get_min(), saturation.get_max());
@@ -1597,9 +1577,13 @@ static void turn_crt_knob(bool pressed, const int amount)
 	log_crt_knob_value();
 }
 
-void VGA_AddCompositeSettings(Config &conf)
+void VGA_AddCompositeSettings(Config& conf)
 {
-	auto sec = conf.AddSection_prop("composite", &composite_init, true);
+	constexpr auto changeable_at_runtime = true;
+
+	auto sec = conf.AddSection_prop("composite",
+	                                &composite_init,
+	                                changeable_at_runtime);
 	assert(sec);
 	composite_settings(*sec);
 }

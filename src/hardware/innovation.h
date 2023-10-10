@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2021-2021  The DOSBox Staging Team
+ *  Copyright (C) 2021-2022  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -23,61 +23,52 @@
 
 #include "dosbox.h"
 
-#include <atomic>
 #include <memory>
-#include <mutex>
+#include <queue>
 #include <string>
-#include <thread>
-#include <vector>
 
 #include "mixer.h"
 #include "inout.h"
-#include "rwqueue.h"
-#include "../libs/residfp/SID.h"
+
+#include "residfp/SID.h"
 
 class Innovation {
 public:
-	Innovation() : keep_rendering(false) {}
-	void Open(const std::string &model_choice,
-	          const std::string &clock_choice,
-	          int filter_strength_6581,
-	          int filter_strength_8580,
-	          int port_choice);
+	void Open(const std::string_view model_choice,
+	          const std::string_view clock_choice, int filter_strength_6581,
+	          int filter_strength_8580, int port_choice,
+	          const std::string_view channel_filter_choice);
 
 	void Close();
-	~Innovation() { Close(); }
+	~Innovation()
+	{
+		Close();
+	}
 
 private:
-	using channel_t = std::unique_ptr<MixerChannel, decltype(&MIXER_DelChannel)>;
-
-	void Render();
-	uint16_t GetRemainingSamples();
-	void MixerCallBack(uint16_t requested_samples);
+	bool MaybeRenderFrame(float &frame);
+	void AudioCallback(const uint16_t requested_frames);
 	uint8_t ReadFromPort(io_port_t port, io_width_t width);
-	void WriteToPort(io_port_t port, uint8_t data, io_width_t width);
+	void RenderUpToNow();
+	int16_t TallySilence(const int16_t sample);
+	void WriteToPort(io_port_t port, io_val_t value, io_width_t width);
 
 	// Managed objects
-	channel_t channel{nullptr, MIXER_DelChannel};
-
-	IO_ReadHandleObject read_handler = {};
-	IO_WriteHandleObject write_handler = {};
-
-	std::vector<int16_t> play_buffer = {};
-	static constexpr auto num_buffers = 4;
-	RWQueue<std::vector<int16_t>> playable{num_buffers};
-	RWQueue<std::vector<int16_t>> backstock{num_buffers};
-	std::thread renderer = {};
-	std::mutex service_mutex = {};
+	mixer_channel_t channel               = nullptr;
+	IO_ReadHandleObject read_handler      = {};
+	IO_WriteHandleObject write_handler    = {};
 	std::unique_ptr<reSIDfp::SID> service = {};
-	std::atomic_bool keep_rendering = {};
+	std::queue<float> fifo                = {};
 
-	// Scalar members
-	uint16_t base_port = 0;
-	double chip_clock = 0;
-	double sid_sample_rate = 0;
-	size_t last_used = 0;
-	uint16_t play_buffer_pos = 0;
-	bool is_open = false;
+	// Initial configuration
+	double chip_clock            = 0.0;
+	double ms_per_clock          = 0.0;
+	io_port_t base_port          = 0;
+	int idle_after_silent_frames = 0;
+
+	// Runtime states
+	double last_rendered_ms = 0.0;
+	bool is_open            = false;
 };
 
 #endif

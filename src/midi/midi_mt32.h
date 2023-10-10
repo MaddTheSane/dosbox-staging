@@ -1,8 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2012-2021  sergm <sergm@bigmir.net>
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -22,6 +21,7 @@
 #ifndef DOSBOX_MIDI_MT32_H
 #define DOSBOX_MIDI_MT32_H
 
+#include "midi.h"
 #include "midi_handler.h"
 
 #if C_MT32EMU
@@ -29,6 +29,8 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -37,58 +39,67 @@
 
 #include "mixer.h"
 #include "rwqueue.h"
-#include "soft_limiter.h"
+#include "std_filesystem.h"
+
+// forward declaration
+class LASynthModel;
+
+using model_and_dir_t = std::pair<const LASynthModel*, std_fs::path>;
 
 static_assert(MT32EMU_VERSION_MAJOR > 2 ||
                       (MT32EMU_VERSION_MAJOR == 2 && MT32EMU_VERSION_MINOR >= 5),
               "libmt32emu >= 2.5.0 required (using " MT32EMU_VERSION ")");
 
 class MidiHandler_mt32 final : public MidiHandler {
-private:
-	using channel_t = std::unique_ptr<MixerChannel, decltype(&MIXER_DelChannel)>;
-
 public:
 	using service_t = std::unique_ptr<MT32Emu::Service>;
 
-	MidiHandler_mt32();
+	MidiHandler_mt32() = default;
 	~MidiHandler_mt32() override;
 	void Close() override;
-	const char *GetName() const override { return "mt32"; }
+
+	std::string_view GetName() const override
+	{
+		return "mt32";
+	}
+
+	MidiDeviceType GetDeviceType() const override
+	{
+		return MidiDeviceType::BuiltIn;
+	}
+
 	MIDI_RC ListAll(Program *caller) override;
 	bool Open(const char *conf) override;
-	void PlayMsg(const uint8_t *msg) override;
+	void PlayMsg(const MidiMessage& msg) override;
 	void PlaySysex(uint8_t *sysex, size_t len) override;
 	void PrintStats();
 
 private:
-	uint32_t GetMidiEventTimestamp() const;
 	service_t GetService();
 	void MixerCallBack(uint16_t len);
-	void SetMixerLevel(const AudioFrame &desired) noexcept;
-	uint16_t GetRemainingFrames();
+	void ProcessWorkFromFifo();
+
+	uint16_t GetNumPendingAudioFrames();
+	void RenderAudioFramesToFifo(const uint16_t num_frames = 1);
 	void Render();
 
 	// Managed objects
-	channel_t channel{nullptr, MIXER_DelChannel};
-
-	std::vector<int16_t> play_buffer = {};
-	static constexpr auto num_buffers = 4;
-	RWQueue<std::vector<int16_t>> playable{num_buffers};
-	RWQueue<std::vector<int16_t>> backstock{num_buffers};
+	mixer_channel_t channel = nullptr;
+	RWQueue<AudioFrame> audio_frame_fifo{1};
+	RWQueue<MidiWork> work_fifo{1};
 
 	std::mutex service_mutex = {};
 	service_t service = {};
 	std::thread renderer = {};
-	SoftLimiter soft_limiter;
+	std::optional<model_and_dir_t> model_and_dir = {};
 
-	// The following two members let us determine the total number of played
-	// frames, which is used by GetMidiEventTimestamp() to calculate a total
-	// time offset.
-	uint32_t total_buffers_played = 0;
-	uint16_t last_played_frame = 0; // relative frame-offset in the play buffer
+	// Used to track the balance of time between the last mixer callback
+	// versus the current MIDI Sysex or Msg event.
+	double last_rendered_ms = 0.0;
+	double ms_per_audio_frame = 0.0;
 
-	std::atomic_bool keep_rendering = {};
-	bool is_open = false;
+	bool had_underruns = false;
+	bool is_open       = false;
 };
 
 #endif // C_MT32EMU

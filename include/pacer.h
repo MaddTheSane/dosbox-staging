@@ -41,22 +41,36 @@ task should run. For example: Pacer render_pacer("Render", 1000);
  2. Check if the task can be run using CanRun(), which returns a bool.
  3. Immediately after the task ran (or didn't), Checkpoint() the results to
     prepare for the next pass.
+
+Use the Reset() call after performing tasks that shouldn't be counted againsts
+the pacer's timing. This is especially important for tasks that are long running
+or depend on host behavior, such as changing a video mode or altering the
+SDL window.
 */
 
 class Pacer {
 public:
-	Pacer(const std::string &name, const int timeout);
+	enum class LogLevel {
+		NOTHING,
+		CHECKPOINTS,
+		TIMEOUTS,
+	};
+	Pacer(const std::string &name, const int timeout, const LogLevel level);
 	Pacer() = delete;
 
 	bool CanRun();
 	void Checkpoint();
+	void SetLogLevel(const LogLevel level);
 	void SetTimeout(const int timeout);
+	void Reset();
 
 private:
 	const std::string pacer_name{};
 	int64_t iteration_start = 0;
+	LogLevel log_level = LogLevel::NOTHING;
 	int skip_timeout = 0;
 	bool can_run = true;
+	bool was_reset = false;
 };
 
 #endif

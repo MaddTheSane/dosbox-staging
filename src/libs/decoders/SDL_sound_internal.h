@@ -2,7 +2,7 @@
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
  *  Copyright (C) 2020-2021  The DOSBox Staging Team
- *  Copyright (C) 2018-2021  Kevin R. Croft <krcroft@gmail.com>
+ *  Copyright (C) 2018-2021  kcgen <kcgen@users.noreply.github.com>
  *  Copyright (C) 2001-2017  Ryan C. Gordon <icculus@icculus.org>
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -34,7 +34,7 @@
 #error Do not include this header from your applications.
 #endif
 
-#include "SDL.h"
+#include <SDL.h>
 
 /* SDL 1.2.4 defines this, but better safe than sorry. */
 #if (!defined(__inline__))

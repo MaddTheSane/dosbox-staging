@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2022  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -28,38 +28,11 @@
 #include <string>
 #include <sstream>
 
-#include "support.h"
-#include "mapper.h"
 #include "dosbox.h"
+#include "mapper.h"
+#include "math_utils.h"
+#include "program_more_output.h"
 #include "programs.h"
-
-void AUTOTYPE::PrintUsage()
-{
-	constexpr const char *msg =
-	        "\033[32;1mAUTOTYPE\033[0m [-list] [-w WAIT] [-p PACE] "
-	        "button_1 [button_2 [...]] \n\n"
-	        "Where:\n"
-	        "  -list:   prints all available button names.\n"
-	        "  -w WAIT: seconds before typing begins. Two second default; "
-	        "max of 30.\n"
-	        "  -p PACE: seconds between each keystroke. Half-second "
-	        "default; max of 10.\n"
-	        "\n"
-	        "  The sequence is comprised of one or more space-separated "
-	        "buttons.\n"
-	        "  Autotyping begins after WAIT seconds, and each button is "
-	        "entered \n"
-	        "  every PACE seconds. The , character inserts an extra PACE "
-	        "delay.\n"
-	        "\n"
-	        "Some examples:\n"
-	        "  \033[32;1mAUTOTYPE\033[0m -w 1 -p 0.3 up enter , right "
-	        "enter\n"
-	        "  \033[32;1mAUTOTYPE\033[0m -p 0.2 f1 kp_8 , , enter\n"
-	        "  \033[32;1mAUTOTYPE\033[0m -w 1.3 esc enter , p l a y e r "
-	        "enter\n";
-	WriteOut_NoParsing(msg);
-}
 
 // Prints the key-names for the mapper's currently-bound events.
 void AUTOTYPE::PrintKeys()
@@ -105,9 +78,9 @@ void AUTOTYPE::PrintKeys()
  */
 bool AUTOTYPE::ReadDoubleArg(const std::string &name,
                              const char *flag,
-                             const double &def_value,
-                             const double &min_value,
-                             const double &max_value,
+                             const double def_value,
+                             const double min_value,
+                             const double max_value,
                              double &value)
 {
 	bool result = false;
@@ -148,9 +121,10 @@ void AUTOTYPE::Run()
 	ChangeToLongCmd();
 
 	// Usage
-	if (!cmd->GetCount() || cmd->FindExist("-?", false) ||
-	    cmd->FindExist("-help", false)) {
-		PrintUsage();
+	if (!cmd->GetCount() || HelpRequested()) {
+		MoreOutputStrings output(*this);
+		output.AddString(MSG_Get("PROGRAM_AUTOTYPE_HELP_LONG"));
+		output.Display();
 		return;
 	}
 
@@ -188,7 +162,29 @@ void AUTOTYPE::Run()
 	MAPPER_AutoType(sequence, wait_ms, pace_ms);
 }
 
-void AUTOTYPE_ProgramStart(Program **make)
-{
-	*make = new AUTOTYPE;
+void AUTOTYPE::AddMessages() {
+	MSG_Add("PROGRAM_AUTOTYPE_HELP_LONG",
+	        "Performs scripted keyboard entry into a running DOS game.\n"
+	        "\n"
+	        "Usage:\n"
+	        "  [color=light-green]autotype[reset] -list\n"
+	        "  [color=light-green]autotype[reset] [-w [color=white]WAIT[reset]] [-p [color=white]PACE[reset]] [color=light-cyan]BUTTONS[reset]\n"
+	        "\n"
+	        "Where:\n"
+	        "  [color=white]WAIT[reset]    is the number of seconds to wait before typing begins (max of 30).\n"
+	        "  [color=white]PACE[reset]    is the number of seconds before each keystroke (max of 10).\n"
+	        "  [color=light-cyan]BUTTONS[reset] is one or more space-separated buttons.\n"
+	        "\n"
+	        "Notes:\n"
+	        "  The [color=light-cyan]BUTTONS[reset] supplied in the command will be autotyped into running DOS games\n"
+	        "  after they start. Autotyping begins after [color=light-cyan]WAIT[reset] seconds, and each button is\n"
+	        "  entered every [color=white]PACE[reset] seconds. The [color=light-cyan],[reset] character inserts an extra [color=white]PACE[reset] delay.\n"
+	        "  [color=white]WAIT[reset] and [color=white]PACE[reset] default to 2 and 0.5 seconds respectively if not specified.\n"
+	        "  A list of all available button names can be obtained using the -list option.\n"
+	        "\n"
+	        "Examples:\n"
+	        "  [color=light-green]autotype[reset] -list\n"
+	        "  [color=light-green]autotype[reset] -w [color=white]1[reset] -p [color=white]0.3[reset] [color=light-cyan]up enter , right enter[reset]\n"
+	        "  [color=light-green]autotype[reset] -p [color=white]0.2[reset] [color=light-cyan]f1 kp_8 , , enter[reset]\n"
+	        "  [color=light-green]autotype[reset] -w [color=white]1.3[reset] [color=light-cyan]esc enter , p l a y e r enter\n[reset]");
 }

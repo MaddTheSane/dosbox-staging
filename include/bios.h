@@ -112,8 +112,11 @@
 #define BIOS_DEFAULT_IRQ2_LOCATION		(RealMake(0xf000,0xff55))
 #define BIOS_DEFAULT_RESET_LOCATION		(RealMake(0xf000,(machine==MCH_PCJR)?0x0043:0xe05b))
 
-/* maximum of scancodes handled by keyboard bios routines */
-#define MAX_SCAN_CODE 0x58
+// The maximum "normal key" scancode value handled by keyboard bios routines.
+// This should match the maximum return value set in KEYBOARD_AddKey()'s switch
+// statement. The scan code is read from an 8-bit register (reg_al) and
+// therefore limited to handling 255 keys.
+constexpr uint8_t MAX_SCAN_CODE = 115;
 
 /* The Section handling Bios Disk Access */
 //#define BIOS_MAX_DISK 10
@@ -121,7 +124,7 @@
 //#define MAX_SWAPPABLE_DISKS 20
 
 void BIOS_ZeroExtendedSize(bool in);
-void char_out(Bit8u chr,Bit32u att,Bit8u page);
+void char_out(uint8_t chr,uint32_t att,uint8_t page);
 void INT10_StartUp(void);
 void INT16_StartUp(void);
 void INT2A_StartUp(void);
@@ -129,11 +132,11 @@ void INT2F_StartUp(void);
 void INT33_StartUp(void);
 void INT13_StartUp(void);
 
-bool BIOS_AddKeyToBuffer(Bit16u code);
+bool BIOS_AddKeyToBuffer(uint16_t code);
 
 void INT10_ReloadRomFonts();
 
-void BIOS_SetComPorts (Bit16u baseaddr[]);
-void BIOS_SetLPTPort(Bitu port, Bit16u baseaddr);
+void BIOS_SetComPorts (uint16_t baseaddr[]);
+void BIOS_SetLPTPort(Bitu port, uint16_t baseaddr);
 
 #endif

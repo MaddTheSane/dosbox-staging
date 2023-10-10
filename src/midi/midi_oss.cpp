@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2021-2021  The DOSBox Staging Team
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -58,29 +58,33 @@ bool MidiHandler_oss::Open(const char *conf)
 
 void MidiHandler_oss::Close()
 {
-	if (!is_open)
+	if (!is_open) {
 		return;
+	}
 
-	HaltSequence();
+	Reset();
 
 	close(device);
 	is_open = false;
 }
 
-void MidiHandler_oss::PlayMsg(const uint8_t *msg)
+void MidiHandler_oss::PlayMsg(const MidiMessage& msg)
 {
-	const uint8_t len = MIDI_evt_len[*msg];
+	const auto len = MIDI_message_len_by_status[msg.status()];
+
 	uint8_t buf[128];
 	assert(len * 4 <= sizeof(buf));
 	size_t pos = 0;
 	for (uint8_t i = 0; i < len; i++) {
 		buf[pos++] = SEQ_MIDIPUTC;
-		buf[pos++] = *msg;
+		buf[pos++] = msg[i];
 		buf[pos++] = device_num;
 		buf[pos++] = 0;
-		msg++;
 	}
-	write(device, buf, pos);
+	const auto rcode = write(device, buf, pos);
+	if (!rcode) {
+		LOG_WARNING("MIDI:OSS: Failed to play message");
+	}
 }
 
 void MidiHandler_oss::PlaySysex(uint8_t *sysex, size_t len)
@@ -94,5 +98,8 @@ void MidiHandler_oss::PlaySysex(uint8_t *sysex, size_t len)
 		buf[pos++] = device_num;
 		buf[pos++] = 0;
 	}
-	write(device, buf, pos);
+	const auto rcode = write(device, buf, pos);
+	if (!rcode) {
+		LOG_WARNING("MIDI:OSS: Failed to write SysEx message");
+	}
 }

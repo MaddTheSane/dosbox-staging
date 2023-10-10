@@ -35,16 +35,16 @@
 class device_LPT : public DOS_Device {
 public:
 	// Creates a LPT device that communicates with the num-th parallel port, i.e. is LPTnum
-	device_LPT(Bit8u num, class CParallel* pp);
+	device_LPT(uint8_t num, class CParallel* pp);
 	~device_LPT();
-	bool Read(Bit8u * data,Bit16u * size);
-	bool Write(Bit8u * data,Bit16u * size);
-	bool Seek(Bit32u * pos,Bit32u type);
+	bool Read(uint8_t * data,uint16_t * size);
+	bool Write(uint8_t * data,uint16_t * size);
+	bool Seek(uint32_t * pos,uint32_t type);
 	bool Close();
-	Bit16u GetInformation(void);
+	uint16_t GetInformation(void);
 private:
 	CParallel* pportclass;
-	Bit8u num; // This device is LPTnum
+	uint8_t num; // This device is LPTnum
 };
 
 
@@ -61,17 +61,17 @@ public:
 #endif
 
 	// Constructor
-	CParallel(CommandLine* cmd, Bitu portnr, Bit8u initirq);
+	CParallel(CommandLine* cmd, Bitu portnr, uint8_t initirq);
 	
 	virtual ~CParallel();
 
 	IO_ReadHandleObject ReadHandler[3];
 	IO_WriteHandleObject WriteHandler[3];
 
-	void setEvent(Bit16u type, float duration);
-	void removeEvent(Bit16u type);
-	void handleEvent(Bit16u type);
-	virtual void handleUpperEvent(Bit16u type)=0;
+	void setEvent(uint16_t type, float duration);
+	void removeEvent(uint16_t type);
+	void handleEvent(uint16_t type);
+	virtual void handleUpperEvent(uint16_t type)=0;
 	
 	Bitu port_nr;
 	Bitu base;
@@ -86,11 +86,11 @@ public:
 	virtual void Write_CON(Bitu)=0;
 	virtual void Write_IOSEL(Bitu)=0;
 
-	void Write_reserved(Bit8u data, Bit8u address);
+	void Write_reserved(uint8_t data, uint8_t address);
 
-	virtual bool Putchar(Bit8u)=0;
-	bool Putchar_default(Bit8u);
-	Bit8u getPrinterStatus();
+	virtual bool Putchar(uint8_t)=0;
+	bool Putchar_default(uint8_t);
+	uint8_t getPrinterStatus();
 	void initialize();
 	
 
@@ -103,7 +103,7 @@ private:
 extern CParallel* parallelPortObjects[];
 void PARALLEL_Init (Section * sec);
 
-const Bit16u parallel_baseaddr[3] = {0x378,0x278,0x3bc};
+const uint16_t parallel_baseaddr[3] = {0x378,0x278,0x3bc};
 
 #endif
 

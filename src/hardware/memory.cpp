@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2023-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -16,54 +17,58 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
-#include "dosbox.h"
 #include "mem.h"
-#include "inout.h"
-#include "setup.h"
-#include "paging.h"
-#include "regs.h"
 
 #include <string.h>
 
-#define PAGES_IN_BLOCK	((1024*1024)/MEM_PAGE_SIZE)
-#define SAFE_MEMORY	32
-#define MAX_MEMORY	64
-#define MAX_PAGE_ENTRIES (MAX_MEMORY*1024*1024/4096)
-#define LFB_PAGES	512
-#define MAX_LINKS	((MAX_MEMORY*1024/4)+4096)		//Hopefully enough
+#include "inout.h"
+#include "paging.h"
+#include "pci_bus.h"
+#include "regs.h"
+#include "setup.h"
+#include "support.h"
 
-struct LinkBlock {
-	Bitu used;
-	Bit32u pages[MAX_LINKS];
-};
+constexpr auto megabyte = 1024 * 1024;
+
+constexpr auto MinMegabytes = static_cast<uint16_t>(1);
+constexpr auto MaxMegabytes = static_cast<uint16_t>(PciMemoryBase / megabyte);
+
+constexpr auto SafeMegabytesDos   = 31;
+constexpr auto SafeMegabytesWin95 = 480;
+constexpr auto SafeMegabytesWin98 = 512;
 
 static struct MemoryBlock {
-	Bitu pages;
-	PageHandler * * phandlers;
-	MemHandle * mhandles;
-	LinkBlock links;
-	struct	{
-		Bitu		start_page;
-		Bitu		end_page;
-		Bitu		pages;
-		PageHandler *handler;
-		PageHandler *mmiohandler;
-	} lfb;
+	struct page_t {
+		uint8_t bytes[dos_pagesize] = {};
+	};
+	std::vector<page_t> pages           = {};
+	std::vector<PageHandler*> phandlers = {};
+	std::vector<MemHandle> mhandles     = {};
 	struct {
-		bool enabled;
-		Bit8u controlport;
-	} a20;
-} memory;
+		Bitu start_page = 0;
+		Bitu end_page   = 0;
+		Bitu pages      = 0;
 
-HostPt MemBase;
+		PageHandler* handler     = {};
+		PageHandler* mmiohandler = {};
+	} lfb = {};
+	struct {
+		bool enabled = false;
+
+		uint8_t controlport = 0;
+	} a20 = {};
+} memory = {};
+
+// Points to the first byte of the first DOS memory page
+HostPt MemBase = {};
 
 class IllegalPageHandler final : public PageHandler {
 public:
 	IllegalPageHandler() {
 		flags=PFLAG_INIT|PFLAG_NOCODE;
 	}
-	Bitu readb(PhysPt addr) {
+	uint8_t readb(PhysPt addr) override
+	{
 #if C_DEBUG
 		LOG_MSG("Illegal read from %x, CS:IP %8x:%8x",addr,SegValue(cs),reg_eip);
 #else
@@ -75,7 +80,7 @@ public:
 #endif
 		return 0xff;
 	}
-	void writeb(PhysPt addr, MAYBE_UNUSED Bitu val)
+	void writeb(PhysPt addr, [[maybe_unused]] uint8_t val) override
 	{
 #if C_DEBUG
 		LOG_MSG("Illegal write to %x, CS:IP %8x:%8x",addr,SegValue(cs),reg_eip);
@@ -94,11 +99,15 @@ public:
 	RAMPageHandler() {
 		flags=PFLAG_READABLE|PFLAG_WRITEABLE;
 	}
-	HostPt GetHostReadPt(Bitu phys_page) {
-		return MemBase+phys_page*MEM_PAGESIZE;
+	// Get the starting byte address for the give page
+	HostPt GetHostReadPt(const size_t phys_page) override
+	{
+		assert(phys_page < memory.pages.size());
+		return &(memory.pages[phys_page].bytes[0]);
 	}
-	HostPt GetHostWritePt(Bitu phys_page) {
-		return MemBase+phys_page*MEM_PAGESIZE;
+	HostPt GetHostWritePt(const size_t phys_page) override
+	{
+		return GetHostReadPt(phys_page); // same
 	}
 };
 
@@ -107,18 +116,26 @@ public:
 	ROMPageHandler() {
 		flags=PFLAG_READABLE|PFLAG_HASROM;
 	}
-	void writeb(PhysPt addr,Bitu val){
-		LOG(LOG_CPU,LOG_ERROR)("Write %" sBitfs(x) " to rom at %x",val,addr);
+	void writeb(PhysPt addr,uint8_t val) override{
+		LOG(LOG_CPU, LOG_ERROR)("Write 0x%x to rom at %x", val, addr);
 	}
-	void writew(PhysPt addr,Bitu val){
-		LOG(LOG_CPU,LOG_ERROR)("Write %" sBitfs(x) " to rom at %x",val,addr);
+	void writew(PhysPt addr,uint16_t val) override{
+		LOG(LOG_CPU, LOG_ERROR)("Write 0x%x to rom at %x", val, addr);
 	}
-	void writed(PhysPt addr,Bitu val){
-		LOG(LOG_CPU,LOG_ERROR)("Write %" sBitfs(x) " to rom at %x",val,addr);
+	void writed(PhysPt addr,uint32_t val) override{
+		LOG(LOG_CPU, LOG_ERROR)("Write 0x%x to rom at %x", val, addr);
 	}
 };
 
+uint16_t MEM_GetMinMegabytes()
+{
+	return MinMegabytes;
+}
 
+uint16_t MEM_GetMaxMegabytes()
+{
+	return MaxMegabytes;
+}
 
 static IllegalPageHandler illegal_page_handler;
 static RAMPageHandler ram_page_handler;
@@ -134,13 +151,25 @@ void MEM_SetLFB(Bitu page, Bitu pages, PageHandler *handler, PageHandler *mmioha
 }
 
 PageHandler * MEM_GetPageHandler(Bitu phys_page) {
-	if (phys_page<memory.pages) {
+	if (phys_page < memory.pages.size()) {
 		return memory.phandlers[phys_page];
-	} else if ((phys_page>=memory.lfb.start_page) && (phys_page<memory.lfb.end_page)) {
+	}
+	if (phys_page >= memory.lfb.start_page && phys_page < memory.lfb.end_page) {
 		return memory.lfb.handler;
-	} else if ((phys_page>=memory.lfb.start_page+0x01000000/4096) &&
-				(phys_page<memory.lfb.start_page+0x01000000/4096+16)) {
+	}
+
+	constexpr uint32_t pages_in_16mb = {0x01000000u / dos_pagesize};
+	const auto last_page_in_first_16mb = memory.lfb.start_page + pages_in_16mb;
+	const auto sixteen_pages_beyond_first_16mb = last_page_in_first_16mb + 16u;
+
+	if (phys_page >= last_page_in_first_16mb &&
+	    phys_page < sixteen_pages_beyond_first_16mb) {
 		return memory.lfb.mmiohandler;
+	} else {
+		PageHandler* VOODOO_PCI_GetLFBPageHandler(Bitu);
+		if (PageHandler* vph = VOODOO_PCI_GetLFBPageHandler(phys_page)) {
+			return vph;
+		}
 	}
 	return &illegal_page_handler;
 }
@@ -169,7 +198,7 @@ Bitu mem_strlen(PhysPt pt) {
 }
 
 void mem_strcpy(PhysPt dest,PhysPt src) {
-	Bit8u r;
+	uint8_t r;
 	while ( (r = mem_readb(src++)) ) mem_writeb_inline(dest++,r);
 	mem_writeb_inline(dest,0);
 }
@@ -179,7 +208,7 @@ void mem_memcpy(PhysPt dest,PhysPt src,Bitu size) {
 }
 
 void MEM_BlockRead(PhysPt pt,void * data,Bitu size) {
-	Bit8u * write=reinterpret_cast<Bit8u *>(data);
+	uint8_t * write=reinterpret_cast<uint8_t *>(data);
 	while (size--) {
 		*write++=mem_readb_inline(pt++);
 	}
@@ -199,61 +228,68 @@ void MEM_BlockCopy(PhysPt dest,PhysPt src,Bitu size) {
 
 void MEM_StrCopy(PhysPt pt,char * data,Bitu size) {
 	while (size--) {
-		Bit8u r=mem_readb_inline(pt++);
+		uint8_t r=mem_readb_inline(pt++);
 		if (!r) break;
 		*data++=r;
 	}
 	*data=0;
 }
 
-Bitu MEM_TotalPages(void) {
-	return memory.pages;
+uint32_t MEM_TotalPages(void)
+{
+	return check_cast<uint32_t>(memory.pages.size());
 }
 
-Bitu MEM_FreeLargest(void) {
-	Bitu size=0;Bitu largest=0;
-	Bitu index=XMS_START;	
-	while (index<memory.pages) {
+uint32_t MEM_FreeLargest()
+{
+	uint32_t size    = 0;
+	uint32_t largest = 0;
+	size_t   index   = XMS_START;
+	while (index < memory.pages.size()) {
 		if (!memory.mhandles[index]) {
-			size++;
+			++size;
 		} else {
-			if (size>largest) largest=size;
-			size=0;
+			largest = std::max(size, largest);
+			size = 0;
 		}
-		index++;
+		++index;
 	}
-	if (size>largest) largest=size;
+	largest = std::max(size, largest);
 	return largest;
 }
 
-Bitu MEM_FreeTotal(void) {
-	Bitu free=0;
-	Bitu index=XMS_START;	
-	while (index<memory.pages) {
-		if (!memory.mhandles[index]) free++;
-		index++;
+uint32_t MEM_FreeTotal()
+{
+	uint32_t free  = 0;
+	size_t   index = XMS_START;
+	while (index < memory.pages.size()) {
+		if (!memory.mhandles[index]) {
+			++free;
+		}
+		++index;
 	}
 	return free;
 }
 
-Bitu MEM_AllocatedPages(MemHandle handle) 
+uint32_t MEM_AllocatedPages(MemHandle handle) 
 {
-	Bitu pages = 0;
-	while (handle>0) {
-		pages++;
-		handle=memory.mhandles[handle];
+	uint32_t pages = 0;
+	while (handle > 0) {
+		++pages;
+		assert(pages != 0);
+		handle = memory.mhandles[handle];
 	}
 	return pages;
 }
 
 //TODO Maybe some protection for this whole allocation scheme
 
-INLINE Bitu BestMatch(Bitu size) {
+inline Bitu BestMatch(Bitu size) {
 	Bitu index=XMS_START;	
 	Bitu first=0;
 	Bitu best=0xfffffff;
 	Bitu best_first=0;
-	while (index<memory.pages) {
+	while (index < memory.pages.size()) {
 		/* Check if we are searching for first free page */
 		if (!first) {
 			/* Check if this is a free page */
@@ -368,8 +404,10 @@ bool MEM_ReAllocatePages(MemHandle & handle,Bitu pages,bool sequence) {
 		if (sequence) {
 			index=last+1;
 			Bitu free=0;
-			while ((index<(MemHandle)memory.pages) && !memory.mhandles[index]) {
-				index++;free++;
+			while (static_cast<uint32_t>(index) < memory.pages.size() &&
+			       !memory.mhandles[index]) {
+				index++;
+				free++;
 			}
 			if (free>=need) {
 				/* Enough space allocate more pages */
@@ -420,22 +458,38 @@ bool MEM_A20_Enabled(void) {
 	return memory.a20.enabled;
 }
 
-void MEM_A20_Enable(bool enabled) {
-	Bitu phys_base=enabled ? (1024/4) : 0;
-	for (Bitu i=0;i<16;i++) PAGING_MapPage((1024/4)+i,phys_base+i);
-	memory.a20.enabled=enabled;
+// Use this function for initialization since the public 
+// function is optimized to return on the same state, and
+// we need the page mappings initialized for disabled.
+static void InitA20() {
+	memory.a20.enabled = true;
+	MEM_A20_Enable(false);
 }
 
+void MEM_A20_Enable(bool enabled) {
+	// Is A20 already in the requested state?
+	if (memory.a20.enabled == enabled) {
+		return;
+	}
+	constexpr uint32_t a20_base_page = megabyte / dos_pagesize;
+
+	const uint32_t phys_base_page = enabled ? a20_base_page : 0;
+
+	for (uint8_t page = 0; page < 16; ++page) {
+		PAGING_MapPage(a20_base_page + page, phys_base_page + page);
+	}
+	memory.a20.enabled = enabled;
+}
 
 /* Memory access functions */
-Bit16u mem_unalignedreadw(PhysPt address) {
-	Bit16u ret = mem_readb_inline(address);
+uint16_t mem_unalignedreadw(PhysPt address) {
+	uint16_t ret = mem_readb_inline(address);
 	ret       |= mem_readb_inline(address+1) << 8;
 	return ret;
 }
 
-Bit32u mem_unalignedreadd(PhysPt address) {
-	Bit32u ret = mem_readb_inline(address);
+uint32_t mem_unalignedreadd(PhysPt address) {
+	uint32_t ret = mem_readb_inline(address);
 	ret       |= mem_readb_inline(address+1) << 8;
 	ret       |= mem_readb_inline(address+2) << 16;
 	ret       |= mem_readb_inline(address+3) << 24;
@@ -443,20 +497,20 @@ Bit32u mem_unalignedreadd(PhysPt address) {
 }
 
 
-void mem_unalignedwritew(PhysPt address,Bit16u val) {
-	mem_writeb_inline(address,(Bit8u)val);val>>=8;
-	mem_writeb_inline(address+1,(Bit8u)val);
+void mem_unalignedwritew(PhysPt address,uint16_t val) {
+	mem_writeb_inline(address,(uint8_t)val);val>>=8;
+	mem_writeb_inline(address+1,(uint8_t)val);
 }
 
-void mem_unalignedwrited(PhysPt address,Bit32u val) {
-	mem_writeb_inline(address,(Bit8u)val);val>>=8;
-	mem_writeb_inline(address+1,(Bit8u)val);val>>=8;
-	mem_writeb_inline(address+2,(Bit8u)val);val>>=8;
-	mem_writeb_inline(address+3,(Bit8u)val);
+void mem_unalignedwrited(PhysPt address,uint32_t val) {
+	mem_writeb_inline(address,(uint8_t)val);val>>=8;
+	mem_writeb_inline(address+1,(uint8_t)val);val>>=8;
+	mem_writeb_inline(address+2,(uint8_t)val);val>>=8;
+	mem_writeb_inline(address+3,(uint8_t)val);
 }
 
 
-bool mem_unalignedreadw_checked(PhysPt address, Bit16u * val) {
+bool mem_unalignedreadw_checked(PhysPt address, uint16_t * val) {
 	uint8_t rval1;
 	if (mem_readb_checked(address + 0, &rval1))
 		return true;
@@ -469,7 +523,7 @@ bool mem_unalignedreadw_checked(PhysPt address, Bit16u * val) {
 	return false;
 }
 
-bool mem_unalignedreadd_checked(PhysPt address, Bit32u * val) {
+bool mem_unalignedreadd_checked(PhysPt address, uint32_t * val) {
 	uint8_t rval1;
 	if (mem_readb_checked(address+0, &rval1)) return true;
 
@@ -489,50 +543,51 @@ bool mem_unalignedreadd_checked(PhysPt address, Bit32u * val) {
 	return false;
 }
 
-bool mem_unalignedwritew_checked(PhysPt address, Bit16u val) {
-	if (mem_writeb_checked(address+0, (Bit8u)(val & 0xff))) return true;
+bool mem_unalignedwritew_checked(PhysPt address, uint16_t val) {
+	if (mem_writeb_checked(address+0, (uint8_t)(val & 0xff))) return true;
 	val >>= 8;
-	if (mem_writeb_checked(address+1, (Bit8u)(val & 0xff))) return true;
+	if (mem_writeb_checked(address+1, (uint8_t)(val & 0xff))) return true;
 	return false;
 }
 
-bool mem_unalignedwrited_checked(PhysPt address, Bit32u val) {
-	if (mem_writeb_checked(address+0, (Bit8u)(val & 0xff))) return true;
+bool mem_unalignedwrited_checked(PhysPt address, uint32_t val) {
+	if (mem_writeb_checked(address+0, (uint8_t)(val & 0xff))) return true;
 	val >>= 8;
-	if (mem_writeb_checked(address+1, (Bit8u)(val & 0xff))) return true;
+	if (mem_writeb_checked(address+1, (uint8_t)(val & 0xff))) return true;
 	val >>= 8;
-	if (mem_writeb_checked(address+2, (Bit8u)(val & 0xff))) return true;
+	if (mem_writeb_checked(address+2, (uint8_t)(val & 0xff))) return true;
 	val >>= 8;
-	if (mem_writeb_checked(address+3, (Bit8u)(val & 0xff))) return true;
+	if (mem_writeb_checked(address+3, (uint8_t)(val & 0xff))) return true;
 	return false;
 }
 
-Bit8u mem_readb(PhysPt address) {
+uint8_t mem_readb(PhysPt address) {
 	return mem_readb_inline(address);
 }
 
-Bit16u mem_readw(PhysPt address) {
+uint16_t mem_readw(PhysPt address) {
 	return mem_readw_inline(address);
 }
 
-Bit32u mem_readd(PhysPt address) {
+uint32_t mem_readd(PhysPt address) {
 	return mem_readd_inline(address);
 }
 
-void mem_writeb(PhysPt address,Bit8u val) {
+void mem_writeb(PhysPt address,uint8_t val) {
 	mem_writeb_inline(address,val);
 }
 
-void mem_writew(PhysPt address,Bit16u val) {
+void mem_writew(PhysPt address,uint16_t val) {
 	mem_writew_inline(address,val);
 }
 
-void mem_writed(PhysPt address,Bit32u val) {
+void mem_writed(PhysPt address,uint32_t val) {
 	mem_writed_inline(address,val);
 }
 
-static void write_p92(io_port_t, uint8_t val, io_width_t)
+static void write_p92(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	// Bit 0 = system reset (switch back to real mode)
 	if (val&1) E_Exit("XMS: CPU reset via port 0x92 not supported.");
 	memory.a20.controlport = val & ~2;
@@ -560,97 +615,101 @@ void MEM_PreparePCJRCartRom()
 	}
 }
 
-HostPt GetMemBase(void) { return MemBase; }
+static void check_num_megabytes(const int num_megabytes)
+{
+	assert(num_megabytes >= MinMegabytes);
+	assert(num_megabytes <= MaxMegabytes);
+
+	if (num_megabytes > SafeMegabytesDos) {
+		LOG_WARNING("MEMORY: Memory sizes above %d MB aren't recommended for most DOS games",
+		            SafeMegabytesDos);
+	}
+	if (num_megabytes > SafeMegabytesWin95) {
+		LOG_WARNING("MEMORY: Memory sizes above %d/%d MB aren't compatible with unpatched Windows 95/98, respectively",
+		            SafeMegabytesWin95,
+		            SafeMegabytesWin98);
+		// Limitation can be lifted with PATCHMEM by Rudolph R. Loew
+	}
+}
+
+HostPt GetMemBase(void)
+{
+	return MemBase;
+}
 
 class MEMORY final : public Module_base {
 private:
-	IO_ReadHandleObject ReadHandler{};
-	IO_WriteHandleObject WriteHandler{};
+	IO_ReadHandleObject ReadHandler   = {};
+	IO_WriteHandleObject WriteHandler = {};
 
 public:
 	MEMORY(Section *configuration) : Module_base(configuration)
 	{
-		Bitu i;
-		Section_prop * section=static_cast<Section_prop *>(configuration);
-	
-		/* Setup the Physical Page Links */
-		auto memsize = static_cast<uint16_t>(section->Get_int("memsize"));
+		// Get the users memory size preference
+		const auto section = static_cast<Section_prop*>(configuration);
+		const auto num_megabytes = section->Get_int("memsize");
+		check_num_megabytes(num_megabytes);
+		const auto num_pages = (num_megabytes * megabyte) / dos_pagesize;
 
-		if (memsize < 1) memsize = 1;
-		/* max 63 to solve problems with certain xms handlers */
-		if (memsize > MAX_MEMORY - 1) {
-			LOG_MSG("Maximum memory size is %d MB",MAX_MEMORY - 1);
-			memsize = MAX_MEMORY - 1;
-		}
-		if (memsize > SAFE_MEMORY - 1) {
-			LOG_MSG("Memory sizes above %d MB are NOT recommended.",SAFE_MEMORY - 1);
-			LOG_MSG("Stick with the default values unless you are absolutely certain.");
-		}
-		MemBase = new (std::nothrow) Bit8u[memsize * 1024 * 1024];
-		if (!MemBase) {
-			E_Exit("Can't allocate main memory of %u MB", memsize);
-		}
-		memset((void*)MemBase, 0, memsize * 1024 * 1024);
-		memory.pages = (memsize * 1024 * 1024) / 4096;
-		LOG_MSG("MEMORY: Base address: %p", static_cast<void *>(MemBase));
-		LOG_MSG("MEMORY: Using %d DOS memory pages (%u MiB)",
-		        static_cast<int>(memory.pages), memsize);
+		// Size the actual memory pages
+		memory.pages.resize(num_pages);
 
-		/* Allocate the data for the different page information blocks */
-		memory.phandlers = new (std::nothrow) PageHandler * [memory.pages];
-		if (!memory.phandlers) {
-			E_Exit("Can't allocate %" PRIuPTR " bytes for the PageHandler array",
-			       sizeof(PageHandler*) * memory.pages);
-		}
+		// The MemBase is address of the the first page's first byte
+		MemBase = &(memory.pages[0].bytes[0]);
 
-		memory.mhandles = new (std::nothrow) MemHandle [memory.pages];
-		if (!memory.mhandles) {
-			E_Exit("Can't allocate %" PRIuPTR " bytes worth of memory handles",
-			       sizeof(MemHandle) * memory.pages);
-		}
+		LOG_MSG("MEMORY: Using %d DOS memory pages (%u MB) at address: %p",
+		        static_cast<int>(memory.pages.size()),
+		        num_megabytes,
+		        static_cast<void*>(MemBase));
 
-		for (i = 0; i < memory.pages; i++) {
-			memory.phandlers[i] = &ram_page_handler;
-			memory.mhandles[i] = 0;				//Set to 0 for memory allocation
-		}
-		/* Setup rom at 0xc0000-0xc8000 */
-		for (i=0xc0;i<0xc8;i++) {
-			memory.phandlers[i] = &rom_page_handler;
-		}
-		/* Setup rom at 0xf0000-0x100000 */
-		for (i=0xf0;i<0x100;i++) {
-			memory.phandlers[i] = &rom_page_handler;
-		}
-		if (machine==MCH_PCJR) {
-			/* Setup cartridge rom at 0xe0000-0xf0000 */
-			for (i=0xe0;i<0xf0;i++) {
-				memory.phandlers[i] = &rom_page_handler;
+		// Setup the page handlers, defaulting to the RAM handler
+		memory.phandlers.clear();
+		memory.phandlers.resize(num_pages, &ram_page_handler);
+
+		// Setup the memory handers, defaulting to 0 which means
+		// memory-allocation
+		memory.mhandles.clear();
+		memory.mhandles.resize(num_pages, 0);
+
+		using page_range_t = std::pair<uint16_t, uint16_t>;
+		auto install_rom_page_handlers = [&](const page_range_t& page_range) {
+			for (auto p = page_range.first; p < page_range.second; ++p) {
+				memory.phandlers.at(p) = &rom_page_handler;
 			}
+		};
+
+		// Setup ROM page handers between 0xc0000-0xc8000
+		constexpr page_range_t xt_rom_range = {0xc0, 0xc8};
+		install_rom_page_handlers(xt_rom_range);
+
+		// Setup ROM page handlers between 0xf0000-0x100000
+		constexpr page_range_t pc_rom_range = {0xf0, 0x100};
+		install_rom_page_handlers(pc_rom_range);
+
+		// Setup PCjr Cartridge ROM page handlers between 0xe0000-0xf0000
+		if (machine == MCH_PCJR) {
+			constexpr page_range_t pcjr_rom_range = {0xe0, 0xf0};
+			install_rom_page_handlers(pcjr_rom_range);
 		}
-		/* Reset some links */
-		memory.links.used = 0;
+
 		// A20 Line - PS/2 system control port A
 		WriteHandler.Install(0x92, write_p92, io_width_t::byte);
 		ReadHandler.Install(0x92, read_p92, io_width_t::byte);
-		MEM_A20_Enable(false);
-	}
-
-	~MEMORY()
-	{
-		delete [] MemBase;
-		delete [] memory.phandlers;
-		delete [] memory.mhandles;
+		InitA20();
 	}
 };
 
 static MEMORY* test;
 
-static void MEM_ShutDown(MAYBE_UNUSED Section *sec)
+static void MEM_ShutDown([[maybe_unused]] Section *sec)
 {
 	delete test;
 }
 
-void MEM_Init(Section * sec) {
+void MEM_Init(Section* sec)
+{
+	assert(sec);
+
 	/* shutdown function */
 	test = new MEMORY(sec);
 	sec->AddDestroyFunction(&MEM_ShutDown);

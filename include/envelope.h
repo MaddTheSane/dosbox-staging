@@ -1,8 +1,8 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
- *  Copyright (C) 2019-2021  Kevin R. Croft <krcroft@gmail.com>
+ *  Copyright (C) 2020-2022  The DOSBox Staging Team
+ *  Copyright (C) 2019-2021  kcgen <kcgen@users.noreply.github.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -58,20 +58,19 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
+
+typedef struct AudioFrame AudioFrame_;
 
 class Envelope {
 public:
 	Envelope(const char* name);
 
-	void Process(bool is_stereo,
-	             bool is_interpolated,
-	             intptr_t prev[],
-	             intptr_t next[]);
+	void Process(const bool is_stereo, AudioFrame &frame);
 
-	void Update(uint32_t frame_rate,
-	            uint32_t peak_amplitude,
-	            uint8_t expansion_phase_ms,
-	            uint8_t expire_after_seconds);
+	void Update(const int frame_rate, const int peak_amplitude,
+	            const uint8_t expansion_phase_ms,
+	            const uint8_t expire_after_seconds);
 
 	void Reactivate();
 
@@ -79,32 +78,30 @@ private:
 	Envelope(const Envelope &) = delete;            // prevent copying
 	Envelope &operator=(const Envelope &) = delete; // prevent assignment
 
-	bool ClampSample(intptr_t &sample, intptr_t next_edge);
+	bool ClampSample(float &sample, float next_edge);
 
-	void Apply(bool is_stereo,
-	           bool is_interpolated,
-	           intptr_t prev[],
-	           intptr_t next[]);
+	void Apply(const bool is_stereo, AudioFrame &frame);
 
-	void Skip(MAYBE_UNUSED bool is_stereo,
-	          MAYBE_UNUSED bool is_interpolated,
-	          MAYBE_UNUSED intptr_t prev[],
-	          MAYBE_UNUSED intptr_t next[])
+	void Skip([[maybe_unused]] bool is_stereo, [[maybe_unused]] AudioFrame &frame)
 	{}
 
-	using process_f = std::function<void(Envelope &, bool, bool, intptr_t[], intptr_t[])>;
+	using process_f = std::function<void(Envelope &, const bool, AudioFrame &)>;
 	process_f process = &Envelope::Apply;
 
-	const char *channel_name = nullptr;
-	uint32_t expire_after_frames = 0u; // Stop enveloping when this many
-	                                   // frames have been processed.
-	uint32_t frames_done = 0u; // A tally of processed frames.
-	uint16_t edge = 0u; // The current edge of the envelope, which
-	                    // increments outward when samples press against it.
-	uint16_t edge_increment = 0u; // The amount the edge grows by once a
-	                              // sample is found to be beyond it.
-	uint16_t edge_limit = 0u; // Stop enveloping when the current edge is
-	                          // hits or exceeds this limit.
+	std::string channel_name = {};
+
+	int expire_after_frames = 0; // Stop enveloping when this many
+	                             // frames have been processed.
+
+	int frames_done = 0; // A tally of processed frames.
+
+	float edge = 0.0f;           // The current edge of the envelope, which
+	                             // increments outward when samples press
+	                             // against it.
+	float edge_increment = 0.0f; // The amount the edge grows by once a
+	                             // sample is found to be beyond it.
+	float edge_limit = 0.0f;     // Stop enveloping when the current edge is
+	                             // hits or exceeds this limit.
 };
 
 #endif

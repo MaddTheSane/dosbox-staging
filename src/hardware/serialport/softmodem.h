@@ -42,6 +42,11 @@
 #define MODEM_RING_EVENT SERIAL_BASE_EVENT_COUNT + 3
 #define SERIAL_MODEM_EVENT_COUNT SERIAL_BASE_EVENT_COUNT+3
 
+#define MODEM_TICKRATE 1000 // Ticks per second
+#define MODEM_TICKTIME (1000 / MODEM_TICKRATE) // Tick interval in milliseconds
+#define MODEM_RINGINTERVAL (3000 / MODEM_TICKTIME)
+#define MODEM_WARMUP_DELAY_MS (250 / MODEM_TICKTIME)
+
 
 enum ResTypes {
 	ResNONE,
@@ -58,7 +63,7 @@ enum ResTypes {
 #define TEL_CLIENT 0
 #define TEL_SERVER 1
 
-bool MODEM_ReadPhonebook(const std::string &filename);
+bool MODEM_ReadPhonebook(const std_fs::path &path);
 void MODEM_ClearPhonebook();
 
 class CFifo {
@@ -173,7 +178,7 @@ private:
 class CSerialModem final : public CSerial {
 public:
 	CSerialModem(const uint8_t port_idx, CommandLine *cmd);
-	~CSerialModem();
+	~CSerialModem() override;
 	void Reset();
 
 	void SendLine(const char *line);
@@ -193,21 +198,21 @@ public:
 
 	void TelnetEmulation(uint8_t *data, uint32_t size);
 
-	//TODO
+	void Echo(uint8_t ch);
 	void Timer2();
-	void handleUpperEvent(uint16_t type);
+	void handleUpperEvent(uint16_t type) override;
 
 	void RXBufferEmpty();
 
-	void transmitByte(uint8_t val, bool first);
-	void updatePortConfig(uint16_t divider, uint8_t lcr);
-	void updateMSR();
+	void transmitByte(uint8_t val, bool first) override;
+	void updatePortConfig(uint16_t divider, uint8_t lcr) override;
+	void updateMSR() override;
 
-	void setBreak(bool);
+	void setBreak(bool) override;
 
-	void setRTSDTR(bool rts, bool dtr);
-	void setRTS(bool val);
-	void setDTR(bool val);
+	void setRTSDTR(bool rts, bool dtr) override;
+	void setRTS(bool val) override;
+	void setDTR(bool val) override;
 
 	std::unique_ptr<CFifo> rqueue;
 	std::unique_ptr<CFifo> tqueue;
@@ -227,6 +232,7 @@ protected:
 	                              // false: send text (i.e. NO DIALTONE)
 	bool telnet_mode = false; // Default to direct null modem connection;
 	                         // Telnet mode interprets IAC
+	char connect_string[14] = {"CONNECT 57600"}; // default connect string
 	bool connected = false;
 	uint32_t doresponse = 0;
 	uint8_t waiting_tx_character = 0;
@@ -238,12 +244,14 @@ protected:
 	uint32_t flowcontrol = 0;
 	uint32_t dtrmode = 0;
 	int32_t dtrofftimer = 0;
+	int32_t warmup_remain_ticks = 0;
 	uint8_t tmpbuf[MODEM_BUFFER_QUEUE_SIZE] = {0};
 	uint16_t listenport = 23; // 23 is the default telnet TCP/IP port
 	uint8_t reg[SREGS] = {0};
-	std::unique_ptr<TCPServerSocket> serversocket = nullptr;
-	std::unique_ptr<TCPClientSocket> clientsocket = nullptr;
-	std::unique_ptr<TCPClientSocket> waitingclientsocket = nullptr;
+	SocketType socketType = SocketType::Tcp;
+	std::unique_ptr<NETServerSocket> serversocket = nullptr;
+	std::unique_ptr<NETClientSocket> clientsocket = nullptr;
+	std::unique_ptr<NETClientSocket> waitingclientsocket = nullptr;
 
 	struct {
 		bool binary[2] = {false};

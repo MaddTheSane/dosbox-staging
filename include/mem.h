@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2019-2021  The DOSBox Staging Team
+ *  Copyright (C) 2019-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -28,25 +28,28 @@
 #include "mem_unaligned.h"
 #include "types.h"
 
+constexpr uint16_t MemPageSize = 4096;
+
 typedef uint32_t PhysPt;
-typedef uint8_t *HostPt;
+typedef uint8_t* HostPt;
 typedef uint32_t RealPt;
 typedef int32_t MemHandle;
 
-#define MEM_PAGESIZE 4096
-
 extern HostPt MemBase;
 HostPt GetMemBase();
+
+uint16_t MEM_GetMinMegabytes();
+uint16_t MEM_GetMaxMegabytes();
 
 bool MEM_A20_Enabled();
 void MEM_A20_Enable(bool enable);
 
 /* Memory management / EMS mapping */
 HostPt MEM_GetBlockPage();
-Bitu MEM_FreeTotal();                      // Free 4 KiB pages
-Bitu MEM_FreeLargest();                    // Largest free 4 KiB pages block
-Bitu MEM_TotalPages();                     // Total amount of 4 KiB pages
-Bitu MEM_AllocatedPages(MemHandle handle); // amount of allocated pages of handle
+uint32_t MEM_FreeTotal();                      // free 4 KB pages
+uint32_t MEM_FreeLargest();                    // largest free 4 KB pages block
+uint32_t MEM_TotalPages();                     // total amount of 4 KB pages
+uint32_t MEM_AllocatedPages(MemHandle handle); // amount of allocated pages of handle
 MemHandle MEM_AllocatePages(Bitu pages, bool sequence);
 MemHandle MEM_GetNextFreePage();
 PhysPt MEM_AllocatePage();
@@ -174,23 +177,23 @@ static inline void real_writed(uint16_t seg, uint16_t off, uint32_t val)
 	mem_writed(base + off, val);
 }
 
-static inline uint16_t RealSeg(RealPt pt)
+static inline uint16_t RealSegment(RealPt pt)
 {
-	return pt >> 16;
+	return static_cast<uint16_t>(pt >> 16);
 }
 
-static inline uint16_t RealOff(RealPt pt)
+static inline uint16_t RealOffset(RealPt pt)
 {
 	return static_cast<uint16_t>(pt & 0xffff);
 }
 
-static inline PhysPt Real2Phys(RealPt pt)
+static inline PhysPt RealToPhysical(RealPt pt)
 {
-	const auto base = static_cast<uint32_t>(RealSeg(pt) << 4);
-	return base + RealOff(pt);
+	const auto base = static_cast<uint32_t>(RealSegment(pt) << 4);
+	return base + RealOffset(pt);
 }
 
-static inline PhysPt PhysMake(uint16_t seg, uint16_t off)
+static inline PhysPt PhysicalMake(uint16_t seg, uint16_t off)
 {
 	const auto base = static_cast<uint32_t>(seg << 4);
 	return base + off;

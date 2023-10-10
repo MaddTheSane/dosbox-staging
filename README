@@ -1,4 +1,4 @@
-DOSBox (dosbox-staging) 0.78.0 Manual
+DOSBox (dosbox-staging) 0.81.0-alpha Manual
 
 ======
 INDEX:
@@ -77,9 +77,34 @@ START: How to start?
 
 
 AUTOMATION: Do I always have to type these commands?
-    In the DOSBox configuration file is an [autoexec] section. The commands
-    present there are run when DOSBox starts, so you can use this section
-    for the mounting. Look at Section 13: "The configuration (options) file".
+    DOSBox configuration files contain an [autoexec] section that holds
+    one or more commands, listed line by line, just as you would type them
+    into the DOSBox command prompt. The [autoexec] section is run on startup.
+
+    When multiple configuration files are loaded that each have [autoexec]
+    sections, DOSBox Staging by default joins these sections into a combined
+    [autoexec] that's run.
+
+    If you prefer to only run the most recently processed [autoexec] when
+    multiple configuration files are provided, you can set the "autoexec_section"
+    setting to "overwrite", in the [dosbox] section.  When in this mode, the
+    the overwrite-order is as follows:
+
+    1. Highest priority are those command(s) provided on the command line.
+    2. Second is the [autoexec] section from the last processed custom conf file.
+       This would be custom2 if: dosbox -conf custom1.conf -conf custom2.conf
+    3. Third is the [autoexec] section from the local conf, ie: when
+       dosbox.conf is present in the current directory
+    4. Last is the [autoexec] section from the user's portable or primary conf,
+       where:
+        - The portable conf is dosbox-staging.conf that (may) reside along-side
+          the DOSBox executable.
+        - The primary conf is dosbox-staging.conf that (may) reside in the
+          user's configuration directory, which varies by operating system.
+
+    This ordering of configuration files is also discussed in Section 3:
+    "Command Line Parameters", and specific configuration file settings are
+    discussed in Section 13: "The configuration (options) file".
 
 
 FULLSCREEN: How do I change to fullscreen?
@@ -119,10 +144,15 @@ CD-ROM: My CD-ROM doesn't work.
     in Linux:
       - mount d /path/to/cdrom -t cdrom
 
+    In some cases you might want to use a different CD-ROM interface,
+    for example if CD audio does not work:
+      - mount d f:\ -t cdrom -usecd 0
+
     explanation: - d   driveletter you will get in DOSBox (d is the best,
                           don't change it!)
                  - f:\ location of CD-ROM on your PC. In most cases it will
                           be d:\ or e:\
+                 - 0   The number of the CD-ROM drive, reported by "mount -cd"
 
     See also the next question: The game/application can't find its CD-ROM.
 
@@ -250,6 +280,12 @@ KEYBOARD: Common key-presses conflict with system actions on macOS
      - "Move left a space" to deconflict Control+Left
      - "Move right a space" to deconflict Control+Right
 
+KEYBOARD: The numlock and capslock state isn't correct.
+    A known issue prevents SDL from reading the numlock and capslock
+    states on startup. Until this is resolved, we recommend toggling these
+    off prior to starting DOSBox. After startup, you may use numlock and
+    capslock as desired.
+
 KEYBOARD: I can't type \ or : in DOSBox.
     This can happen in various cases, like your host keyboard layout does not
     have a matching DOS layout representation (or it was not correctly
@@ -339,15 +375,14 @@ To be able to use Command Line Parameters:
 (Windows)  open cmd.exe or command.com or edit the shortcut to dosbox.exe
 (Linux)    use any terminal emulator
 (macOS)    start terminal.app and navigate to:
-           /Applications/dosbox-staging.app/Contents/MacOS/dosbox
+           /Applications/DOSBox Staging.app/Contents/MacOS/dosbox
 
 The options are valid for all operating systems unless noted in the option
 description:
 
 dosbox [-fullscreen] [-startmapper] [-noautoexec] [-securemode]
-       [-noprimaryconf] [-nolocalconf] [-conf congfigfile]
-       [-scaler scaler | -forcescaler scaler] [-lang langfile]
-       [-machine machine-type] [-socket socketnumber]
+       [-noprimaryconf] [-nolocalconf] [-conf congfigfile] [-lang langfile]
+       [--list-glshaders] [-machine machine-type] [-socket socketnumber]
        [-c command] [-noconsole] [-exit] [NAME]
 
 dosbox --version
@@ -360,8 +395,6 @@ dosbox -eraseconf
 
 dosbox -erasemapper
 
-dosbox -opencaptures program
-
 
   NAME
         If "NAME" is a directory it will mount that as the C: drive.
@@ -369,9 +402,8 @@ dosbox -opencaptures program
         as the C: drive and execute "NAME".
 
         If "NAME" in an execuatble and the startup_verbosity configurable
-        setting is "auto" (or "low" or "quiet"), then the introductory
-        splash-screen and text help banner will not be shown.  This is known
-        as instant-launch.
+        setting is "auto" (or "low" or "quiet"), then the text help banner
+        will not be shown.
 
   -exit
         DOSBox will close itself when the DOS application "name" ends.
@@ -388,35 +420,60 @@ dosbox -opencaptures program
   -fullscreen
         Starts DOSBox in fullscreen mode.
 
-  -noprimaryconf, -conf, and -nolocalconf:
+  -noprimaryconf, -nolocal, and -conf:
 
         DOSBox Staging uses a layered configuration approach, as follows:
 
-        1. The primary configuration file is loaded first, which comes
-           from the operating system's user configuration directory.
-           This can be thought of as your "global" configuration file.
+        1. If a dosbox-staging.conf file is found along-side the
+           DOSBox executable, known as a portable layout, then this
+           configuration file is loaded first. In this case, the
+           executable's directory is used to load other assets such as
+           glshaders, mt32-roms, and soundfonts.
 
-        2. Custom configurations can be layered on next using one
-           or more -conf <filename> command-line arguments. For example:
+           If a portable layout isn't found, the user's primary
+           configuration file is loaded from the operating system's
+           user configuration directory. This can be thought of as
+           your "global" configuration file, The -noprimaryconf flag
+           can be used in cases where you want to avoid loading your
+           primary conf file.
+
+        2. Second, if the local directory contains a dosbox.conf file,
+           its settings override those previously set by your portable
+           or primary file. The -nolocalconf flag can be used in cases
+           where you want to avoid loading the local dosbox.conf file.
+
+        3. Finally, custom configurations are layered on, in order,
+           using one or more -conf <filename> arguments. For example:
            dosbox -conf myshader.conf -conf myaudio.conf
+           These settings override those previously set by either the
+           Local or Primary configurations.
 
-        3. Finally, if the local directory contains a "dosbox.conf" file,
-           these settings will be layered on last and therefore have
-           the highest precedence.
+        This layered approach means you can start with general settings
+        (from your Primary conf) and increasingly fine-tune them for a specific
+        game.
 
-        This layered approach means you can start with the most general
-        settings (from your primary conf) and increasingly fine-tune them
-        for a specific game, which may only have a couple DOS-specific
-        settings inside its own local dosbox.conf file.
+        If the [dosbox] "autoexec_section" setting is "overwrite", then
+        the same priority order applies when multiple configuration files
+        provide the [autoexec] section: DOSBox Staging will execute [autoexec]
+        only from the end-most (or highest priority) configuration file.
 
-        The -noprimaryconf and -nolocalconf affect this behavior:
+        Additionally, if you've passed commands as arguments directly on the
+        command line, ie: dosbox /path/game/run.bat, then these take priority
+        over any prior [autoexec] sections - to avoid mount and launch
+        conflicts.
 
-        -noprimaryconf avoids loading your primary conf file.
-        -nolocalconf avoids loading the local dosbox.conf file.
+        If you wish to use the original behavior where [autoexec] sections
+        are joined into a combined set of commands, then set the [dosbox]
+        "autoexec_section" setting to "join". This is also the default.
+
 
   -lang languagefilelocation
         Start DOSBox using the language specified in "languagefilelocation".
         See Section 14: "The Language File" for more details.
+
+  --list-glshaders
+        List available GLSL shaders and their directories.
+        Results are useable in the "glshader = " conf setting.
 
   -machine machinetype
         Setup DOSBox to emulate a specific type of machine. Valid choices are:
@@ -426,7 +483,6 @@ dosbox -opencaptures program
         - pcjr          - IBM PCjr
         - tandy         - Tandy Graphics Adapter (Tandy 1000)
         - ega           - IBM Enhanced Graphics Adapter
-        - vgaonly       - IBM Video Graphics Array (see below)
         - vesa_oldvbe   - VESA SVGA - VESA BIOS Extensions (VBE) 1.2
         - vesa_nolfb    - VESA SVGA - VBE 2.0 with Linear Frame Buffer disabled
         - svga_paradise - VESA SVGA - Paradise Systems PVGA1A - VBE 2.0
@@ -435,10 +491,6 @@ dosbox -opencaptures program
         - svga_s3       - VESA SVGA - S3 Trio - VBE 2.0
 
         The default is svga_s3.
-
-        For some special VGA effects the machinetype vgaonly can be used,
-        note that this disables SVGA capabilities and might be slower due to the
-        higher emulation precision.
 
         The machinetype affects the video card and the available sound cards.
 
@@ -458,14 +510,6 @@ dosbox -opencaptures program
         bottom of AUTOEXEC.BAT (which in turn disables any changes to how
         the drives are mounted inside DOSBox).
 
-  -scaler scaler
-        Uses the scaler specified by "scaler". See the DOSBox configuration file
-        for the available scalers.
-
-  -forcescaler scaler
-        Similar to the -scaler parameter, but tries to force usage of
-        the specified scaler even if it might not fit.
-
   --version
         Output version information and exit. Useful for frontends.
 
@@ -473,10 +517,6 @@ dosbox -opencaptures program
         Open the default configuration file in a text editor. If no editor name
         is given, then use the program from EDITOR environment variable,
         otherwise DOSBox will try to guess the name.
-
-  -opencaptures program
-        calls program with as first parameter the location of the captures
-        folder.
 
   --printconf
         Print the location of the default configuration file.
@@ -531,8 +571,10 @@ To get a list of the internal commands type "HELP" at the prompt.
 In addition, the following commands are available:
 
 MOUNT "Emulated Drive letter" "Real Drive or Directory"
-      [-t type] [-size drivesize] [-label drivelabel] [-freesize size_in_mb]
+      [-t type] [-usecd number] [-size drivesize]
+      [-label drivelabel] [-freesize size_in_mb]
       [-freesize size_in_kb (floppies)]
+MOUNT -listcd (or -cd)
 MOUNT -u "Emulated Drive letter"
 
   Program to mount local directories as drives inside DOSBox.
@@ -565,13 +607,22 @@ MOUNT -u "Emulated Drive letter"
   -label drivelabel
         Sets the name of the drive to "drivelabel". Needed on some systems
         if the CD-ROM label isn't read correctly (useful when a program
-        can't find its CD-ROM). If you don't specify a label
-        and no lowlevel support is selected:
+        can't find its CD-ROM). If you don't specify a label and no lowlevel
+        support is selected (that is omitting the -usecd # parameter):
           For Windows: label is extracted from "Real Drive".
           For Linux: label is set to NO_LABEL.
 
         If you do specify a label, this label will be kept as long as the drive
         is mounted. It will not be updated !!
+
+  -listcd (or -cd)
+        Lists the host PC's physical CD-ROM drives and their corresponding
+        numerical IDs for use with the -usecd argument below.
+
+  -usecd number
+        Specifies the numerical ID for a physical CD-ROM drive as
+        provided by the -listcd argument. Note that the -usecd argument is
+        optional and only needed if the wrong CD-ROM drive is mounted.
 
   -u
         Removes the mount. Doesn't work for Z:\.
@@ -585,7 +636,8 @@ MOUNT -u "Emulated Drive letter"
   directory as drive C: in DOSBox.
 
   Mounting your entire C drive with MOUNT C C:\ is NOT recommended! The same
-  is true for mounting the root of any other drive.
+  is true for mounting the root of any other drive, except for CD-ROMs (due to
+  their read-only nature).
   Otherwise if you or DOSBox make a mistake you may lose all your files.
   Also never mount a "Windows" or "Program Files" folders or their subfolders
   in Windows Vista/7 as DOSBox may not work correctly, or will stop working
@@ -861,7 +913,7 @@ MIXER
      of the volume levels.
 
   /LISTMIDI
-     Lists your PC's MIDI devices. To use one, set the 'midiconfig' attribute 
+     Lists your PC's MIDI devices. To use one, set the 'midiconfig' attribute
      in your configuration file to the device's numerical ID or any part of
      its textual name. For example:
 
@@ -1497,7 +1549,8 @@ Typically these are:
   COM1:
     - COM port 1
     - 8N1, meaning: data-bits (8), parity (none), and stop-bits (1).
-    - 57600 baud
+    - 57600 baud, which can be changed to 300 <= VALUE <= 57600 with the
+      baudrate:VALUE setting.
     - 03F8 address
     - IRQ4 interrupt
     - 16550 fifo enabled
@@ -1543,7 +1596,7 @@ CPU Cycles (speed up/slow down)
   DOSBox window will display a line "CPU speed: fixed 10000 cycles" at the top.
   In this mode you can reduce the amount of cycles even more by hitting Ctrl+F11
   (Cmd+F11 on macOS), as low as needed, or raise it with Ctrl+F12 (Cmd+F12 on
-  macOS) but you will be limited by you PC's single-threaded performance. 
+  macOS) but you will be limited by you PC's single-threaded performance.
   You can see how much free time your real CPU's cores have by looking at
   the Task Manager in Windows 2000/XP/Vista/7 and the System Monitor
   in Windows 95/98/ME. Once 100% of the power of your computer's real CPU's one
@@ -1570,27 +1623,86 @@ CPU Core (speed up)
   games that work worse/crash with the dynamic core (so save your game often),
   or do not work at all!
 
-Graphics emulation (speed up)
-  VGA emulation is a demanding part of DOSBox in terms of actual CPU usage.
-  On systems with limited CPU performance, consider binding a hotkey to the
-  "Increase frameskip" action ("Inc Fskip") using the keymapper. Skipping
-  frames generally frees up your CPU, providing faster emulation when using
-  max cycles or affording a greater number of fixed cycles with Ctrl+F12
-  (or Cmd+F12 on macOS).
+Graphics performance (speed up)
 
-  You can repeat this until the game runs fast enough for you.
-  Please note that this is a trade-off: you lose in fluidity of video what
-  you gain in speed.  Once you'll find the perfect combination for the
-  game and your hardware, you can save it in game-specific conf file.
+  1. Ensure your video drivers are up-to-date.  There are currently no
+     known driver-specific regressions with DOSBox Staging.
 
-Sound emulation (speed up)
-  You can also try to disable the sound through the setup utility of the game
-  to reduce load on your CPU further. Setting nosound=true in DOSBox's
-  configuration does NOT disable the emulation of sound devices, just
-  the output of sound will be disabled.
+  2. Ensure your DOSBox Staging configuration file is set to use your PC's most
+     performant rendering backend. If you're using a typical x86-64 or Apple M1
+     PC platform, then the default settings should be OK. However, if you're
+     using an ARM-based SBC like the Raspberry Pi 3 or 4, then we highly
+     recommend using the configuration settings mentioned here:
 
-Also try to close every program but DOSBox to reserve as much resources
-as possible for DOSBox.
+     https://github.com/dosbox-staging/dosbox-staging/wiki/Config-file-examples
+
+     If you're using settings from DOSBox upstream (<= 0.74x or DOSBox SVN)
+     or another DOSBox fork, then we suggest backing those up and starting
+     with a new configuration.  To do so, open a command prompt where your
+     DOSBox Staging executable is located.
+
+     Launch DOSBox Staging with internal defaults:
+          dosbox -noprimaryconf -nolocalconf
+
+     At the Z:\> prompt, write a new configuration file:
+          Z:\> config -wc
+
+     You can open this newly written config with:
+          dosbox -editconf
+
+  3. Test your settings using a graphically-intensive benchmark such as using the
+     shareware version of Quake in Phil's DOS Benchmark Pack (google search for
+     it).
+
+     Before launching it, ensure your web browser is shutdown and your system is
+     otherwise idle. Run the Quake 320x200 low-resolution benchmark five times
+     and record the results (reports FPS might vary by up to ~10%).
+
+     Now open your configuration file (launch "dosbox -editconf") and try
+     adjusting one of the following settings and rerun the benchmark, Be sure to
+     only make one conf change at a time between runs.
+
+     1) Compare OpenGL versus Texture rendering modes:
+        - output = opengl (or openglnb), versus
+        - output = texture (or texturenb)
+
+     2) Compare your windowing environment's compositing ability:
+        - windowresolution = 640x480, vesus
+        - windowresolution = medium, versus
+        - windowresolution = desktop
+
+     3) Compare your GPU's fullscreen scaling modes:
+        - "fullscreen = true" with "fullresolution = desktop"
+        - "fullscreen = true" with "fullresolution = original"
+
+     4) Check if it makes sense to enable vsync:
+        - "fullscreen = true" with "vsync = true"
+        - "fullscreen = true" with "vsync = false"
+
+     5) Compare the cost of using GLShaders:
+        - Setup the base configuration first:
+            "output = opengl"
+            "fullscreen = false"
+            "windowresolution = 1280x960"
+        - Now compare shader performance:
+            [render] "glshader = none", versus
+            [render] "glshader = crt-easymode-flat"
+
+  Based on the above results, you should have a good understanding of which
+  settings provide the fastest performance versus those settings that are
+  slower.
+
+Audio performance (speed up)
+ - Consider disabling the audio-device filters (they are off by default).
+
+General tips:
+
+  On Linux, check if your distribution supports the "gamemode" package.  Launch
+  with "gamemoderun dosbox", which is good for any game or program needed
+  low-latency CPU scheduling.
+
+  Try to close every program but DOSBox to reserve as many resources as possible
+  for DOSBox.
 
 
 Advanced cycles configuration:
@@ -1606,9 +1718,9 @@ Example:
 
 
 
-====================
-11. Troubleshooting:
-====================
+=====================
+11.  Troubleshooting:
+=====================
 
 General tip:
   Check messages in the DOSBox status window. See Section 12: "DOSBox Status Window".
@@ -1634,8 +1746,6 @@ Running a certain game closes DOSBox, crashes with some message or hangs:
     similar the machine settings that control the emulated chipset and
     functionality:
       machine=vesa_nolfb
-    or
-      machine=vgaonly
   - use loadfix before starting the game
 
 The game exits to the DOSBox prompt with some error message:
@@ -1724,24 +1834,26 @@ Alternatively, you can setup the filename in the configuration file
 in the [dosbox] section. There's a language= entry that can be changed with
 the filelocation.
 
-The DOSBox Staging release package includes a "translations" directory
-containing translated language files. Place the "translations" directory
-inside your config path to allow short-hand notation, as follows:
+The DOSBox Staging release is bundled with a "Resources/translations"
+directory containing translated language files. Translations are provided
+for German (de), Spanish (es), Fench (fr), Italian (it), Polish (pl), and
+Russian (ru).  Select your prefered language using short-hand notation,
+as shown in these examples:
 
-On launch:
-  dosbox -lang es
-  dosbox -lang fr
-  dosbox -lang it
-  dosbox -lang pl
-  dosbox -lang ru
+Via LANG environment variable:
+  set LANG de     (on Windows)
+  export LANG=it  (on macOS and Linux)
 
 Via conf setting:
   [dosbox]
   language = es
-  # fr, it, pl, ru
 
-Note: macOS users can find the "translations" directory inside the
-      "./Resources/" directory, after expanding the .dmg package.
+Via command-line flag:
+  dosbox -lang pl
+  dosbox -lang ru
+
+Note: macOS users can find the "Resources/translations" directory after
+expanding the .dmg package.
 
 
 ========================================

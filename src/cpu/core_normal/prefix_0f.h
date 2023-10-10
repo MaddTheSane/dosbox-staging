@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -97,8 +98,6 @@
 				GetEArw;
 				switch (which) {
 				case 0x02:										/* LGDT */
-					if (cpu.pmode && cpu.cpl) EXCEPTION(EXCEPTION_GP);
-					goto illegal_opcode;
 				case 0x03:										/* LIDT */
 					if (cpu.pmode && cpu.cpl) EXCEPTION(EXCEPTION_GP);
 					goto illegal_opcode;
@@ -123,7 +122,7 @@
 			} else {
 				GetEAa;CPU_LAR(LoadMw(eaa),ar);
 			}
-			*rmrw=(Bit16u)ar;
+			*rmrw=(uint16_t)ar;
 		}
 		break;
 	CASE_0F_W(0x03)												/* LSL Gw,Ew */
@@ -135,7 +134,7 @@
 			} else {
 				GetEAa;CPU_LSL(LoadMw(eaa),limit);
 			}
-			*rmrw=(Bit16u)limit;
+			*rmrw=(uint16_t)limit;
 		}
 		break;
 	CASE_0F_B(0x06)												/* CLTS */
@@ -144,7 +143,7 @@
 		break;
 	CASE_0F_B(0x08)												/* INVD */
 	CASE_0F_B(0x09)												/* WBINVD */
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegal_opcode;
+		if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegal_opcode;
 		if (cpu.pmode && cpu.cpl) EXCEPTION(EXCEPTION_GP);
 		break;
 	CASE_0F_B(0x20)												/* MOV Rd.CRx */
@@ -156,7 +155,7 @@
 				LOG(LOG_CPU,LOG_ERROR)("MOV XXX,CR%u with non-register", static_cast<uint32_t>(which));
 			}
 			GetEArd;
-			Bit32u crx_value;
+			uint32_t crx_value;
 			if (CPU_READ_CRX(which,crx_value)) RUNEXCEPTION();
 			*eard=crx_value;
 		}
@@ -170,7 +169,7 @@
 				LOG(LOG_CPU,LOG_ERROR)("MOV XXX,DR%u with non-register", static_cast<uint32_t>(which));
 			}
 			GetEArd;
-			Bit32u drx_value;
+			uint32_t drx_value;
 			if (CPU_READ_DRX(which,drx_value)) RUNEXCEPTION();
 			*eard=drx_value;
 		}
@@ -208,7 +207,7 @@
 				LOG(LOG_CPU,LOG_ERROR)("MOV XXX,TR%u with non-register", static_cast<uint32_t>(which));
 			}
 			GetEArd;
-			Bit32u trx_value;
+			uint32_t trx_value;
 			if (CPU_READ_TRX(which,trx_value)) RUNEXCEPTION();
 			*eard=trx_value;
 		}
@@ -227,15 +226,15 @@
 		break;
 	CASE_0F_B(0x31)												/* RDTSC */
 		{
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMSLOW)
+			if (CPU_ArchitectureType<ArchitectureType::PentiumSlow)
 				goto illegal_opcode;
 			/* Use a fixed number when in auto cycles mode as else the reported value changes constantly */
-	                Bit64s tsc = (Bit64s)(PIC_FullIndex() *
+	                int64_t tsc = (int64_t)(PIC_FullIndex() *
 	                                      static_cast<double>(CPU_CycleAutoAdjust
 	                                                                  ? 70000
 	                                                                  : CPU_CycleMax));
-	                reg_edx = (Bit32u)(tsc >> 32);
-			reg_eax = (Bit32u)(tsc & 0xffffffff);
+	                reg_edx = (uint32_t)(tsc >> 32);
+			reg_eax = (uint32_t)(tsc & 0xffffffff);
 		}
 		break;
 	CASE_0F_W(0x80) /* JO */
@@ -315,14 +314,14 @@
 	CASE_0F_W(0xa3)												/* BT Ew,Gw */
 		{
 			FillFlags();GetRMrw;
-			Bit16u mask=1 << (*rmrw & 15);
+			uint16_t mask=1 << (*rmrw & 15);
 			if (rm >= 0xc0 ) {
 				GetEArw;
 				SETFLAGBIT(CF,(*earw & mask));
 			} else {
-				GetEAa;eaa+=(((Bit16s)*rmrw)>>4)*2;
+				GetEAa;eaa+=(((int16_t)*rmrw)>>4)*2;
 				if (!TEST_PREFIX_ADDR) FixEA16;
-				Bit16u old=LoadMw(eaa);
+				uint16_t old=LoadMw(eaa);
 				SETFLAGBIT(CF,(old & mask));
 			}
 			break;
@@ -341,15 +340,15 @@
 	CASE_0F_W(0xab)												/* BTS Ew,Gw */
 		{
 			FillFlags();GetRMrw;
-			Bit16u mask=1 << (*rmrw & 15);
+			uint16_t mask=1 << (*rmrw & 15);
 			if (rm >= 0xc0 ) {
 				GetEArw;
 				SETFLAGBIT(CF,(*earw & mask));
 				*earw|=mask;
 			} else {
-				GetEAa;eaa+=(((Bit16s)*rmrw)>>4)*2;
+				GetEAa;eaa+=(((int16_t)*rmrw)>>4)*2;
 				if (!TEST_PREFIX_ADDR) FixEA16;
-				Bit16u old=LoadMw(eaa);
+				uint16_t old=LoadMw(eaa);
 				SETFLAGBIT(CF,(old & mask));
 				SaveMw(eaa,old | mask);
 			}
@@ -366,7 +365,7 @@
 		break;
 	CASE_0F_B(0xb0) 										/* cmpxchg Eb,Gb */
 		{
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegal_opcode;
+			if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegal_opcode;
 			FillFlags();
 			GetRMrb;
 			if (rm >= 0xc0 ) {
@@ -380,7 +379,7 @@
 				}
 			} else {
    				GetEAa;
-				Bit8u val = LoadMb(eaa);
+				uint8_t val = LoadMb(eaa);
 				if (reg_al == val) { 
 					SaveMb(eaa,*rmrb);
 					SETFLAGBIT(ZF,1);
@@ -394,7 +393,7 @@
 		}
 	CASE_0F_W(0xb1) 									/* cmpxchg Ew,Gw */
 		{
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegal_opcode;
+			if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegal_opcode;
 			FillFlags();
 			GetRMrw;
 			if (rm >= 0xc0 ) {
@@ -408,7 +407,7 @@
 				}
 			} else {
    				GetEAa;
-				Bit16u val = LoadMw(eaa);
+				uint16_t val = LoadMw(eaa);
 				if(reg_ax == val) { 
 					SaveMw(eaa,*rmrw);
 					SETFLAGBIT(ZF,1);
@@ -433,15 +432,15 @@
 	CASE_0F_W(0xb3)												/* BTR Ew,Gw */
 		{
 			FillFlags();GetRMrw;
-			Bit16u mask=1 << (*rmrw & 15);
+			uint16_t mask=1 << (*rmrw & 15);
 			if (rm >= 0xc0 ) {
 				GetEArw;
 				SETFLAGBIT(CF,(*earw & mask));
 				*earw&= ~mask;
 			} else {
-				GetEAa;eaa+=(((Bit16s)*rmrw)>>4)*2;
+				GetEAa;eaa+=(((int16_t)*rmrw)>>4)*2;
 				if (!TEST_PREFIX_ADDR) FixEA16;
-				Bit16u old=LoadMw(eaa);
+				uint16_t old=LoadMw(eaa);
 				SETFLAGBIT(CF,(old & mask));
 				SaveMw(eaa,old & ~mask);
 			}
@@ -485,7 +484,7 @@
 			FillFlags();GetRM;
 			if (rm >= 0xc0 ) {
 				GetEArw;
-				Bit16u mask=1 << (Fetchb() & 15);
+				uint16_t mask=1 << (Fetchb() & 15);
 				SETFLAGBIT(CF,(*earw & mask));
 				switch (rm & 0x38) {
 				case 0x20:										/* BT */
@@ -503,8 +502,8 @@
 					E_Exit("CPU:0F:BA:Illegal subfunction %X",rm & 0x38);
 				}
 			} else {
-				GetEAa;Bit16u old=LoadMw(eaa);
-				Bit16u mask=1 << (Fetchb() & 15);
+				GetEAa;uint16_t old=LoadMw(eaa);
+				uint16_t mask=1 << (Fetchb() & 15);
 				SETFLAGBIT(CF,(old & mask));
 				switch (rm & 0x38) {
 				case 0x20:										/* BT */
@@ -527,15 +526,15 @@
 	CASE_0F_W(0xbb)												/* BTC Ew,Gw */
 		{
 			FillFlags();GetRMrw;
-			Bit16u mask=1 << (*rmrw & 15);
+			uint16_t mask=1 << (*rmrw & 15);
 			if (rm >= 0xc0 ) {
 				GetEArw;
 				SETFLAGBIT(CF,(*earw & mask));
 				*earw^=mask;
 			} else {
-				GetEAa;eaa+=(((Bit16s)*rmrw)>>4)*2;
+				GetEAa;eaa+=(((int16_t)*rmrw)>>4)*2;
 				if (!TEST_PREFIX_ADDR) FixEA16;
-				Bit16u old=LoadMw(eaa);
+				uint16_t old=LoadMw(eaa);
 				SETFLAGBIT(CF,(old & mask));
 				SaveMw(eaa,old ^ mask);
 			}
@@ -544,7 +543,7 @@
 	CASE_0F_W(0xbc)												/* BSF Gw,Ew */
 		{
 			GetRMrw;
-			Bit16u result,value;
+			uint16_t result,value;
 			if (rm >= 0xc0) { GetEArw; value=*earw; } 
 			else			{ GetEAa; value=LoadMw(eaa); }
 			if (value==0) {
@@ -561,7 +560,7 @@
 	CASE_0F_W(0xbd)												/* BSR Gw,Ew */
 		{
 			GetRMrw;
-			Bit16u result,value;
+			uint16_t result,value;
 			if (rm >= 0xc0) { GetEArw; value=*earw; } 
 			else			{ GetEAa; value=LoadMw(eaa); }
 			if (value==0) {
@@ -578,48 +577,48 @@
 	CASE_0F_W(0xbe)												/* MOVSX Gw,Eb */
 		{
 			GetRMrw;															
-			if (rm >= 0xc0 ) {GetEArb;*rmrw=*(Bit8s *)earb;}
+			if (rm >= 0xc0 ) {GetEArb;*rmrw=*(int8_t *)earb;}
 			else {GetEAa;*rmrw=LoadMbs(eaa);}
 			break;
 		}
 	CASE_0F_B(0xc0)												/* XADD Gb,Eb */
 		{
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegal_opcode;
-			GetRMrb;Bit8u oldrmrb=*rmrb;
+			if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegal_opcode;
+			GetRMrb;uint8_t oldrmrb=*rmrb;
 			if (rm >= 0xc0 ) {GetEArb;*rmrb=*earb;*earb+=oldrmrb;}
 			else {GetEAa;*rmrb=LoadMb(eaa);SaveMb(eaa,LoadMb(eaa)+oldrmrb);}
 			break;
 		}
 	CASE_0F_W(0xc1)												/* XADD Gw,Ew */
 		{
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegal_opcode;
-			GetRMrw;Bit16u oldrmrw=*rmrw;
+			if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegal_opcode;
+			GetRMrw;uint16_t oldrmrw=*rmrw;
 			if (rm >= 0xc0 ) {GetEArw;*rmrw=*earw;*earw+=oldrmrw;}
 			else {GetEAa;*rmrw=LoadMw(eaa);SaveMw(eaa,LoadMw(eaa)+oldrmrw);}
 			break;
 		}
 	CASE_0F_W(0xc8)												/* BSWAP AX */
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegal_opcode;
+		if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegal_opcode;
 		BSWAPW(reg_ax);break;
 	CASE_0F_W(0xc9)												/* BSWAP CX */
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegal_opcode;
+		if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegal_opcode;
 		BSWAPW(reg_cx);break;
 	CASE_0F_W(0xca)												/* BSWAP DX */
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegal_opcode;
+		if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegal_opcode;
 		BSWAPW(reg_dx);break;
 	CASE_0F_W(0xcb)												/* BSWAP BX */
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegal_opcode;
+		if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegal_opcode;
 		BSWAPW(reg_bx);break;
 	CASE_0F_W(0xcc)												/* BSWAP SP */
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegal_opcode;
+		if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegal_opcode;
 		BSWAPW(reg_sp);break;
 	CASE_0F_W(0xcd)												/* BSWAP BP */
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegal_opcode;
+		if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegal_opcode;
 		BSWAPW(reg_bp);break;
 	CASE_0F_W(0xce)												/* BSWAP SI */
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegal_opcode;
+		if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegal_opcode;
 		BSWAPW(reg_si);break;
 	CASE_0F_W(0xcf)												/* BSWAP DI */
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_486OLDSLOW) goto illegal_opcode;
+		if (CPU_ArchitectureType<ArchitectureType::Intel486OldSlow) goto illegal_opcode;
 		BSWAPW(reg_di);break;
 		

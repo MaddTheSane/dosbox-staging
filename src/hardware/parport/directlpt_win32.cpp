@@ -31,7 +31,7 @@
 #include <SDL.h> 
 #include "setup.h"
 
-CDirectLPT::CDirectLPT (Bitu nr, Bit8u initIrq, CommandLine* cmd)
+CDirectLPT::CDirectLPT (Bitu nr, uint8_t initIrq, CommandLine* cmd)
                               :CParallel (cmd, nr, initIrq) {
 	InstallationSuccessful = false;
 	interruptflag=true; // interrupt disabled
@@ -70,7 +70,7 @@ CDirectLPT::CDirectLPT (Bitu nr, Bit8u initIrq, CommandLine* cmd)
 		LOG_MSG("Parallel Port: Invalid base address.");
 		return;
 	}*/
-	Bit32u ecpbase = 0;
+	uint32_t ecpbase = 0;
 	if(cmd->FindStringBegin("ecpbase:",str,false)) {
 		if(sscanf(str.c_str(), "%x",&ecpbase)!=1) {
 			LOG_MSG("parallel%d: Invalid realbase parameter.",nr);
@@ -83,12 +83,12 @@ CDirectLPT::CDirectLPT (Bitu nr, Bit8u initIrq, CommandLine* cmd)
 		if (isECP) ecpbase = realbaseaddress+0x402;
 	}
 	// add the standard parallel port registers
-	addIOPermission((Bit16u)realbaseaddress);
-	addIOPermission((Bit16u)realbaseaddress+1);
-	addIOPermission((Bit16u)realbaseaddress+2);
+	addIOPermission((uint16_t)realbaseaddress);
+	addIOPermission((uint16_t)realbaseaddress+1);
+	addIOPermission((uint16_t)realbaseaddress+2);
 	
 	// if it could be a ECP port: make the extended control register accessible
-	if(isECP)addIOPermission((Bit16u)ecpbase);
+	if(isECP)addIOPermission((uint16_t)ecpbase);
 	
 	// bail out if porttalk fails
 	if(!setPermissionList())
@@ -99,7 +99,7 @@ CDirectLPT::CDirectLPT (Bitu nr, Bit8u initIrq, CommandLine* cmd)
 	if(isECP) {
 		// check if there is a ECP port (try to set bidir)
 		originalECPControlReg = inportb(ecpbase);
-		Bit8u new_bidir = originalECPControlReg&0x1F;
+		uint8_t new_bidir = originalECPControlReg&0x1F;
 		new_bidir|=0x20;
 
 		outportb(ecpbase,new_bidir);
@@ -110,7 +110,7 @@ CDirectLPT::CDirectLPT (Bitu nr, Bit8u initIrq, CommandLine* cmd)
 		}
 	}
 	// check if there is a parallel port at all: the autofeed bit
-	Bit8u controlreg=inportb(realbaseaddress+2);
+	uint8_t controlreg=inportb(realbaseaddress+2);
 	outportb(realbaseaddress+2,controlreg|2);
 	if(!(inportb(realbaseaddress+2)&0x2))
 	{
@@ -154,13 +154,13 @@ CDirectLPT::~CDirectLPT () {
 		outportb(realbaseaddress+0x402,originalECPControlReg);
 }
 
-bool CDirectLPT::Putchar(Bit8u val)
+bool CDirectLPT::Putchar(uint8_t val)
 {	
 	//LOG_MSG("putchar: %x",val);
 
 	// check if printer online and not busy
 	// PE and Selected: no printer attached
-	Bit8u sr=Read_SR();
+	uint8_t sr=Read_SR();
 	//LOG_MSG("SR: %x",sr);
 	if((sr&0x30)==0x30)
 	{
@@ -216,7 +216,7 @@ Bitu CDirectLPT::Read_PR() {
 	return inportb(realbaseaddress);
 }
 Bitu CDirectLPT::Read_COM() {
-	Bit8u retval=inportb(realbaseaddress+2);
+	uint8_t retval=inportb(realbaseaddress+2);
 	if(!interruptflag)// interrupt activated
 	retval&=~0x10;
 	return retval;
@@ -226,7 +226,7 @@ Bitu CDirectLPT::Read_SR() {
 }
 
 void CDirectLPT::Write_PR(Bitu val) {
-	//LOG_MSG("%c,%x",(Bit8u)val,val);
+	//LOG_MSG("%c,%x",(uint8_t)val,val);
 	outportb(realbaseaddress,val);
 }
 void CDirectLPT::Write_CON(Bitu val) {
@@ -238,7 +238,7 @@ void CDirectLPT::Write_IOSEL(Bitu val) {
 	outportb(realbaseaddress+1,val);
 }
 
-void CDirectLPT::handleUpperEvent(Bit16u type) {}
+void CDirectLPT::handleUpperEvent(uint16_t type) {}
 
 
 #endif

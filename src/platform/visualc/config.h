@@ -1,26 +1,35 @@
-/* String appended to the .conf file. */
-#define CONF_SUFFIX "-staging-git"
+/* Project name, lower-case and without spaces */
+#define CANONICAL_PROJECT_NAME "dosbox-staging"
 
-/* Version number of package */
-#define VERSION "0.78.0"
+// Emulator Semantic Version (MAJOR.MINOR.PATCH), incremented as follows:
+//  - MAJOR version when you make incompatible API changes
+//  - MINOR version when you add functionality in a backwards compatible manner
+//  - PATCH version when you make backwards compatible bug fixes
+// Additional labels for pre-release and build metadata are available as extensions to the MAJOR.MINOR.PATCH format.
+// Ref: https://semver.org/
+
+#define VERSION "0.81.0-alpha"
 
 /* This macro is going to be overriden via CI */
 #define DOSBOX_DETAILED_VERSION "git"
 
+/* Strings to be returned by virtual drivers, etc. */
+
+// Name of the emulator
+#define DOSBOX_NAME "DOSBox Staging"
+// Development team name
+#define DOSBOX_TEAM "The " DOSBOX_NAME " Team"
+// Copyright string
+#define DOSBOX_COPYRIGHT "(C) " DOSBOX_TEAM
+
 /* Define to 1 to enable internal debugger, requires libcurses */
 #define C_DEBUG 0
-
-/* Define to 1 to enable screenshots, requires libpng */
-#define C_SSHOT 1
 
 /* Define to 1 to use opengl display output support */
 #define C_OPENGL 1
 
 /* Define to 1 to enable internal modem support, requires SDL_net */
 #define C_MODEM 1
-
-/* Define to 1 to enable NE2000 ethernet passthrough, requires libpcap */
-#define C_NE2000 0
 
 /* Define to 1 to enable IPX networking support, requires SDL_net */
 #define C_IPX 1
@@ -39,7 +48,12 @@
 /* Define to 1 to use x86 dynamic cpu core */
 #define C_DYNAMIC_X86 1
 
-/* Define to 1 to use recompiling cpu core. Can not be used together with the dynamic-x86 core */
+/* Define to 1 if the target platform needs per-page dynamic core write or
+ * execute (W^X) tagging */
+#define C_PER_PAGE_W_OR_X 1
+
+/* Define to 1 to use recompiling cpu core. Can not be used together with the
+ * dynamic-x86 core */
 #define C_DYNREC 0
 
 /* Enable memory function inlining in */
@@ -76,8 +90,38 @@
 // https://docs.microsoft.com/en-us/cpp/c-runtime-library/math-constants
 #define _USE_MATH_DEFINES
 
+// Modern MSVC provides POSIX-like routines, so prefer that over built-in
+#define HAVE_STRNLEN
+
 // MSVC issues pedantic warnings on POSIX functions; for portability we don't
 // want to deal with these warnings, as the only way to avoid them is using
 // Microsoft-specific names and functions instead of POSIX conformant ones.
 // https://docs.microsoft.com/en-us/cpp/error-messages/compiler-warnings/compiler-warning-level-3-c4996?view=vs-2019#posix-function-names
 #define _CRT_NONSTDC_NO_WARNINGS
+
+// MSVC issues warnings on what it considers "unsafe" C-calls for
+// which "safer" (_s-equivalent) calls.
+//
+// To date, no effort has been made to transition toward these _s
+// calls, in part because no static analyzer (Coverity, PVS Studio,
+// or Clang) has flagged the project's use of the existing non-_s
+// calls as having security implications.
+//
+// Likewise, if there is going to be work put into altering the use
+// of these calls, it will involve transitioning toward modern C++
+// constructs as mentioned in #1314 (Ref:
+// https://github.com/dosbox-staging/dosbox-staging/issues/1314)
+//
+// Because the recommendations in these warnings will not be acted
+// upon given the planned direction of the the project, they
+// therefore provide no value and are being silenced.
+
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
+// On *nix systems, this variable holds a (potentially) custom path
+// configured during compile-time by setting Meson's "--datadir"
+// On Windows, this path is not customizeable, so it's left blank here.
+//
+#define CUSTOM_DATADIR ""

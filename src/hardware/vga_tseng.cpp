@@ -1,4 +1,7 @@
 /*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -19,15 +22,18 @@
 
 
 #include "dosbox.h"
+
+#include <cstdlib>
+
 #include "setup.h"
 #include "vga.h"
 #include "inout.h"
 #include "mem.h"
-#include <cstdlib>
+#include "../ints/int10.h"
 
 // Tseng ET4K data
 typedef struct {
-	Bit8u extensionsEnabled;
+	uint8_t extensionsEnabled;
 
 // Stored exact values of some registers. Documentation only specifies some bits but hardware checks may
 // expect other bits to be preserved.
@@ -63,8 +69,9 @@ static SVGA_ET4K_DATA et4k = { 1,0,0,0,0,0,0,0,0, 0,0, 0,0,
 		return et4k.store_##port##_##index;
 
 // Tseng ET4K implementation
-void write_p3d5_et4k(io_port_t reg, uint8_t val, io_width_t)
+void write_p3d5_et4k(io_port_t reg, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	if (!et4k.extensionsEnabled && reg != 0x33)
 		return;
 
@@ -122,7 +129,7 @@ void write_p3d5_et4k(io_port_t reg, uint8_t val, io_width_t)
 		vga.config.line_compare = (vga.config.line_compare & 0x3ff) | ((val&0x10)<<6);
 	// Abusing s3 ex_ver_overflow field. This is to be cleaned up later.
 		{
-			Bit8u s3val =
+			uint8_t s3val =
 				((val & 0x01) << 2) | // vbstart
 				((val & 0x02) >> 1) | // vtotal
 				((val & 0x04) >> 1) | // vdispend
@@ -198,8 +205,9 @@ uint8_t read_p3d5_et4k(io_port_t reg, io_width_t)
 	return 0x0;
 }
 
-void write_p3c5_et4k(io_port_t reg, uint8_t val, io_width_t)
+void write_p3c5_et4k(io_port_t reg, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	switch (reg) {
 		/*
 		3C4h index  6  (R/W): TS State Control
@@ -236,8 +244,9 @@ uint8_t read_p3c5_et4k(io_port_t reg, io_width_t)
 bit 0-3  64k Write bank number (0..15)
     4-7  64k Read bank number (0..15)
 */
-void write_p3cd_et4k(io_port_t, uint8_t val, io_width_t)
+void write_p3cd_et4k(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	vga.svga.bank_write = val & 0x0f;
 	vga.svga.bank_read = (val >> 4) & 0x0f;
 	VGA_SetupHandlers();
@@ -248,8 +257,9 @@ uint8_t read_p3cd_et4k(io_port_t, io_width_t)
 	return (vga.svga.bank_read << 4) | vga.svga.bank_write;
 }
 
-void write_p3c0_et4k(io_port_t reg, uint8_t val, io_width_t)
+void write_p3c0_et4k(io_port_t reg, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	switch (reg) {
 		// 3c0 index 16h: ATC Miscellaneous
 		// VGADOC provides a lot of information, Ferarro documents only two bits
@@ -329,14 +339,14 @@ void FinishSetMode_ET4K(io_port_t crtc_base, VGA_ModeExtraData *modeData)
 	// Reinterpret hor_overflow. Curiously, three bits out of four are
 	// in the same places. Input has hdispend (not supported), output
 	// has CRTC offset (also not supported)
-	Bit8u et4k_hor_overflow =
+	uint8_t et4k_hor_overflow =
 		(modeData->hor_overflow & 0x01) |
 		(modeData->hor_overflow & 0x04) |
 		(modeData->hor_overflow & 0x10);
 	IO_Write(crtc_base,0x3f);IO_Write(crtc_base+1,et4k_hor_overflow);
 
 	// Reinterpret ver_overflow
-	Bit8u et4k_ver_overflow =
+	uint8_t et4k_ver_overflow =
 		((modeData->ver_overflow & 0x01) << 1) | // vtotal10
 		((modeData->ver_overflow & 0x02) << 1) | // vdispend10
 		((modeData->ver_overflow & 0x04) >> 2) | // vbstart10
@@ -388,7 +398,7 @@ void DetermineMode_ET4K() {
 	// Close replica from the base implementation. It will stay here
 	// until I figure a way to either distinguish M_VGA and M_LIN8 or
 	// merge them.
-	if (vga.attr.mode_control & 1) {
+	if (vga.attr.mode_control.is_graphics_enabled) {
 		if (vga.gfx.mode & 0x40) VGA_SetMode((et4k.biosMode<=0x13)?M_VGA:M_LIN8); // Ugly...
 		else if (vga.gfx.mode & 0x20) VGA_SetMode(M_CGA4);
 		else if ((vga.gfx.miscellaneous & 0x0c)==0x0c) VGA_SetMode(M_CGA2);
@@ -460,9 +470,9 @@ void SVGA_Setup_TsengET4K(void) {
 	else
 		vga.vmemsize = 1024 * 1024;
 
-	VGA_LogInitialization("Tseng Labs ET4000", "DRAM");
+	const auto num_modes = ModeList_VGA_Tseng.size();
+	VGA_LogInitialization("Tseng Labs ET4000", "DRAM", num_modes);
 }
-
 
 // Tseng ET3K implementation
 typedef struct {
@@ -500,8 +510,9 @@ static SVGA_ET3K_DATA et3k = { 0,0,0,0,0,0,0,0,0,0, 0,0, 0,0, {0,0,0,0,0,0,0,0},
 	case 0x##index: \
 		return et3k.store_##port##_##index;
 
-void write_p3d5_et3k(io_port_t reg, uint8_t val, io_width_t)
+void write_p3d5_et3k(io_port_t reg, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	switch (reg) {
 		// 3d4 index 1bh-21h: Hardware zoom control registers
 		// I am not sure if there was a piece of software that used these.
@@ -560,7 +571,7 @@ void write_p3d5_et3k(io_port_t reg, uint8_t val, io_width_t)
 		vga.config.line_compare = (vga.config.line_compare & 0x3ff) | ((val&0x10)<<6);
 	// Abusing s3 ex_ver_overflow field. This is to be cleaned up later.
 		{
-			Bit8u s3val =
+			uint8_t s3val =
 				((val & 0x01) << 2) | // vbstart
 				((val & 0x02) >> 1) | // vtotal
 				((val & 0x04) >> 1) | // vdispend
@@ -599,8 +610,9 @@ uint8_t read_p3d5_et3k(io_port_t reg, io_width_t)
 	return 0x0;
 }
 
-void write_p3c5_et3k(io_port_t reg, uint8_t val, io_width_t)
+void write_p3c5_et3k(io_port_t reg, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	switch (reg) {
 		// Both registers deal mostly with hardware zoom which is not implemented. Other bits
 		// seem to be useless for emulation with the exception of index 7 bit 4 (font select)
@@ -632,8 +644,9 @@ bit 0-2  64k Write bank number
            2  1M linear memory
 NOTES: 1M linear memory is not supported
 */
-void write_p3cd_et3k(io_port_t, uint8_t val, io_width_t)
+void write_p3cd_et3k(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	vga.svga.bank_write = val & 0x07;
 	vga.svga.bank_read = (val>>3) & 0x07;
 	vga.svga.bank_size = (val&0x40)?64*1024:128*1024;
@@ -645,8 +658,9 @@ uint8_t read_p3cd_et3k(io_port_t, io_width_t)
 	return (vga.svga.bank_read << 3) | vga.svga.bank_write | ((vga.svga.bank_size == 128 * 1024) ? 0 : 0x40);
 }
 
-void write_p3c0_et3k(io_port_t reg, uint8_t val, io_width_t)
+void write_p3c0_et3k(io_port_t reg, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	// See ET4K notes.
 	switch (reg) {
 		STORE_ET3K(3c0, 16);
@@ -700,7 +714,7 @@ void FinishSetMode_ET3K(io_port_t crtc_base, VGA_ModeExtraData *modeData)
 
 	// Tseng ET3K does not have horizontal overflow bits
 	// Reinterpret ver_overflow
-	Bit8u et4k_ver_overflow =
+	uint8_t et4k_ver_overflow =
 		((modeData->ver_overflow & 0x01) << 1) | // vtotal10
 		((modeData->ver_overflow & 0x02) << 1) | // vdispend10
 		((modeData->ver_overflow & 0x04) >> 2) | // vbstart10
@@ -728,7 +742,7 @@ void FinishSetMode_ET3K(io_port_t crtc_base, VGA_ModeExtraData *modeData)
 		Bitu best = 1;
 		int dist = 100000000;
 		for (Bitu i = 0; i < 8; i++) {
-			int cdiff = abs( static_cast<Bit32s>(target - static_cast<Bits>(et3k.clockFreq[i])) );
+			int cdiff = abs( static_cast<int32_t>(target - static_cast<Bits>(et3k.clockFreq[i])) );
 			if (cdiff < dist) {
 				best = i;
 				dist = cdiff;
@@ -752,7 +766,7 @@ void DetermineMode_ET3K() {
 	// Close replica from the base implementation. It will stay here
 	// until I figure a way to either distinguish M_VGA and M_LIN8 or
 	// merge them.
-	if (vga.attr.mode_control & 1) {
+	if (vga.attr.mode_control.is_graphics_enabled) {
 		if (vga.gfx.mode & 0x40) VGA_SetMode((et3k.biosMode<=0x13)?M_VGA:M_LIN8); // Ugly...
 		else if (vga.gfx.mode & 0x20) VGA_SetMode(M_CGA4);
 		else if ((vga.gfx.miscellaneous & 0x0c)==0x0c) VGA_SetMode(M_CGA2);
@@ -803,8 +817,9 @@ void SVGA_Setup_TsengET3K(void) {
 	IO_RegisterReadHandler(0x3cd, read_p3cd_et3k, io_width_t::byte);
 	IO_RegisterWriteHandler(0x3cd, write_p3cd_et3k, io_width_t::byte);
 
-	// The ET3000AX/BX had a fixed 512 KiB of DRAM
+	// The ET3000AX/BX had a fixed 512 KB of DRAM
 	vga.vmemsize = 512*1024;
 
-	VGA_LogInitialization("Tseng Labs ET3000", "DRAM");
+	const auto num_modes = ModeList_VGA_Tseng.size();
+	VGA_LogInitialization("Tseng Labs ET3000", "DRAM", num_modes);
 }

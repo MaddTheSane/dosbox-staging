@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -27,19 +27,25 @@
 
 class AUTOTYPE final : public Program {
 public:
-	void Run();
-
+	AUTOTYPE()
+	{
+		AddMessages();
+		help_detail = {HELP_Filter::All,
+		               HELP_Category::Dosbox,
+		               HELP_CmdType::Program,
+		               "AUTOTYPE"};
+	}
+	void Run() override;
 private:
+	static void AddMessages();
 	void PrintUsage();
 	void PrintKeys();
 	bool ReadDoubleArg(const std::string &name,
 	                   const char *flag,
-	                   const double &def_value,
-	                   const double &min_value,
-	                   const double &max_value,
+	                   const double def_value,
+	                   const double min_value,
+	                   const double max_value,
 	                   double &value);
 };
-
-void AUTOTYPE_ProgramStart(Program **make);
 
 #endif

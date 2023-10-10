@@ -45,52 +45,52 @@ diskGeo DiskGeometryList[] = {
 	{0, 0, 0, 0, 0}
 };
 
-Bitu call_int13;
+callback_number_t call_int13 = 0;
 Bitu diskparm0, diskparm1;
-static Bit8u last_status;
-static Bit8u last_drive;
-Bit16u imgDTASeg;
+static uint8_t last_status;
+static uint8_t last_drive;
+uint16_t imgDTASeg;
 RealPt imgDTAPtr;
 DOS_DTA *imgDTA;
 bool killRead;
 static bool swapping_requested;
 
-void BIOS_SetEquipment(Bit16u equipment);
+void BIOS_SetEquipment(uint16_t equipment);
 
 /* 2 floppys and 2 harddrives, max */
-std::array<std::shared_ptr<imageDisk>, MAX_DISK_IMAGES> imageDiskList;
-std::array<std::shared_ptr<imageDisk>, MAX_SWAPPABLE_DISKS> diskSwap;
+std::array<imageDisk*, MAX_DISK_IMAGES> imageDiskList = {};
+std::array<imageDisk*, MAX_SWAPPABLE_DISKS> diskSwap  = {};
 
 unsigned int swapPosition;
 
 void updateDPT(void) {
-	Bit32u tmpheads, tmpcyl, tmpsect, tmpsize;
+	uint32_t tmpheads, tmpcyl, tmpsect, tmpsize;
 	if(imageDiskList[2]) {
 		PhysPt dp0physaddr=CALLBACK_PhysPointer(diskparm0);
 		imageDiskList[2]->Get_Geometry(&tmpheads, &tmpcyl, &tmpsect, &tmpsize);
-		phys_writew(dp0physaddr,(Bit16u)tmpcyl);
-		phys_writeb(dp0physaddr+0x2,(Bit8u)tmpheads);
+		phys_writew(dp0physaddr,(uint16_t)tmpcyl);
+		phys_writeb(dp0physaddr+0x2,(uint8_t)tmpheads);
 		phys_writew(dp0physaddr+0x3,0);
-		phys_writew(dp0physaddr+0x5,(Bit16u)-1);
+		phys_writew(dp0physaddr+0x5,(uint16_t)-1);
 		phys_writeb(dp0physaddr+0x7,0);
 		phys_writeb(dp0physaddr+0x8,(0xc0 | (((imageDiskList[2]->heads) > 8) << 3)));
 		phys_writeb(dp0physaddr+0x9,0);
 		phys_writeb(dp0physaddr+0xa,0);
 		phys_writeb(dp0physaddr+0xb,0);
-		phys_writew(dp0physaddr+0xc,(Bit16u)tmpcyl);
-		phys_writeb(dp0physaddr+0xe,(Bit8u)tmpsect);
+		phys_writew(dp0physaddr+0xc,(uint16_t)tmpcyl);
+		phys_writeb(dp0physaddr+0xe,(uint8_t)tmpsect);
 	}
 	if(imageDiskList[3]) {
 		PhysPt dp1physaddr=CALLBACK_PhysPointer(diskparm1);
 		imageDiskList[3]->Get_Geometry(&tmpheads, &tmpcyl, &tmpsect, &tmpsize);
-		phys_writew(dp1physaddr,(Bit16u)tmpcyl);
-		phys_writeb(dp1physaddr+0x2,(Bit8u)tmpheads);
-		phys_writeb(dp1physaddr+0xe,(Bit8u)tmpsect);
+		phys_writew(dp1physaddr,(uint16_t)tmpcyl);
+		phys_writeb(dp1physaddr+0x2,(uint8_t)tmpheads);
+		phys_writeb(dp1physaddr+0xe,(uint8_t)tmpsect);
 	}
 }
 
 void incrementFDD(void) {
-	Bit16u equipment=mem_readw(BIOS_CONFIGURATION);
+	uint16_t equipment=mem_readw(BIOS_CONFIGURATION);
 	if(equipment&1) {
 		Bitu numofdisks = (equipment>>6)&3;
 		numofdisks++;
@@ -154,29 +154,34 @@ void swapInNextDisk(bool pressed) {
 }
 
 
-Bit8u imageDisk::Read_Sector(Bit32u head,Bit32u cylinder,Bit32u sector,void * data) {
-	Bit32u sectnum;
+uint8_t imageDisk::Read_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data) {
+	uint32_t sectnum;
 
 	sectnum = ( (cylinder * heads + head) * sectors ) + sector - 1L;
 
 	return Read_AbsoluteSector(sectnum, data);
 }
 
-Bit8u imageDisk::Read_AbsoluteSector(Bit32u sectnum, void * data) {
-	Bit32u bytenum;
+uint8_t imageDisk::Read_AbsoluteSector(uint32_t sectnum, void *data)
+{
+	const auto bytenum = check_cast<cross_off_t>(sectnum) * sector_size;
 
-	bytenum = sectnum * sector_size;
-
-	if (last_action==WRITE || bytenum!=current_fpos) fseek(diskimg,bytenum,SEEK_SET);
-	size_t ret=fread(data, 1, sector_size, diskimg);
+	if (last_action == WRITE || bytenum != current_fpos) {
+		if (cross_fseeko(diskimg, bytenum, SEEK_SET) != 0) {
+			LOG_ERR("BIOSDISK: Could not seek to sector %u in file '%s': %s",
+			        sectnum, diskname, strerror(errno));
+			return 0xff;
+		}
+	}
+	size_t ret = fread(data, 1, sector_size, diskimg);
 	current_fpos=bytenum+ret;
 	last_action=READ;
 
 	return 0x00;
 }
 
-Bit8u imageDisk::Write_Sector(Bit32u head,Bit32u cylinder,Bit32u sector,void * data) {
-	Bit32u sectnum;
+uint8_t imageDisk::Write_Sector(uint32_t head,uint32_t cylinder,uint32_t sector,void * data) {
+	uint32_t sectnum;
 
 	sectnum = ( (cylinder * heads + head) * sectors ) + sector - 1L;
 
@@ -184,15 +189,21 @@ Bit8u imageDisk::Write_Sector(Bit32u head,Bit32u cylinder,Bit32u sector,void * d
 }
 
 
-Bit8u imageDisk::Write_AbsoluteSector(Bit32u sectnum, void *data) {
-	Bit32u bytenum;
-
-	bytenum = sectnum * sector_size;
+uint8_t imageDisk::Write_AbsoluteSector(uint32_t sectnum, void *data) {
+	const auto bytenum = check_cast<cross_off_t>(sectnum) * sector_size;
 
 	//LOG_MSG("Writing sectors to %ld at bytenum %d", sectnum, bytenum);
 
-	if (last_action==READ || bytenum!=current_fpos) fseek(diskimg,bytenum,SEEK_SET);
-	size_t ret=fwrite(data, 1, sector_size, diskimg);
+	if (last_action == READ || bytenum != current_fpos) {
+		if (cross_fseeko(diskimg, bytenum, SEEK_SET) != 0) {
+			LOG_ERR("BIOSDISK: Could not seek to byte %lld in file '%s': %s",
+			        static_cast<long long int>(bytenum),
+			        diskname,
+			        strerror(errno));
+			return 0xff;
+		}
+	}
+	size_t ret = fwrite(data, 1, sector_size, diskimg);
 	current_fpos=bytenum+ret;
 	last_action=WRITE;
 
@@ -216,7 +227,7 @@ imageDisk::imageDisk(FILE *img_file, const char *img_name, uint32_t img_size_k, 
 	memset(diskname,0,512);
 	safe_strcpy(diskname, img_name);
 	if (!is_hdd) {
-		Bit8u i=0;
+		uint8_t i=0;
 		bool founddisk = false;
 		while (DiskGeometryList[i].ksize!=0x0) {
 			if ((DiskGeometryList[i].ksize == img_size_k) ||
@@ -241,7 +252,7 @@ imageDisk::imageDisk(FILE *img_file, const char *img_name, uint32_t img_size_k, 
 	}
 }
 
-void imageDisk::Set_Geometry(Bit32u setHeads, Bit32u setCyl, Bit32u setSect, Bit32u setSectSize) {
+void imageDisk::Set_Geometry(uint32_t setHeads, uint32_t setCyl, uint32_t setSect, uint32_t setSectSize) {
 	heads = setHeads;
 	cylinders = setCyl;
 	sectors = setSect;
@@ -249,24 +260,24 @@ void imageDisk::Set_Geometry(Bit32u setHeads, Bit32u setCyl, Bit32u setSect, Bit
 	active = true;
 }
 
-void imageDisk::Get_Geometry(Bit32u * getHeads, Bit32u *getCyl, Bit32u *getSect, Bit32u *getSectSize) {
+void imageDisk::Get_Geometry(uint32_t * getHeads, uint32_t *getCyl, uint32_t *getSect, uint32_t *getSectSize) {
 	*getHeads = heads;
 	*getCyl = cylinders;
 	*getSect = sectors;
 	*getSectSize = sector_size;
 }
 
-Bit8u imageDisk::GetBiosType(void) {
+uint8_t imageDisk::GetBiosType(void) {
 	if(!hardDrive) {
-		return (Bit8u)DiskGeometryList[floppytype].biosval;
+		return (uint8_t)DiskGeometryList[floppytype].biosval;
 	} else return 0;
 }
 
-Bit32u imageDisk::getSectSize(void) {
+uint32_t imageDisk::getSectSize(void) {
 	return sector_size;
 }
 
-static Bit8u GetDosDriveNumber(Bit8u biosNum) {
+static uint8_t GetDosDriveNumber(uint8_t biosNum) {
 	switch(biosNum) {
 		case 0x0:
 			return 0x0;
@@ -285,8 +296,8 @@ static Bit8u GetDosDriveNumber(Bit8u biosNum) {
 	}
 }
 
-static bool driveInactive(Bit8u driveNum) {
-	if(driveNum>=(2 + MAX_HDD_IMAGES)) {
+static bool driveInactive(uint8_t driveNum) {
+	if (driveNum >= MAX_DISK_IMAGES) {
 		LOG(LOG_BIOS,LOG_ERROR)("Disk %d non-existent", driveNum);
 		last_status = 0x01;
 		CALLBACK_SCF(true);
@@ -314,9 +325,9 @@ static bool has_image(const std::array<T, N> &arr) {
 }
 
 static Bitu INT13_DiskHandler(void) {
-	Bit16u segat, bufptr;
-	Bit8u sectbuf[512];
-	Bit8u  drivenum;
+	uint16_t segat, bufptr;
+	uint8_t sectbuf[512];
+	uint8_t  drivenum;
 	Bitu t;
 	last_drive = reg_dl;
 	drivenum = GetDosDriveNumber(reg_dl);
@@ -369,7 +380,7 @@ static Bitu INT13_DiskHandler(void) {
 			CALLBACK_SCF(true);
 			return CBRET_NONE;
 		}
-		if (!any_images) {
+		if (drivenum >= MAX_DISK_IMAGES || !imageDiskList[drivenum]) {
 			if (drivenum >= DOS_DRIVES || !Drives[drivenum] || Drives[drivenum]->isRemovable()) {
 				reg_ah = 0x01;
 				CALLBACK_SCF(true);
@@ -377,11 +388,14 @@ static Bitu INT13_DiskHandler(void) {
 			}
 			// Inherit the Earth cdrom and Amberstar use it as a disk test
 			if (((reg_dl&0x80)==0x80) && (reg_dh==0) && ((reg_cl&0x3f)==1)) {
-				if (reg_ch==0) {
-					PhysPt ptr = PhysMake(SegValue(es),reg_bx);
+				if (reg_ch == 0) {
 					// write some MBR data into buffer for Amberstar installer
-					mem_writeb(ptr+0x1be,0x80); // first partition is active
-					mem_writeb(ptr+0x1c2,0x06); // first partition is FAT16B
+					real_writeb(SegValue(es),
+					            reg_bx + 0x1be,
+					            0x80); // first partition is active
+					real_writeb(SegValue(es),
+					            reg_bx + 0x1c2,
+					            0x06); // first partition is FAT16B
 				}
 				reg_ah = 0;
 				CALLBACK_SCF(false);
@@ -397,7 +411,7 @@ static Bitu INT13_DiskHandler(void) {
 		segat = SegValue(es);
 		bufptr = reg_bx;
 		for (Bitu i = 0; i < reg_al; i++) {
-			last_status = imageDiskList[drivenum]->Read_Sector((Bit32u)reg_dh, (Bit32u)(reg_ch | ((reg_cl & 0xc0)<< 2)), (Bit32u)((reg_cl & 63)+i), sectbuf);
+			last_status = imageDiskList[drivenum]->Read_Sector((uint32_t)reg_dh, (uint32_t)(reg_ch | ((reg_cl & 0xc0)<< 2)), (uint32_t)((reg_cl & 63)+i), sectbuf);
 			if((last_status != 0x00) || (killRead)) {
 				LOG_MSG("Error in disk read");
 				killRead = false;
@@ -425,7 +439,7 @@ static Bitu INT13_DiskHandler(void) {
 				sectbuf[t] = real_readb(SegValue(es),bufptr);
 				bufptr++;
 			}
-			last_status = imageDiskList[drivenum]->Write_Sector((Bit32u)reg_dh, (Bit32u)(reg_ch | ((reg_cl & 0xc0) << 2)), (Bit32u)((reg_cl & 63) + i), &sectbuf[0]);
+			last_status = imageDiskList[drivenum]->Write_Sector((uint32_t)reg_dh, (uint32_t)(reg_ch | ((reg_cl & 0xc0) << 2)), (uint32_t)((reg_cl & 63) + i), &sectbuf[0]);
 			if(last_status != 0x00) {
 				CALLBACK_SCF(true);
 				return CBRET_NONE;
@@ -450,7 +464,7 @@ static Bitu INT13_DiskHandler(void) {
 		segat = SegValue(es);
 		bufptr = reg_bx;
 		for(i=0;i<reg_al;i++) {
-			last_status = imageDiskList[drivenum]->Read_Sector((Bit32u)reg_dh, (Bit32u)(reg_ch | ((reg_cl & 0xc0)<< 2)), (Bit32u)((reg_cl & 63)+i), sectbuf);
+			last_status = imageDiskList[drivenum]->Read_Sector((uint32_t)reg_dh, (uint32_t)(reg_ch | ((reg_cl & 0xc0)<< 2)), (uint32_t)((reg_cl & 63)+i), sectbuf);
 			if(last_status != 0x00) {
 				LOG_MSG("Error in disk read");
 				CALLBACK_SCF(true);
@@ -486,15 +500,15 @@ static Bitu INT13_DiskHandler(void) {
 		}
 		reg_ax = 0x00;
 		reg_bl = imageDiskList[drivenum]->GetBiosType();
-		Bit32u tmpheads, tmpcyl, tmpsect, tmpsize;
+		uint32_t tmpheads, tmpcyl, tmpsect, tmpsize;
 		imageDiskList[drivenum]->Get_Geometry(&tmpheads, &tmpcyl, &tmpsect, &tmpsize);
 		if (tmpcyl==0) LOG(LOG_BIOS,LOG_ERROR)("INT13 DrivParm: cylinder count zero!");
 		else tmpcyl--;		// cylinder count -> max cylinder
 		if (tmpheads==0) LOG(LOG_BIOS,LOG_ERROR)("INT13 DrivParm: head count zero!");
 		else tmpheads--;	// head count -> max head
-		reg_ch = (Bit8u)(tmpcyl & 0xff);
-		reg_cl = (Bit8u)(((tmpcyl >> 2) & 0xc0) | (tmpsect & 0x3f)); 
-		reg_dh = (Bit8u)tmpheads;
+		reg_ch = (uint8_t)(tmpcyl & 0xff);
+		reg_cl = (uint8_t)(((tmpcyl >> 2) & 0xc0) | (tmpsect & 0x3f)); 
+		reg_dh = (uint8_t)tmpheads;
 		last_status = 0x00;
 		if (reg_dl&0x80) {	// harddisks
 			reg_dl = 0;
@@ -535,12 +549,12 @@ static Bitu INT13_DiskHandler(void) {
 
 			reg_ah = (drivenum <2)?1:3; //With 2 for floppy MSDOS starts calling int 13 ah 16
 			if(reg_ah == 3) {
-				reg_cx = static_cast<Bit16u>(ts >>16);
-				reg_dx = static_cast<Bit16u>(ts & 0xffff);
+				reg_cx = static_cast<uint16_t>(ts >>16);
+				reg_dx = static_cast<uint16_t>(ts & 0xffff);
 			}
 			CALLBACK_SCF(false);
 		} else {
-			if (drivenum <DOS_DRIVES && (Drives[drivenum] != 0 || drivenum <2)) {
+			if (drivenum <DOS_DRIVES && (Drives[drivenum] != nullptr || drivenum <2)) {
 				if (drivenum <2) {
 					//TODO use actual size (using 1.44 for now).
 					reg_ah = 0x1; // type
@@ -580,10 +594,17 @@ void BIOS_SetupDisks(void) {
 	call_int13=CALLBACK_Allocate();	
 	CALLBACK_Setup(call_int13,&INT13_DiskHandler,CB_INT13,"Int 13 Bios disk");
 	RealSetVec(0x13,CALLBACK_RealPointer(call_int13));
-	for (auto &disk : imageDiskList)
-		disk.reset();
-	for (auto &disk : diskSwap)
-		disk.reset();
+
+	// Clean any the numbered images
+	for (auto &image_ptr : imageDiskList) {
+		DriveManager::CloseNumberedImage(image_ptr);
+		image_ptr = nullptr;
+	}
+
+	// Clear any raw disk images
+	diskSwap.fill(nullptr);
+	DriveManager::CloseRawFddImages();
+
 	diskparm0 = CALLBACK_Allocate();
 	diskparm1 = CALLBACK_Allocate();
 	swapPosition = 0;

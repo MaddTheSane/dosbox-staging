@@ -10,7 +10,9 @@ extraction:
       - libopusfile-dev
       - libpng-dev
       - libsdl2-dev
+      - libsdl2-image-dev
       - libsdl2-net-dev
+      - libspeexdsp-dev
       - python3-pip
     after_prepare:
     - python3 -m pip install --user --upgrade meson
@@ -18,7 +20,7 @@ extraction:
     - meson --version
     configure:
       command:
-      - meson setup -Duse_fluidsynth=false -Duse_mt32emu=false build
+      - meson setup -Duse_fluidsynth=false -Duse_mt32emu=false -Dunit_tests=disabled build
     index:
       build_command:
       - ninja -C build

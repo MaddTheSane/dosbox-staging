@@ -90,7 +90,7 @@ extern Bitu cycle_count;
 
 typedef PhysPt (*GetEAHandler)(void);
 
-static const Bit32u AddrMaskTable[2]={0x0000ffff,0xffffffff};
+static const uint32_t AddrMaskTable[2]={0x0000ffff,0xffffffff};
 
 static struct {
 	Bitu opcode_index;
@@ -112,12 +112,12 @@ static struct {
 
 
 #define MAX_PQ_SIZE 32
-static Bit8u prefetch_buffer[MAX_PQ_SIZE];
+static uint8_t prefetch_buffer[MAX_PQ_SIZE];
 static bool pq_valid=false;
 static Bitu pq_start;
 
-static Bit8u Fetchb() {
-	Bit8u temp;
+static uint8_t Fetchb() {
+	uint8_t temp;
 	if (pq_valid && (core.cseip>=pq_start) && (core.cseip<pq_start+CPU_PrefetchQueueSize)) {
 		temp=prefetch_buffer[core.cseip-pq_start];
 		if ((core.cseip+1>=pq_start+CPU_PrefetchQueueSize-4) &&
@@ -141,8 +141,8 @@ static Bit8u Fetchb() {
 	return temp;
 }
 
-static Bit16u Fetchw() {
-	Bit16u temp;
+static uint16_t Fetchw() {
+	uint16_t temp;
 	if (pq_valid && (core.cseip>=pq_start) && (core.cseip+2<pq_start+CPU_PrefetchQueueSize)) {
 		temp=prefetch_buffer[core.cseip-pq_start]|
 			(prefetch_buffer[core.cseip-pq_start+1]<<8);
@@ -167,8 +167,8 @@ static Bit16u Fetchw() {
 	return temp;
 }
 
-static Bit32u Fetchd() {
-	Bit32u temp;
+static uint32_t Fetchd() {
+	uint32_t temp;
 	if (pq_valid && (core.cseip>=pq_start) && (core.cseip+4<pq_start+CPU_PrefetchQueueSize)) {
 		temp=prefetch_buffer[core.cseip-pq_start]|
 			(prefetch_buffer[core.cseip-pq_start+1]<<8)|
@@ -208,12 +208,12 @@ static Bit32u Fetchd() {
 
 #define EALookupTable (core.ea_table)
 
-Bits CPU_Core_Prefetch_Run(void) {
+Bits CPU_Core_Prefetch_Run() noexcept
+{
 	bool invalidate_pq=false;
 	while (CPU_Cycles-->0) {
 		if (invalidate_pq) {
-			pq_valid=false;
-			invalidate_pq=false;
+			pq_valid = false;
 		}
 		LOADIP;
 		core.opcode_index=cpu.code.big*0x200;
@@ -232,34 +232,48 @@ Bits CPU_Core_Prefetch_Run(void) {
 		cycle_count++;
 #endif
 restart_opcode:
-		Bit8u next_opcode=Fetchb();
-		invalidate_pq=false;
-		if (core.opcode_index&OPCODE_0F) invalidate_pq=true;
-		else switch (next_opcode) {
-			case 0x70:	case 0x71:	case 0x72:	case 0x73:
-			case 0x74:	case 0x75:	case 0x76:	case 0x77:
-			case 0x78:	case 0x79:	case 0x7a:	case 0x7b:
-			case 0x7c:	case 0x7d:	case 0x7e:	case 0x7f:	// jcc
-			case 0x9a:	// call
-			case 0xc2:	case 0xc3:	// retn
-			case 0xc8:	// enter
-			case 0xc9:	// leave
-			case 0xca:	case 0xcb:	// retf
-			case 0xcc:	// int3
-			case 0xcd:	// int
-			case 0xce:	// into
-			case 0xcf:	// iret
-			case 0xe0:	// loopnz
-			case 0xe1:	// loopz
-			case 0xe2:	// loop
-			case 0xe3:	// jcxz
-			case 0xe8:	// call
-			case 0xe9:	case 0xea:	case 0xeb:	// jmp
-			case 0xff:
-				invalidate_pq=true;
-				break;
-			default:
-				break;
+		const auto next_opcode = Fetchb();
+		invalidate_pq = core.opcode_index & OPCODE_0F;
+		if (!invalidate_pq) {
+			switch (next_opcode) {
+			case 0x70: // jcc (first)
+			case 0x71: // ...
+			case 0x72:
+			case 0x73:
+			case 0x74:
+			case 0x75:
+			case 0x76:
+			case 0x77:
+			case 0x78:
+			case 0x79:
+			case 0x7a:
+			case 0x7b:
+			case 0x7c:
+			case 0x7d:
+			case 0x7e: // ...
+			case 0x7f: // jcc (last)
+			case 0x9a: // call
+			case 0xc2: // retn
+			case 0xc3: // retn
+			case 0xc8: // enter
+			case 0xc9: // leave
+			case 0xca: // retf
+			case 0xcb: // retf
+			case 0xcc: // int3
+			case 0xcd: // int
+			case 0xce: // into
+			case 0xcf: // iret
+			case 0xe0: // loopnz
+			case 0xe1: // loopz
+			case 0xe2: // loop
+			case 0xe3: // jcxz
+			case 0xe8: // call
+			case 0xe9: // jmp (first)
+			case 0xea: // ...
+			case 0xeb: // jmp (last)
+			case 0xff: invalidate_pq = true; break;
+			default: break;
+			}
 		}
 		switch (core.opcode_index+next_opcode) {
 		#include "core_normal/prefix_none.h"
@@ -295,7 +309,8 @@ decode_end:
 	return CBRET_NONE;
 }
 
-Bits CPU_Core_Prefetch_Trap_Run(void) {
+Bits CPU_Core_Prefetch_Trap_Run() noexcept
+{
 	Bits oldCycles = CPU_Cycles;
 	CPU_Cycles = 1;
 	cpu.trap_skip = false;
@@ -307,8 +322,6 @@ Bits CPU_Core_Prefetch_Trap_Run(void) {
 
 	return ret;
 }
-
-
 
 void CPU_Core_Prefetch_Init(void) {
 

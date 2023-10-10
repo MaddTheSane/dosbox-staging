@@ -21,34 +21,35 @@
 
 #include "dosbox.h"
 
-void JOYSTICK_Enable(Bitu which,bool enabled);
+void JOYSTICK_Enable(uint8_t which, bool enabled);
 
-void JOYSTICK_Button(Bitu which,Bitu num,bool pressed);
+void JOYSTICK_Button(uint8_t which, int num, bool pressed);
 
-void JOYSTICK_Move_X(Bitu which,float x);
+// takes in the joystick axis absolute value from -32768 to 32767
+void JOYSTICK_Move_X(uint8_t which, int16_t x_val);
+void JOYSTICK_Move_Y(uint8_t which, int16_t y_val);
 
-void JOYSTICK_Move_Y(Bitu which,float y);
+bool JOYSTICK_IsAccessible(uint8_t which);
 
-bool JOYSTICK_IsEnabled(Bitu which);
+bool JOYSTICK_GetButton(uint8_t which, int num);
 
-bool JOYSTICK_GetButton(Bitu which, Bitu num);
-
-float JOYSTICK_GetMove_X(Bitu which);
-
-float JOYSTICK_GetMove_Y(Bitu which);
+// returns a percentage from -1.0 to +1.0 along the axis
+double JOYSTICK_GetMove_X(uint8_t which);
+double JOYSTICK_GetMove_Y(uint8_t which);
 
 void JOYSTICK_ParseConfiguredType();
 
 enum JoystickType {
-	JOY_UNSET,
-	JOY_DISABLED, // joystick subsystem is fully disabled (won't even query)
-	JOY_NONE,     // joystick subsystem will be available for mapping only
-	JOY_AUTO,
-	JOY_2AXIS,
-	JOY_4AXIS,
-	JOY_4AXIS_2,
-	JOY_FCS,
-	JOY_CH
+	JOY_UNSET = 1 << 0,
+	JOY_NONE_FOUND = 1 << 1,       // Not a conf option; only set during auto-setup
+	JOY_DISABLED = 1 << 2,         // SDL's joystick subsystem left uninitialized
+	JOY_ONLY_FOR_MAPPING = 1 << 3, // Hidden from DOS, but still mappable
+	JOY_AUTO = 1 << 4,             // Specific type is determined during auto-setup
+	JOY_2AXIS = 1 << 5,
+	JOY_4AXIS = 1 << 6,
+	JOY_4AXIS_2 = 1 << 7,
+	JOY_FCS = 1 << 8,
+	JOY_CH = 1 << 9,
 };
 
 //--Added 2011-05-08 by Alun Bestor to let Boxer set and retrieve the gameport timing mode.

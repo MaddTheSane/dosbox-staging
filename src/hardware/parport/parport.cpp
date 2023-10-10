@@ -36,22 +36,22 @@
 #include "filelpt.h"
 #include "dos_inc.h"
 
-bool device_LPT::Read(Bit8u * data,Bit16u * size) {
+bool device_LPT::Read(uint8_t * data,uint16_t * size) {
 	*size=0;
 	LOG(LOG_DOSMISC,LOG_NORMAL)("LPTDEVICE:Read called");
 	return true;
 }
 
 
-bool device_LPT::Write(Bit8u * data,Bit16u * size) {
-	for (Bit16u i=0; i<*size; i++)
+bool device_LPT::Write(uint8_t * data,uint16_t * size) {
+	for (int16_t i=0; i<*size; i++)
 	{
 		if(!pportclass->Putchar(data[i])) return false;
 	}
 	return true;
 }
 
-bool device_LPT::Seek(Bit32u * pos,Bit32u type) {
+bool device_LPT::Seek(uint32_t * pos,uint32_t type) {
 	*pos = 0;
 	return true;
 }
@@ -60,11 +60,11 @@ bool device_LPT::Close() {
 	return false;
 }
 
-Bit16u device_LPT::GetInformation(void) {
+uint16_t device_LPT::GetInformation(void) {
 	return 0x80A0;
 };
 const char* lptname[]={"LPT1","LPT2","LPT3"};
-device_LPT::device_LPT(Bit8u _num, class CParallel* pp) {
+device_LPT::device_LPT(uint8_t _num, class CParallel* pp) {
 	pportclass = pp;
 	SetName(lptname[_num]);
 	this->num = _num;
@@ -80,16 +80,16 @@ static void Parallel_EventHandler(uint32_t val) {
 		parallelPortObjects[serclassid]->handleEvent(val>>2);
 }
 
-void CParallel::setEvent(Bit16u type, float duration) {
+void CParallel::setEvent(uint16_t type, float duration) {
     PIC_AddEvent(Parallel_EventHandler,duration,(type<<2)|port_nr);
 }
 
-void CParallel::removeEvent(Bit16u type) {
+void CParallel::removeEvent(uint16_t type) {
     // TODO
 	PIC_RemoveSpecificEvents(Parallel_EventHandler,(type<<2)|port_nr);
 }
 
-void CParallel::handleEvent(Bit16u type) {
+void CParallel::handleEvent(uint16_t type) {
 	handleUpperEvent(type);
 }
 
@@ -169,7 +169,7 @@ void CParallel::log_par(bool active, char const* format,...) {
 #endif
 
 // Initialisation
-CParallel::CParallel(CommandLine* cmd, Bitu portnr, Bit8u initirq) {
+CParallel::CParallel(CommandLine* cmd, Bitu portnr, uint8_t initirq) {
 	base = parallel_baseaddr[portnr];
 	irq = initirq;
 	port_nr = portnr;
@@ -220,7 +220,7 @@ CParallel::~CParallel(void) {
 	if(mydosdevice) DOS_DelDevice(mydosdevice);
 };
 
-Bit8u CParallel::getPrinterStatus()
+uint8_t CParallel::getPrinterStatus()
 {
 	/*	7      not busy
 		6      acknowledge
@@ -229,7 +229,7 @@ Bit8u CParallel::getPrinterStatus()
 		3      I/O error
 		2-1    unused
 		0      timeout  */
-	Bit8u statusreg=Read_SR();
+	uint8_t statusreg=Read_SR();
 
 	//LOG_MSG("get printer status: %x",statusreg);
 	statusreg^=0x48;
@@ -269,7 +269,7 @@ public:
 #endif
 
 		// default ports & interrupts
-		Bit8u defaultirq[] = { 7, 5, 12};
+		uint8_t defaultirq[] = { 7, 5, 12};
 		Section_prop *section = static_cast <Section_prop*>(configuration);
 		
 		char pname[]="parallelx";

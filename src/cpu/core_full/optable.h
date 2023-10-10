@@ -16,6 +16,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "../string_ops.h"
+
 /* Big ass opcode table normal,double, 66 normal, 66 double */
 static OpCode OpCodeTable[1024]={
 /* 0x00 - 0x07 */
@@ -446,7 +448,7 @@ static OpCode OpCodeTable[1024]={
 
 /* 0x260 - 0x267 */
 {D_PUSHAd	,0			,0		,0		},{D_POPAd	,0			,0		,0		},
-{L_MODRM	,O_BOUNDd	,0		,0		},{0		,0			,0		,0		},
+{L_MODRM	,O_BOUNDd	,0		,M_Gd	},{0		,0			,0		,0		},
 {L_PRESEG	,0			,0		,fs		},{L_PRESEG	,0			,0		,gs		},
 {L_PREOP	,0			,0		,0		},{L_PREADD	,0			,0		,0		},
 /* 0x268 - 0x26f */

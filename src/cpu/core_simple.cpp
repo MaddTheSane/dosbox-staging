@@ -15,23 +15,22 @@
  *  with this program; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
-
-#include <stdio.h>
-
 #include "dosbox.h"
-#include "mem.h"
-#include "cpu.h"
-#include "lazyflags.h"
-#include "inout.h"
+
 #include "callback.h"
-#include "pic.h"
+#include "cpu.h"
 #include "fpu.h"
+#include "inout.h"
+#include "lazyflags.h"
+#include "mem.h"
+#include "paging.h"
+#include "pic.h"
+#include "tracy.h"
 
 #if C_DEBUG
 #include "debug.h"
 #endif
 
-#include "paging.h"
 #define SegBase(c)	SegPhys(c)
 #define LoadMb(off) mem_readb(off)
 #define LoadMw(off) mem_readw(off)
@@ -81,7 +80,7 @@ extern Bitu cycle_count;
 
 typedef PhysPt (*GetEAHandler)(void);
 
-static const Bit32u AddrMaskTable[2]={0x0000ffff,0xffffffff};
+static const uint32_t AddrMaskTable[2]={0x0000ffff,0xffffffff};
 
 static struct {
 	Bitu opcode_index;
@@ -105,19 +104,19 @@ static struct {
 #define BaseDS		core.base_ds
 #define BaseSS		core.base_ss
 
-static INLINE Bit8u Fetchb() {
-	Bit8u temp=host_readb(core.cseip);
+static inline uint8_t Fetchb() {
+	uint8_t temp=host_readb(core.cseip);
 	core.cseip+=1;
 	return temp;
 }
 
-static INLINE Bit16u Fetchw() {
-	Bit16u temp=host_readw(core.cseip);
+static inline uint16_t Fetchw() {
+	uint16_t temp=host_readw(core.cseip);
 	core.cseip+=2;
 	return temp;
 }
-static INLINE Bit32u Fetchd() {
-	Bit32u temp=host_readd(core.cseip);
+static inline uint32_t Fetchd() {
+	uint32_t temp=host_readd(core.cseip);
 	core.cseip+=4;
 	return temp;
 }
@@ -134,7 +133,9 @@ static INLINE Bit32u Fetchd() {
 
 #define EALookupTable (core.ea_table)
 
-Bits CPU_Core_Simple_Run(void) {
+Bits CPU_Core_Simple_Run() noexcept
+{
+	ZoneScoped;
 	while (CPU_Cycles-->0) {
 		LOADIP;
 		core.opcode_index=cpu.code.big*0x200;
@@ -163,15 +164,23 @@ restart_opcode:
 		illegal_opcode:
 #if C_DEBUG	
 			{
-				Bitu len=(GETIP-reg_eip);
+				// Basic illegal opcode info-only report
+				LOG(LOG_CPU, LOG_NORMAL)("Illegal/Unhandled opcode");
+
+				/* Detailed illegal opcode logging is disabled.
+				// (sprintf below is commented out)
+				Bitu len = (GETIP - reg_eip);
 				LOADIP;
-				if (len>16) len=16;
-				char tempcode[16*2+1];char * writecode=tempcode;
-				for (;len>0;len--) {
-//					sprintf(writecode,"%X",mem_readb(core.cseip++));
-					writecode+=2;
+				if (len > 16)
+					len = 16;
+				char tempcode[16 * 2 + 1];
+				[[maybe_unused]] char *writecode = tempcode;
+				for (; len > 0; len--) {
+					// sprintf(writecode,"%X",mem_readb(core.cseip++));
+					writecode += 2;
 				}
-				LOG(LOG_CPU,LOG_NORMAL)("Illegal/Unhandled opcode %s",tempcode);
+				LOG(LOG_CPU, LOG_NORMAL)("Illegal/Unhandled opcode %s", tempcode);
+				*/
 			}
 #endif
 			CPU_Exception(6,0);
@@ -187,7 +196,8 @@ decode_end:
 	return CBRET_NONE;
 }
 
-Bits CPU_Core_Simple_Trap_Run(void) {
+Bits CPU_Core_Simple_Trap_Run() noexcept
+{
 	Bits oldCycles = CPU_Cycles;
 	CPU_Cycles = 1;
 	cpu.trap_skip = false;
@@ -199,8 +209,6 @@ Bits CPU_Core_Simple_Trap_Run(void) {
 
 	return ret;
 }
-
-
 
 void CPU_Core_Simple_Init(void) {
 

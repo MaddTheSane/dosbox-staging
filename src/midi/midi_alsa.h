@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -48,10 +48,19 @@ public:
 	MidiHandler_alsa(const MidiHandler_alsa &) = delete; // prevent copying
 	MidiHandler_alsa &operator=(const MidiHandler_alsa &) = delete; // prevent assignment
 
-	const char *GetName() const override { return "alsa"; }
+	std::string_view GetName() const override
+	{
+		return "alsa";
+	}
+
+	MidiDeviceType GetDeviceType() const override
+	{
+		return MidiDeviceType::External;
+	}
+
 	bool Open(const char *conf) override;
 	void Close() override;
-	void PlayMsg(const uint8_t *msg) override;
+	void PlayMsg(const MidiMessage& msg) override;
 	void PlaySysex(uint8_t *sysex, size_t len) override;
 	MIDI_RC ListAll(Program *caller) override;
 };

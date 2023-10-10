@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2022  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -32,9 +32,4 @@ void LS::Run()
 	char args[CMD_MAXLINE];
 	safe_strcpy(args, tmp.c_str());
 	first_shell->CMD_LS(args);
-}
-
-void LS_ProgramStart(Program **make)
-{
-	*make = new LS;
 }

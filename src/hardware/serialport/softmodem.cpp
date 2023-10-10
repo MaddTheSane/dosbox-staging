@@ -30,6 +30,7 @@
 #include "string_utils.h"
 #include "serialport.h"
 #include "softmodem.h"
+#include "math_utils.h"
 #include "misc_util.h"
 
 class PhonebookEntry {
@@ -66,12 +67,13 @@ static bool MODEM_IsPhoneValid(const std::string &input) {
 	return true;
 }
 
-bool MODEM_ReadPhonebook(const std::string &filename) {
-	std::ifstream loadfile(filename);
+bool MODEM_ReadPhonebook(const std_fs::path &path) {
+	std::ifstream loadfile(path);
 	if (!loadfile)
 		return false;
 
-	LOG_MSG("SERIAL: Phonebook loading from %s.", filename.c_str());
+	const auto path_string = path.string();
+	LOG_MSG("SERIAL: Phonebook loading from %s.", path_string.c_str());
 
 	std::string linein;
 	while (std::getline(loadfile, linein)) {
@@ -79,8 +81,8 @@ bool MODEM_ReadPhonebook(const std::string &filename) {
 		std::string phone, address;
 
 		if (!(iss >> phone >> address)) {
-			LOG_MSG("SERIAL: Phonebook skipped a bad line in %s.",
-			        filename.c_str());
+			LOG_MSG("SERIAL: Phonebook skipped a bad line in '%s'",
+			        path_string.c_str());
 			continue;
 		}
 
@@ -117,7 +119,16 @@ CSerialModem::CSerialModem(const uint8_t port_idx, CommandLine *cmd)
           telClient({}),
           dial({})
 {
+	uint32_t bool_temp = 0;
+
 	InstallationSuccessful=false;
+
+	// enet: Setting to 1 enables enet on the port, otherwise TCP.
+	if (getUintFromString("sock:", bool_temp, cmd)) {
+		if (bool_temp == 1) {
+			socketType = SocketType::Enet;
+		}
+	}
 
 	// Setup the listening port
 	uint32_t val;
@@ -132,7 +143,7 @@ CSerialModem::CSerialModem(const uint8_t port_idx, CommandLine *cmd)
 
 	CSerial::Init_Registers();
 	Reset(); // reset calls EnterIdleState
-	setEvent(SERIAL_POLLING_EVENT,1);
+	setEvent(SERIAL_POLLING_EVENT, MODEM_TICKTIME);
 
 	// Enable telnet-mode if configured
 	if (getUintFromString("telnet:", val, cmd)) {
@@ -140,6 +151,21 @@ CSerialModem::CSerialModem(const uint8_t port_idx, CommandLine *cmd)
 		LOG_MSG("SERIAL: Port %" PRIu8 " telnet-mode %s",
 		        GetPortNumber(), telnet_mode ? "enabled" : "disabled");
 	}
+
+	// Get the connect speed to report
+	constexpr auto min_baudrate = 300u;
+	constexpr auto max_baudrate = 57600u;
+	if (getUintFromString("baudrate:", val, cmd)) {
+		val = clamp(val, min_baudrate, max_baudrate);
+	} else {
+		val = max_baudrate;
+	}
+
+	assert(val >= min_baudrate && val <= max_baudrate);
+	safe_sprintf(connect_string, "CONNECT %d", val);
+
+	LOG_MSG("SERIAL: Port %" PRIu8 " will report baud rate %d",
+			GetPortNumber(), val);
 
 	InstallationSuccessful=true;
 }
@@ -189,7 +215,7 @@ void CSerialModem::handleUpperEvent(uint16_t type)
 			setEvent(SERIAL_RX_EVENT, (float)0.01);
 		}
 		Timer2();
-		setEvent(SERIAL_POLLING_EVENT,1);
+		setEvent(SERIAL_POLLING_EVENT, MODEM_TICKTIME);
 		break;
 	}
 
@@ -200,18 +226,18 @@ void CSerialModem::handleUpperEvent(uint16_t type)
 }
 
 void CSerialModem::SendLine(const char *line) {
-	rqueue->addb(0xd);
-	rqueue->addb(0xa);
+	rqueue->addb(reg[MREG_CR_CHAR]);
+	rqueue->addb(reg[MREG_LF_CHAR]);
 	rqueue->adds((uint8_t *)line, strlen(line));
-	rqueue->addb(0xd);
-	rqueue->addb(0xa);
+	rqueue->addb(reg[MREG_CR_CHAR]);
+	rqueue->addb(reg[MREG_LF_CHAR]);
 }
 
 // only for numbers < 1000...
 void CSerialModem::SendNumber(uint32_t val)
 {
-	rqueue->addb(0xd);
-	rqueue->addb(0xa);
+	rqueue->addb(reg[MREG_CR_CHAR]);
+	rqueue->addb(reg[MREG_LF_CHAR]);
 
 	rqueue->addb(val / 100 + '0');
 	val = val%100;
@@ -219,33 +245,35 @@ void CSerialModem::SendNumber(uint32_t val)
 	val = val%10;
 	rqueue->addb(val + '0');
 
-	rqueue->addb(0xd);
-	rqueue->addb(0xa);
+	rqueue->addb(reg[MREG_CR_CHAR]);
+	rqueue->addb(reg[MREG_LF_CHAR]);
 }
 
 void CSerialModem::SendRes(const ResTypes response) {
-	char const * string = nullptr;
+	const char* response_str = nullptr;
 	uint32_t code = -1;
 	switch (response) {
-		case ResOK:         code = 0; string = "OK"; break;
-		case ResCONNECT:    code = 1; string = "CONNECT 57600"; break;
-		case ResRING:       code = 2; string = "RING"; break;
-		case ResNOCARRIER:  code = 3; string = "NO CARRIER"; break;
-		case ResERROR:      code = 4; string = "ERROR"; break;
-		case ResNODIALTONE: code = 6; string = "NO DIALTONE"; break;
-		case ResBUSY:       code = 7; string = "BUSY"; break;
-		case ResNOANSWER:   code = 8; string = "NO ANSWER"; break;
-		case ResNONE:       return;
+	case ResOK:         code = 0; response_str = "OK"; break;
+	case ResCONNECT:    code = 1; response_str = connect_string; break;
+	case ResRING:       code = 2; response_str = "RING"; break;
+	case ResNOCARRIER:  code = 3; response_str = "NO CARRIER"; break;
+	case ResERROR:      code = 4; response_str = "ERROR"; break;
+	case ResNODIALTONE: code = 6; response_str = "NO DIALTONE"; break;
+	case ResBUSY:       code = 7; response_str = "BUSY"; break;
+	case ResNOANSWER:   code = 8; response_str = "NO ANSWER"; break;
+	case ResNONE: return;
 	}
 
 	if(doresponse != 1) {
 		if (doresponse == 2 && (response == ResRING ||
-			response == ResCONNECT || response == ResNOCARRIER))
+			response == ResCONNECT || response == ResNOCARRIER)) {
 			return;
-		if (numericresponse && code != static_cast<uint32_t>(-1))
+		}
+		if (numericresponse && code != static_cast<uint32_t>(-1)) {
 			SendNumber(code);
-		else if (string != nullptr)
-			SendLine(string);
+		} else if (response_str != nullptr) {
+			SendLine(response_str);
+		}
 
 		// if(CSerial::CanReceiveByte())	// very fast response
 		//	if(rqueue->inuse() && CSerial::getRTS())
@@ -255,9 +283,10 @@ void CSerialModem::SendRes(const ResTypes response) {
 		//	        GetPortNumber(), rbyte);
 		//	}
 
-		if (string != nullptr) {
+		if (response_str != nullptr) {
 			LOG_MSG("SERIAL: Port %" PRIu8 " modem response: %s.",
-			        GetPortNumber(), string);
+			        GetPortNumber(),
+			        response_str);
 		}
 	}
 }
@@ -280,9 +309,10 @@ bool CSerialModem::Dial(const char * host) {
 	}
 
 	// Resolve host we're gonna dial
-	LOG_MSG("SERIAL: Port %" PRIu8 " connecting to host %s port %" PRIu16
-	        ".", GetPortNumber(), destination, port);
-	clientsocket.reset(new TCPClientSocket(destination, port));
+	LOG_MSG("SERIAL: Port %" PRIu8 " connecting to host %s port %" PRIu16 ".",
+	        GetPortNumber(), destination, port);
+	clientsocket.reset(NETClientSocket::NETClientFactory(socketType,
+	                                                     destination, port));
 	if (!clientsocket->isopen) {
 		clientsocket.reset(nullptr);
 		LOG_MSG("SERIAL: Port %" PRIu8 " failed to connect.", GetPortNumber());
@@ -299,6 +329,7 @@ void CSerialModem::AcceptIncomingCall() {
 	if (waitingclientsocket) {
 		clientsocket = std::move(waitingclientsocket);
 		EnterConnectedState();
+		warmup_remain_ticks = MODEM_WARMUP_DELAY_MS;
 	} else {
 		EnterIdleState();
 	}
@@ -354,6 +385,7 @@ void CSerialModem::EnterIdleState(){
 	connected = false;
 	ringing = false;
 	dtrofftimer = -1;
+	warmup_remain_ticks = 0;
 	clientsocket.reset(nullptr);
 	waitingclientsocket.reset(nullptr);
 
@@ -363,17 +395,19 @@ void CSerialModem::EnterIdleState(){
 		while (waitingclientsocket) {
 			waitingclientsocket.reset(serversocket->Accept());
 		}
-	} else if (listenport) {
-
-		serversocket.reset(new TCPServerSocket(listenport));
+	}
+	if (listenport) {
+		serversocket.reset(nullptr);
+		serversocket.reset(NETServerSocket::NETServerFactory(socketType,
+		                                                     listenport));
 		if (!serversocket->isopen) {
-			LOG_MSG("SERIAL: Port %" PRIu8 " modem could not open TCP port "
+			LOG_MSG("SERIAL: Port %" PRIu8 " modem could not open port "
 			        "%" PRIu16 ".",
 			        GetPortNumber(), listenport);
 
 			serversocket.reset(nullptr);
 		} else
-			LOG_MSG("SERIAL: Port %" PRIu8 " modem listening on TCP port "
+			LOG_MSG("SERIAL: Port %" PRIu8 " modem listening on port "
 			        "%" PRIu16 " ...",
 			        GetPortNumber(), listenport);
 	}
@@ -417,19 +451,8 @@ void CSerialModem::DoCommand()
 	upcase(cmdbuf);
 	LOG_MSG("SERIAL: Port %" PRIu8 " command sent to modem: ->%s<-",
 	        GetPortNumber(), cmdbuf);
-	/* Check for empty line, stops dialing and autoanswer */
-	if (!cmdbuf[0]) {
-		reg[MREG_AUTOANSWER_COUNT] = 0;	// autoanswer off
-		return;
-	}
-	//else {
-		//MIXER_Enable(mhd.chan,false);
-	//	dialing = false;
-	//	SendRes(ResNOCARRIER);
-	//	goto ret_none;
-	//}
-	/* AT command set interpretation */
 
+	/* AT command set interpretation */
 	if ((cmdbuf[0] != 'A') || (cmdbuf[1] != 'T')) {
 		SendRes(ResERROR);
 		return;
@@ -467,6 +490,29 @@ void CSerialModem::DoCommand()
 					LOG_MSG("SERIAL: Port %" PRIu8 " telnet-mode %s",
 					        GetPortNumber(),
 					        telnet_mode ? "enabled" : "disabled");
+				}
+				break;
+			}
+			// +SOCK1 enables enet.  +SOCK0 is TCP.
+			if (is_next_token("SOCK", scanbuf)) {
+				scanbuf += 4;
+				const uint32_t requested_mode = ScanNumber(scanbuf);
+				const auto requested_type = static_cast<SocketType>(
+				        requested_mode);
+				if (requested_type >= SocketType::Invalid) {
+					SendRes(ResERROR);
+					return;
+				}
+				if (socketType != requested_type) {
+					socketType = requested_type;
+					// This will break when there's more
+					// than two socket types.
+					LOG_MSG("SERIAL: Port %" PRIu8
+					        " socket type %s",
+					        GetPortNumber(),
+					        to_string(socketType));
+					// Reset port state.
+					EnterIdleState();
 				}
 				break;
 			}
@@ -509,7 +555,7 @@ void CSerialModem::DoCommand()
 					// be a valid IP/name
 					// Transform by adding dots
 					size_t j = 0;
-					size_t foundlen = strlen(foundstr);
+					const size_t foundlen = strlen(foundstr);
 					for (size_t i = 0; i < foundlen; i++) {
 						buffer[j++] = foundstr[i];
 						// Add a dot after the third, sixth and ninth number
@@ -517,7 +563,7 @@ void CSerialModem::DoCommand()
 							buffer[j++] = '.';
 						// If the string is longer than 12 digits,
 						// interpret the rest as port
-						if (i == 11 && strlen(foundstr) > 12)
+						if (i == 11 && foundlen > 12)
 							buffer[j++] = ':';
 					}
 					buffer[j] = 0;
@@ -821,13 +867,24 @@ void CSerialModem::TelnetEmulation(uint8_t *data, uint32_t size)
 	}
 }
 
-void CSerialModem::Timer2() {
+void CSerialModem::Echo(uint8_t ch)
+{
+	if (echo) {
+		rqueue->addb(ch);
+		// LOG_MSG("SERIAL: Port %" PRIu8 " echo back to queue: %x.",
+		//         GetPortNumber(), txval);
+	}
+}
+
+void CSerialModem::Timer2()
+{
 	uint32_t txbuffersize = 0;
 
 	// Check for eventual break command
 	if (!commandmode) {
 		cmdpause++;
-		const auto guard_threashold = static_cast<uint32_t>(20 * reg[MREG_GUARD_TIME]);
+		const auto guard_threashold = static_cast<uint32_t>(
+		        reg[MREG_GUARD_TIME] * 20 / MODEM_TICKTIME);
 		if (cmdpause > guard_threashold) {
 			if (plusinc == 0) {
 				plusinc = 1;
@@ -847,26 +904,44 @@ void CSerialModem::Timer2() {
 	while (tqueue->inuse()) {
 		const uint8_t txval = tqueue->getb();
 		if (commandmode) {
-			if (echo) {
-				rqueue->addb(txval);
-				// LOG_MSG("SERIAL: Port %" PRIu8 " echo back to queue: %x.",
-				//         GetPortNumber(), txval);
+			if (cmdpos < 2) {
+				// Ignore everything until we see "AT" sequence.
+				if (cmdpos == 0 && toupper(txval) != 'A') {
+					continue;
+				}
+
+				if (cmdpos == 1 && toupper(txval) != 'T') {
+					Echo(reg[MREG_BACKSPACE_CHAR]);
+					cmdpos = 0;
+					continue;
+				}
+			} else {
+				// Now entering command.
+				if (txval == reg[MREG_BACKSPACE_CHAR]) {
+					if (cmdpos > 2) {
+						Echo(txval);
+						cmdpos--;
+					}
+					continue;
+				}
+
+				if (txval == reg[MREG_LF_CHAR]) {
+					continue; // Real modem doesn't seem to skip this?
+				}
+
+				if (txval == reg[MREG_CR_CHAR]) {
+					Echo(txval);
+					DoCommand();
+					continue;
+				}
 			}
 
-			if (txval == '\n')
-				continue; // Real modem doesn't seem to skip this?
-
-			if (txval == '\b') {
-				if (cmdpos > 0)
-					cmdpos--;
-			} else if (txval == '\r') {
-				DoCommand();
-			} else if (cmdpos < 99) {
+			if (cmdpos < 99) {
+				Echo(txval);
 				cmdbuf[cmdpos] = txval;
 				cmdpos++;
 			}
-		}
-		else {// + character
+		} else {
 			if (plusinc >= 1 && plusinc <= 3 && txval == reg[MREG_ESCAPE_CHAR]) // +
 				plusinc++;
 			else {
@@ -878,20 +953,23 @@ void CSerialModem::Timer2() {
 		}
 	} // while loop
 
-	if (clientsocket && txbuffersize) {
+	if (clientsocket && txbuffersize && warmup_remain_ticks == 0) {
 		// down here it saves a lot of network traffic
 		if (!clientsocket->SendArray(tmpbuf,txbuffersize)) {
 			SendRes(ResNOCARRIER);
+			LOG_INFO("SERIAL: No carrier on send");
 			EnterIdleState();
 		}
 	}
 	// Handle incoming to the serial port
 	if (!commandmode && clientsocket && rqueue->left()) {
 		size_t usesize = rqueue->left() >= 16 ? 16 : rqueue->left();
+		// size_t usesize = 1;
 		if (!clientsocket->ReceiveArray(tmpbuf, usesize)) {
 			SendRes(ResNOCARRIER);
+			LOG_INFO("SERIAL: No carrier on receive");
 			EnterIdleState();
-		} else if (usesize) {
+		} else if (usesize && warmup_remain_ticks == 0) {
 			// Filter telnet commands
 			if (telnet_mode)
 				TelnetEmulation(tmpbuf, usesize);
@@ -899,19 +977,30 @@ void CSerialModem::Timer2() {
 				rqueue->adds(tmpbuf,usesize);
 		}
 	}
+
+	// Tick down warmup timer
+	if (clientsocket && warmup_remain_ticks) {
+		// Drop all incoming and outgoing traffic for a short period after
+		// answering a call. This is to simulate real modem behavior where
+		// the first packet is usually bad (extra data in the buffer from
+		// connecting, noise, random nonsense).
+		// Some games are known to break without this.
+		warmup_remain_ticks--;
+	}
+
 	// Check for incoming calls
 	if (!connected && !waitingclientsocket && serversocket) {
 		waitingclientsocket.reset(serversocket->Accept());
 		if (waitingclientsocket) {
 			if (!CSerial::getDTR() && dtrmode != 0) {
-				// accept no calls with DTR off; TODO: AT &Dn
+				// accept no calls with DTR off
 				EnterIdleState();
 			} else {
 				ringing = true;
 				SendRes(ResRING);
 				CSerial::setRI(!CSerial::getRI());
 				//MIXER_Enable(mhd.chan,true);
-				ringtimer = 3000;
+				ringtimer = MODEM_RINGINTERVAL;
 				reg[MREG_RING_COUNT] = 0; //Reset ring counter reg
 			}
 		}
@@ -928,11 +1017,12 @@ void CSerialModem::Timer2() {
 			CSerial::setRI(!CSerial::getRI());
 
 			//MIXER_Enable(mhd.chan,true);
-			ringtimer = 3000;
+			ringtimer = MODEM_RINGINTERVAL;
 		}
 		--ringtimer;
 	}
 
+	// Handle DTR drop
 	if (connected && !getDTR()) {
 		if (dtrofftimer == 0) {
 			switch (dtrmode) {
@@ -993,8 +1083,8 @@ void CSerialModem::transmitByte(uint8_t val, bool first)
 	setEvent(MODEM_TX_EVENT, bytetime); // TX event
 	if (first)
 		ByteTransmitting();
-	// LOG_MSG("SERIAL: Port %" PRIu8 " modem byte %x to be transmitted.",
-	// GetPortNumber(), val);
+	// LOG_MSG("SERIAL: Port %" PRIu8 " modem byte %x '%c' to be
+	// transmitted.", 		GetPortNumber(), val, val);
 }
 
 void CSerialModem::updatePortConfig(uint16_t, uint8_t lcr)
@@ -1020,8 +1110,8 @@ void CSerialModem::setRTS(bool val) {
 void CSerialModem::setDTR(bool val) {
 	if (val != oldDTRstate) {
 		if (connected && !val) {
-			// Start the timer upon losing DTR.
-			dtrofftimer = reg[MREG_DTR_DELAY];
+			// Start the timer upon losing DTR (S25 stores time in 1/100s of a second).
+			dtrofftimer = reg[MREG_DTR_DELAY] * 10 / MODEM_TICKTIME;
 		} else {
 			dtrofftimer = -1;
 		}

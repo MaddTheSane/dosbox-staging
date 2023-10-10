@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2019-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -21,243 +22,293 @@
 #include <cassert>
 #include <cmath>
 #include <cstdlib>
-#include <fstream>
-#include <sstream>
-#include <unordered_map>
+#include <memory>
+#include <mutex>
 
-#include <sys/types.h>
-
-#include "video.h"
+#include "../capture/capture.h"
+#include "control.h"
+#include "fraction.h"
+#include "mapper.h"
 #include "render.h"
 #include "setup.h"
-#include "control.h"
-#include "mapper.h"
-#include "cross.h"
-#include "hardware.h"
-#include "support.h"
+#include "shader_manager.h"
 #include "shell.h"
 #include "string_utils.h"
+#include "support.h"
 #include "vga.h"
-
-#include "render_crt_glsl.h"
-#include "render_glsl.h"
-#include "render_scalers.h"
+#include "video.h"
 
 Render_t render;
 ScalerLineHandler_t RENDER_DrawLine;
 
-static void RENDER_CallBack( GFX_CallBackFunctions_t function );
+static ShaderManager& get_shader_manager()
+{
+	static auto shader_manager = ShaderManager();
+	return shader_manager;
+}
 
-static void Check_Palette(void) {
-	/* Clean up any previous changed palette data */
+const char* to_string(const PixelFormat pf)
+{
+	switch (pf) {
+	case PixelFormat::Indexed8: return "Indexed8";
+	case PixelFormat::RGB555_Packed16: return "RGB555_Packed16";
+	case PixelFormat::RGB565_Packed16: return "RGB565_Packed16";
+	case PixelFormat::BGR24_ByteArray: return "BGR24_ByteArray";
+	case PixelFormat::XRGB8888_Packed32: return "XRGB8888_Packed32";
+	default: assertm(false, "Invalid pixel format"); return {};
+	}
+}
+
+uint8_t get_bits_per_pixel(const PixelFormat pf)
+{
+	return enum_val(pf);
+}
+
+static void render_callback(GFX_CallBackFunctions_t function);
+
+static void check_palette(void)
+{
+	// Clean up any previous changed palette data
 	if (render.pal.changed) {
 		memset(render.pal.modified, 0, sizeof(render.pal.modified));
 		render.pal.changed = false;
 	}
-	if (render.pal.first>render.pal.last) 
+	if (render.pal.first > render.pal.last) {
 		return;
+	}
 	Bitu i;
 	switch (render.scale.outMode) {
-	case scalerMode8:
-		break;
+	case scalerMode8: break;
 	case scalerMode15:
 	case scalerMode16:
-		for (i=render.pal.first;i<=render.pal.last;i++) {
-			Bit8u r=render.pal.rgb[i].red;
-			Bit8u g=render.pal.rgb[i].green;
-			Bit8u b=render.pal.rgb[i].blue;
-			Bit16u newPal = GFX_GetRGB(r,g,b);
-			if (newPal != render.pal.lut.b16[i]) {
-				render.pal.changed = true;
+		for (i = render.pal.first; i <= render.pal.last; i++) {
+			uint8_t r = render.pal.rgb[i].red;
+			uint8_t g = render.pal.rgb[i].green;
+			uint8_t b = render.pal.rgb[i].blue;
+
+			uint16_t new_pal = GFX_GetRGB(r, g, b);
+			if (new_pal != render.pal.lut.b16[i]) {
+				render.pal.changed     = true;
 				render.pal.modified[i] = 1;
-				render.pal.lut.b16[i] = newPal;
+				render.pal.lut.b16[i]  = new_pal;
 			}
 		}
 		break;
 	case scalerMode32:
 	default:
-		for (i=render.pal.first;i<=render.pal.last;i++) {
-			Bit8u r=render.pal.rgb[i].red;
-			Bit8u g=render.pal.rgb[i].green;
-			Bit8u b=render.pal.rgb[i].blue;
-			Bit32u newPal = GFX_GetRGB(r,g,b);
-			if (newPal != render.pal.lut.b32[i]) {
-				render.pal.changed = true;
+		for (i = render.pal.first; i <= render.pal.last; i++) {
+			uint8_t r = render.pal.rgb[i].red;
+			uint8_t g = render.pal.rgb[i].green;
+			uint8_t b = render.pal.rgb[i].blue;
+
+			uint32_t new_pal = GFX_GetRGB(r, g, b);
+			if (new_pal != render.pal.lut.b32[i]) {
+				render.pal.changed     = true;
 				render.pal.modified[i] = 1;
-				render.pal.lut.b32[i] = newPal;
+				render.pal.lut.b32[i]  = new_pal;
 			}
 		}
 		break;
 	}
-	/* Setup pal index to startup values */
-	render.pal.first=256;
-	render.pal.last=0;
+
+	// Setup pal index to startup values
+	render.pal.first = 256;
+	render.pal.last  = 0;
 }
 
-void RENDER_SetPal(Bit8u entry,Bit8u red,Bit8u green,Bit8u blue) {
-	render.pal.rgb[entry].red=red;
-	render.pal.rgb[entry].green=green;
-	render.pal.rgb[entry].blue=blue;
-	if (render.pal.first>entry) render.pal.first=entry;
-	if (render.pal.last<entry) render.pal.last=entry;
+void RENDER_SetPalette(const uint8_t entry, const uint8_t red,
+                       const uint8_t green, const uint8_t blue)
+{
+	render.pal.rgb[entry].red   = red;
+	render.pal.rgb[entry].green = green;
+	render.pal.rgb[entry].blue  = blue;
+
+	if (render.pal.first > entry) {
+		render.pal.first = entry;
+	}
+	if (render.pal.last < entry) {
+		render.pal.last = entry;
+	}
 }
 
-static void RENDER_EmptyLineHandler(const void *)
-{}
+static void empty_line_handler(const void*) {}
 
-static void RENDER_StartLineHandler(const void * s) {
+static void start_line_handler(const void* s)
+{
 	if (s) {
-		const Bitu *src = (Bitu*)s;
-		Bitu *cache = (Bitu*)(render.scale.cacheRead);
-		for (Bits x=render.src.start;x>0;) {
-			const auto src_ptr = reinterpret_cast<const uint8_t *>(src);
+		auto src = static_cast<const uintptr_t*>(s);
+		auto cache = reinterpret_cast<uintptr_t*>(render.scale.cacheRead);
+		for (Bits x = render.src_start; x > 0;) {
+			const auto src_ptr = reinterpret_cast<const uint8_t*>(src);
 			const auto src_val = read_unaligned_size_t(src_ptr);
 			if (GCC_UNLIKELY(src_val != cache[0])) {
-				if (!GFX_StartUpdate(render.scale.outWrite, render.scale.outPitch)) {
-					RENDER_DrawLine = RENDER_EmptyLineHandler;
+				if (!GFX_StartUpdate(render.scale.outWrite,
+				                     render.scale.outPitch)) {
+					RENDER_DrawLine = empty_line_handler;
 					return;
 				}
-				render.scale.outWrite += render.scale.outPitch * Scaler_ChangedLines[0];
+				render.scale.outWrite += render.scale.outPitch *
+				                         Scaler_ChangedLines[0];
 				RENDER_DrawLine = render.scale.lineHandler;
-				RENDER_DrawLine( s );
+				RENDER_DrawLine(s);
 				return;
 			}
-			x--; src++; cache++;
+			x--;
+			src++;
+			cache++;
 		}
 	}
 	render.scale.cacheRead += render.scale.cachePitch;
-	Scaler_ChangedLines[0] += Scaler_Aspect[ render.scale.inLine ];
+	Scaler_ChangedLines[0] += Scaler_Aspect[render.scale.inLine];
 	render.scale.inLine++;
 	render.scale.outLine++;
 }
 
-static void RENDER_FinishLineHandler(const void * s) {
+static void finish_line_handler(const void* s)
+{
 	if (s) {
-		const Bitu *src = (Bitu*)s;
-		Bitu *cache = (Bitu*)(render.scale.cacheRead);
-		for (Bits x=render.src.start;x>0;) {
+		auto src = static_cast<const uintptr_t*>(s);
+		auto cache = reinterpret_cast<uintptr_t*>(render.scale.cacheRead);
+		for (Bits x = render.src_start; x > 0;) {
 			cache[0] = src[0];
-			x--; src++; cache++;
+			x--;
+			src++;
+			cache++;
 		}
 	}
 	render.scale.cacheRead += render.scale.cachePitch;
 }
 
-
-static void RENDER_ClearCacheHandler(const void * src) {
+static void clear_cache_handler(const void* src)
+{
 	Bitu x, width;
-	Bit32u *srcLine, *cacheLine;
-	srcLine = (Bit32u *)src;
-	cacheLine = (Bit32u *)render.scale.cacheRead;
-	width = render.scale.cachePitch / 4;
-	for (x=0;x<width;x++)
+	uint32_t *srcLine, *cacheLine;
+	srcLine   = (uint32_t*)src;
+	cacheLine = (uint32_t*)render.scale.cacheRead;
+	width     = render.scale.cachePitch / 4;
+	for (x = 0; x < width; x++) {
 		cacheLine[x] = ~srcLine[x];
-	render.scale.lineHandler( src );
+	}
+	render.scale.lineHandler(src);
 }
 
-bool RENDER_StartUpdate(void) {
-	if (GCC_UNLIKELY(render.updating))
-		return false;
-	if (GCC_UNLIKELY(!render.active))
-		return false;
-	if (GCC_UNLIKELY(render.frameskip.count<render.frameskip.max)) {
-		render.frameskip.count++;
+bool RENDER_StartUpdate(void)
+{
+	if (GCC_UNLIKELY(render.updating)) {
 		return false;
 	}
-	render.frameskip.count=0;
+	if (GCC_UNLIKELY(!render.active)) {
+		return false;
+	}
 	if (render.scale.inMode == scalerMode8) {
-		Check_Palette();
+		check_palette();
 	}
-	render.scale.inLine = 0;
-	render.scale.outLine = 0;
-	render.scale.cacheRead = (Bit8u*)&scalerSourceCache;
-	render.scale.outWrite = 0;
-	render.scale.outPitch = 0;
-	Scaler_ChangedLines[0] = 0;
+	render.scale.inLine     = 0;
+	render.scale.outLine    = 0;
+	render.scale.cacheRead  = (uint8_t*)&scalerSourceCache;
+	render.scale.outWrite   = nullptr;
+	render.scale.outPitch   = 0;
+	Scaler_ChangedLines[0]  = 0;
 	Scaler_ChangedLineIndex = 0;
-	/* Clearing the cache will first process the line to make sure it's never the same */
-	if (GCC_UNLIKELY( render.scale.clearCache) ) {
-//		LOG_MSG("Clearing cache");
-		//Will always have to update the screen with this one anyway, so let's update already
-		if (GCC_UNLIKELY(!GFX_StartUpdate( render.scale.outWrite, render.scale.outPitch )))
+
+	// Clearing the cache will first process the line to make sure it's
+	// never the same
+	if (GCC_UNLIKELY(render.scale.clearCache)) {
+		// LOG_MSG("Clearing cache");
+
+		// Will always have to update the screen with this one anyway,
+		// so let's update already
+		if (GCC_UNLIKELY(!GFX_StartUpdate(render.scale.outWrite,
+		                                  render.scale.outPitch))) {
 			return false;
-		render.fullFrame = true;
+		}
+		render.fullFrame        = true;
 		render.scale.clearCache = false;
-		RENDER_DrawLine = RENDER_ClearCacheHandler;
+		RENDER_DrawLine         = clear_cache_handler;
 	} else {
 		if (render.pal.changed) {
-			/* Assume pal changes always do a full screen update anyway */
-			if (GCC_UNLIKELY(!GFX_StartUpdate( render.scale.outWrite, render.scale.outPitch )))
+			// Assume pal changes always do a full screen update
+			// anyway
+			if (GCC_UNLIKELY(!GFX_StartUpdate(render.scale.outWrite,
+			                                  render.scale.outPitch))) {
 				return false;
-			RENDER_DrawLine = render.scale.linePalHandler;
+			}
+			RENDER_DrawLine  = render.scale.linePalHandler;
 			render.fullFrame = true;
 		} else {
-			RENDER_DrawLine = RENDER_StartLineHandler;
-			if (GCC_UNLIKELY(CaptureState & (CAPTURE_IMAGE|CAPTURE_VIDEO))) 
+			RENDER_DrawLine = start_line_handler;
+			if (GCC_UNLIKELY(CAPTURE_IsCapturingImage() ||
+			                 CAPTURE_IsCapturingVideo())) {
 				render.fullFrame = true;
-			else
+			} else {
 				render.fullFrame = false;
+			}
 		}
 	}
 	render.updating = true;
 	return true;
 }
 
-static void RENDER_Halt( void ) {
-	RENDER_DrawLine = RENDER_EmptyLineHandler;
-	GFX_EndUpdate( 0 );
-	render.updating=false;
-	render.active=false;
+static void halt_render(void)
+{
+	RENDER_DrawLine = empty_line_handler;
+	GFX_EndUpdate(nullptr);
+	render.updating = false;
+	render.active   = false;
 }
 
 extern uint32_t PIC_Ticks;
-void RENDER_EndUpdate( bool abort ) {
-	if (GCC_UNLIKELY(!render.updating))
+
+void RENDER_EndUpdate(bool abort)
+{
+	if (GCC_UNLIKELY(!render.updating)) {
 		return;
-	RENDER_DrawLine = RENDER_EmptyLineHandler;
-	if (GCC_UNLIKELY(CaptureState & (CAPTURE_IMAGE|CAPTURE_VIDEO))) {
-		Bitu pitch, flags;
-		flags = 0;
-		if (render.src.dblw != render.src.dblh) {
-			if (render.src.dblw) flags|=CAPTURE_FLAG_DBLW;
-			if (render.src.dblh) flags|=CAPTURE_FLAG_DBLH;
-		}
-		auto fps = render.src.fps;
-		pitch = render.scale.cachePitch;
-		if (render.frameskip.max) {
-			const double fps_skip = 1 + render.frameskip.max;
-			fps /= fps_skip;
-		}
-		CAPTURE_AddImage(render.src.width, render.src.height, render.src.bpp,
-		                 pitch, flags, static_cast<float>(fps), (Bit8u *)&scalerSourceCache,
-		                 (Bit8u *)&render.pal.rgb);
 	}
-	if ( render.scale.outWrite ) {
-		GFX_EndUpdate( abort? NULL : Scaler_ChangedLines );
-		render.frameskip.hadSkip[render.frameskip.index] = 0;
+
+	RENDER_DrawLine = empty_line_handler;
+
+	if (GCC_UNLIKELY((CAPTURE_IsCapturingImage() || CAPTURE_IsCapturingVideo()))) {
+		bool double_width  = false;
+		bool double_height = false;
+		if (render.src.double_width != render.src.double_height) {
+			if (render.src.double_width) {
+				double_width = true;
+			}
+			if (render.src.double_height) {
+				double_height = true;
+			}
+		}
+
+		RenderedImage image = {};
+
+		image.params               = render.src;
+		image.params.double_width  = double_width;
+		image.params.double_height = double_height;
+		image.pitch                = render.scale.cachePitch;
+		image.image_data           = (uint8_t*)&scalerSourceCache;
+		image.palette_data         = (uint8_t*)&render.pal.rgb;
+
+		const auto frames_per_second = static_cast<float>(render.fps);
+
+		CAPTURE_AddFrame(image, frames_per_second);
+	}
+
+	if (render.scale.outWrite) {
+		GFX_EndUpdate(abort ? nullptr : Scaler_ChangedLines);
 	} else {
-#if 0
-		Bitu total = 0, i;
-		render.frameskip.hadSkip[render.frameskip.index] = 1;
-		for (i = 0;i<RENDER_SKIP_CACHE;i++) 
-			total += render.frameskip.hadSkip[i];
-		LOG_MSG( "Skipped frame %d %d", PIC_Ticks, (total * 100) / RENDER_SKIP_CACHE );
-#endif
-		if (RENDER_GetForceUpdate()) GFX_EndUpdate(0);
+		// If we made it here, then there's nothing new to render.
+		GFX_EndUpdate(nullptr);
 	}
-	render.frameskip.index = (render.frameskip.index + 1) & (RENDER_SKIP_CACHE - 1);
-	render.updating=false;
+	render.updating = false;
 }
 
-static Bitu MakeAspectTable(Bitu skip,Bitu height,double scaley,Bitu miny) {
+static Bitu make_aspect_table(Bitu height, double scaley, Bitu miny)
+{
 	Bitu i;
-	double lines=0;
-	Bitu linesadded=0;
-	for (i=0;i<skip;i++)
-		Scaler_Aspect[i] = 0;
+	double lines    = 0;
+	Bitu linesadded = 0;
 
-	height += skip;
-	for (i=skip;i<height;i++) {
+	for (i = 0; i < height; i++) {
 		lines += scaley;
 		if (lines >= miny) {
 			Bitu templines = (Bitu)lines;
@@ -271,543 +322,659 @@ static Bitu MakeAspectTable(Bitu skip,Bitu height,double scaley,Bitu miny) {
 	return linesadded;
 }
 
+static Section_prop* get_render_section()
+{
+	assert(control);
+
+	auto render_section = static_cast<Section_prop*>(
+	        control->GetSection("render"));
+	assert(render_section);
+
+	return render_section;
+}
+
+void RENDER_Reinit()
+{
+	RENDER_Init(get_render_section());
+}
+
 //--Modified 2009-10-18 by Alun Bestor: make unstatic to permit Boxer to call this function itself
-/* static */ void RENDER_Reset( void ) {
+/* static */ void render_reset(void)
+{
 //--End of modifications
+	static std::mutex render_reset_mutex;
 
 	//--Added 2009-03-06 by Alun Bestor to allow Boxer to override DOSBox's scaler settings
 	boxer_applyRenderingStrategy();
 	//--End of modifications
 
-	Bitu width=render.src.width;
-	Bitu height=render.src.height;
-	bool dblw=render.src.dblw;
-	bool dblh=render.src.dblh;
-
-	double gfx_scalew;
-	double gfx_scaleh;
-	
-	Bitu gfx_flags, xscale, yscale;
-	ScalerSimpleBlock_t		*simpleBlock = &ScaleNormal1x;
-	ScalerComplexBlock_t	*complexBlock = 0;
-	if (render.aspect) {
-		if (render.src.ratio>1.0) {
-			gfx_scalew = 1;
-			gfx_scaleh = render.src.ratio;
-		} else {
-			gfx_scalew = (1/render.src.ratio);
-			gfx_scaleh = 1;
-		}
-	} else {
-		gfx_scalew = 1;
-		gfx_scaleh = 1;
+	if (render.src.width == 0 || render.src.height == 0) {
+		return;
 	}
 
-	/* Don't do software scaler sizes larger than 4k */
-	Bitu maxsize_current_input = SCALER_MAXLINE_WIDTH/width;
-	if (render.scale.size > maxsize_current_input) render.scale.size = maxsize_current_input;
+	// Despite rendering being a single-threaded sequence, the Reset() can
+	// be called from the rendering callback, which might come from a video
+	// driver operating in a different thread or process.
+	std::lock_guard<std::mutex> guard(render_reset_mutex);
 
-	if ((dblh && dblw) || (render.scale.forced && !dblh && !dblw)) {
-		/* Initialize always working defaults */
-		if (render.scale.size == 2)
-			simpleBlock = &ScaleNormal2x;
-		else if (render.scale.size == 3)
-			simpleBlock = &ScaleNormal3x;
-		else
-			simpleBlock = &ScaleNormal1x;
-		/* Maybe override them */
-#if RENDER_USE_ADVANCED_SCALERS>0
-		switch (render.scale.op) {
-#if RENDER_USE_ADVANCED_SCALERS>2
-		case scalerOpAdvInterp:
-			if (render.scale.size == 2)
-				complexBlock = &ScaleAdvInterp2x;
-			else if (render.scale.size == 3)
-				complexBlock = &ScaleAdvInterp3x;
-			break;
-		case scalerOpAdvMame:
-			if (render.scale.size == 2)
-				complexBlock = &ScaleAdvMame2x;
-			else if (render.scale.size == 3)
-				complexBlock = &ScaleAdvMame3x;
-			break;
-		case scalerOpHQ:
-			if (render.scale.size == 2)
-				complexBlock = &ScaleHQ2x;
-			else if (render.scale.size == 3)
-				complexBlock = &ScaleHQ3x;
-			break;
-		case scalerOpSuperSaI:
-			if (render.scale.size == 2)
-				complexBlock = &ScaleSuper2xSaI;
-			break;
-		case scalerOpSuperEagle:
-			if (render.scale.size == 2)
-				complexBlock = &ScaleSuperEagle;
-			break;
-		case scalerOpSaI:
-			if (render.scale.size == 2)
-				complexBlock = &Scale2xSaI;
-			break;
-#endif
-		case scalerOpTV:
-			if (render.scale.size == 2)
-				simpleBlock = &ScaleTV2x;
-			else if (render.scale.size == 3)
-				simpleBlock = &ScaleTV3x;
-			break;
-		case scalerOpRGB:
-			if (render.scale.size == 2)
-				simpleBlock = &ScaleRGB2x;
-			else if (render.scale.size == 3)
-				simpleBlock = &ScaleRGB3x;
-			break;
-		case scalerOpScan:
-			if (render.scale.size == 2)
-				simpleBlock = &ScaleScan2x;
-			else if (render.scale.size == 3)
-				simpleBlock = &ScaleScan3x;
-			break;
-		default:
-			break;
-		}
-#endif
-	} else if (dblw) {
+	uint16_t width     = render.src.width;
+	bool double_width  = render.src.double_width;
+	bool double_height = render.src.double_height;
+
+	uint8_t gfx_flags, xscale, yscale;
+	ScalerSimpleBlock_t* simpleBlock = &ScaleNormal1x;
+
+	// Don't do software scaler sizes larger than 4k
+	uint16_t maxsize_current_input = SCALER_MAXWIDTH / width;
+	if (render.scale.size > maxsize_current_input) {
+		render.scale.size = maxsize_current_input;
+	}
+
+	if (double_height && double_width) {
+		simpleBlock = &ScaleNormal2x;
+	} else if (double_width) {
 		simpleBlock = &ScaleNormalDw;
-		if (width * simpleBlock->xscale > SCALER_MAXLINE_WIDTH) {
-			// This should only happen if you pick really bad values... but might be worth adding selecting a scaler that fits
-			simpleBlock = &ScaleNormal1x;
-		}
-	} else if (dblh) {
+	} else if (double_height) {
 		simpleBlock = &ScaleNormalDh;
-	} else  {
-forcenormal:
-		complexBlock = 0;
-		simpleBlock = &ScaleNormal1x;
-	}
-	if (complexBlock) {
-#if RENDER_USE_ADVANCED_SCALERS>1
-		if ((width >= SCALER_COMPLEXWIDTH - 16) || height >= SCALER_COMPLEXHEIGHT - 16) {
-			LOG_MSG("Scaler can't handle this resolution, going back to normal");
-			goto forcenormal;
-		}
-#else
-		goto forcenormal;
-#endif
-		gfx_flags = complexBlock->gfxFlags;
-		xscale = complexBlock->xscale;	
-		yscale = complexBlock->yscale;
-//		LOG_MSG("Scaler:%s",complexBlock->name);
 	} else {
-		gfx_flags = simpleBlock->gfxFlags;
-		xscale = simpleBlock->xscale;	
-		yscale = simpleBlock->yscale;
-//		LOG_MSG("Scaler:%s",simpleBlock->name);
-	}
-	switch (render.src.bpp) {
-	case 8:
-			render.src.start = ( render.src.width * 1) / sizeof(Bitu);
-			if (gfx_flags & GFX_CAN_8)
-				gfx_flags |= GFX_LOVE_8;
-			else
-				gfx_flags |= GFX_LOVE_32;
-			break;
-	case 15:
-			render.src.start = ( render.src.width * 2) / sizeof(Bitu);
-			gfx_flags |= GFX_LOVE_15;
-			gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
-			break;
-	case 16:
-			render.src.start = ( render.src.width * 2) / sizeof(Bitu);
-			gfx_flags |= GFX_LOVE_16;
-			gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
-			break;
-	case 24:
-		render.src.start = (render.src.width * 3) / sizeof(Bitu);
-		gfx_flags |= GFX_LOVE_32;
-		gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
-		break;
-	case 32:
-		render.src.start = (render.src.width * 4) / sizeof(Bitu);
-		gfx_flags |= GFX_LOVE_32;
-		gfx_flags = (gfx_flags & ~GFX_CAN_8) | GFX_RGBONLY;
-		break;
-	}
-	gfx_flags=GFX_GetBestMode(gfx_flags);
-	if (gfx_flags & GFX_UNITY_SCALE &&
-		simpleBlock != NULL &&
-		strstr( simpleBlock->name, "Normal" ) == simpleBlock->name ) {
-		gfx_scalew  = 1.0;
-		gfx_scaleh  = 1.0;
-		xscale      = 1  ;
-		yscale      = 1  ;
 		simpleBlock = &ScaleNormal1x;
 	}
+
+	if ((width * simpleBlock->xscale > SCALER_MAXWIDTH) ||
+	    (render.src.height * simpleBlock->yscale > SCALER_MAXHEIGHT)) {
+		simpleBlock = &ScaleNormal1x;
+	}
+
+	gfx_flags = simpleBlock->gfxFlags;
+	xscale    = simpleBlock->xscale;
+	yscale    = simpleBlock->yscale;
+	//		LOG_MSG("Scaler:%s",simpleBlock->name);
+
+	constexpr auto src_pixel_bytes = sizeof(uintptr_t);
+
+	switch (render.src.pixel_format) {
+	case PixelFormat::Indexed8:
+	case PixelFormat::RGB555_Packed16:
+	case PixelFormat::RGB565_Packed16:
+		render.src_start = (render.src.width * 2) / src_pixel_bytes;
+		gfx_flags        = (gfx_flags & ~GFX_CAN_8);
+		break;
+	case PixelFormat::BGR24_ByteArray:
+		render.src_start = (render.src.width * 3) / src_pixel_bytes;
+		gfx_flags        = (gfx_flags & ~GFX_CAN_8);
+		break;
+	case PixelFormat::XRGB8888_Packed32:
+		render.src_start = (render.src.width * 4) / src_pixel_bytes;
+		gfx_flags        = (gfx_flags & ~GFX_CAN_8);
+		break;
+	}
+
+	gfx_flags = GFX_GetBestMode(gfx_flags);
+
 	if (!gfx_flags) {
-		if (!complexBlock && simpleBlock == &ScaleNormal1x)
+		if (simpleBlock == &ScaleNormal1x) {
 			E_Exit("Failed to create a rendering output");
-		else
-			goto forcenormal;
+		}
 	}
 	width *= xscale;
-	Bitu skip = complexBlock ? 1 : 0;
-	if (gfx_flags & GFX_SCALING) {
-		height = MakeAspectTable(skip, render.src.height, yscale, yscale );
-	} else {
-		if ((gfx_flags & GFX_CAN_RANDOM) && gfx_scaleh > 1) {
-			gfx_scaleh *= yscale;
-			height = MakeAspectTable( skip, render.src.height, gfx_scaleh, yscale );
-		} else {
-			gfx_flags &= ~GFX_CAN_RANDOM;		//Hardware surface when possible
-			height = MakeAspectTable( skip, render.src.height, yscale, yscale);
-		}
-	}
+	const auto height = make_aspect_table(render.src.height, yscale, yscale);
 
-	// Setup the scaler variables
-
-	if (dblh)
+	// Set up scaler variables
+	if (double_height) {
 		gfx_flags |= GFX_DBL_H;
-	if (dblw)
-		gfx_flags |= GFX_DBL_W;
-
-#if C_OPENGL
-	GFX_SetShader(render.shader_src);
-#endif
-
-	// The pixel aspect ratio of the source image, assuming 4:3 screen
-	const double real_par = (width / 4.0) / (height / 3.0);
-	const double user_par = (render.aspect ? real_par : 1.0);
-
-	gfx_flags = GFX_SetSize(width, height, gfx_flags, gfx_scalew,
-	                        gfx_scaleh, &RENDER_CallBack, user_par);
-
-	if (gfx_flags & GFX_CAN_8)
-		render.scale.outMode = scalerMode8;
-	else if (gfx_flags & GFX_CAN_15)
-		render.scale.outMode = scalerMode15;
-	else if (gfx_flags & GFX_CAN_16)
-		render.scale.outMode = scalerMode16;
-	else if (gfx_flags & GFX_CAN_32)
-		render.scale.outMode = scalerMode32;
-	else
-		E_Exit("Failed to create a rendering output");
-	ScalerLineBlock_t *lineBlock;
-	if (gfx_flags & GFX_HARDWARE) {
-#if RENDER_USE_ADVANCED_SCALERS>1
-		if (complexBlock) {
-			lineBlock = &ScalerCache;
-			render.scale.complexHandler = complexBlock->Linear[ render.scale.outMode ];
-		} else
-#endif
-		{
-			render.scale.complexHandler = 0;
-			lineBlock = &simpleBlock->Linear;
-		}
-	} else {
-#if RENDER_USE_ADVANCED_SCALERS>1
-		if (complexBlock) {
-			lineBlock = &ScalerCache;
-			render.scale.complexHandler = complexBlock->Random[ render.scale.outMode ];
-		} else
-#endif
-		{
-			render.scale.complexHandler = 0;
-			lineBlock = &simpleBlock->Random;
-		}
 	}
-	switch (render.src.bpp) {
-	case 8:
+	if (double_width) {
+		gfx_flags |= GFX_DBL_W;
+	}
+
+	if (GFX_GetRenderingBackend() == RenderingBackend::OpenGl) {
+		GFX_SetShader(get_shader_manager().GetCurrentShaderInfo(),
+		              get_shader_manager().GetCurrentShaderSource());
+	}
+
+	const auto render_pixel_aspect_ratio = render.src.pixel_aspect_ratio;
+
+	gfx_flags = GFX_SetSize(width,
+	                        height,
+	                        render_pixel_aspect_ratio,
+	                        gfx_flags,
+	                        render.src.video_mode,
+	                        &render_callback);
+
+	if (gfx_flags & GFX_CAN_8) {
+		render.scale.outMode = scalerMode8;
+	} else if (gfx_flags & GFX_CAN_15) {
+		render.scale.outMode = scalerMode15;
+	} else if (gfx_flags & GFX_CAN_16) {
+		render.scale.outMode = scalerMode16;
+	} else if (gfx_flags & GFX_CAN_32) {
+		render.scale.outMode = scalerMode32;
+	} else {
+		E_Exit("Failed to create a rendering output");
+	}
+
+	const auto lineBlock = gfx_flags & GFX_CAN_RANDOM ? &simpleBlock->Random
+	                                                  : &simpleBlock->Linear;
+	switch (render.src.pixel_format) {
+	case PixelFormat::Indexed8:
 		render.scale.lineHandler = (*lineBlock)[0][render.scale.outMode];
 		render.scale.linePalHandler = (*lineBlock)[5][render.scale.outMode];
-		render.scale.inMode = scalerMode8;
+		render.scale.inMode     = scalerMode8;
 		render.scale.cachePitch = render.src.width * 1;
 		break;
-	case 15:
+	case PixelFormat::RGB555_Packed16:
 		render.scale.lineHandler = (*lineBlock)[1][render.scale.outMode];
-		render.scale.linePalHandler = 0;
-		render.scale.inMode = scalerMode15;
-		render.scale.cachePitch = render.src.width * 2;
+		render.scale.linePalHandler = nullptr;
+		render.scale.inMode         = scalerMode15;
+		render.scale.cachePitch     = render.src.width * 2;
 		break;
-	case 16:
+	case PixelFormat::RGB565_Packed16:
 		render.scale.lineHandler = (*lineBlock)[2][render.scale.outMode];
-		render.scale.linePalHandler = 0;
-		render.scale.inMode = scalerMode16;
-		render.scale.cachePitch = render.src.width * 2;
+		render.scale.linePalHandler = nullptr;
+		render.scale.inMode         = scalerMode16;
+		render.scale.cachePitch     = render.src.width * 2;
 		break;
-	case 24:
+	case PixelFormat::BGR24_ByteArray:
 		render.scale.lineHandler = (*lineBlock)[3][render.scale.outMode];
-		render.scale.linePalHandler = 0;
-		render.scale.inMode = scalerMode32;
-		render.scale.cachePitch = render.src.width * 3;
+		render.scale.linePalHandler = nullptr;
+		render.scale.inMode         = scalerMode32;
+		render.scale.cachePitch     = render.src.width * 3;
 		break;
-	case 32:
+	case PixelFormat::XRGB8888_Packed32:
 		render.scale.lineHandler = (*lineBlock)[4][render.scale.outMode];
-		render.scale.linePalHandler = 0;
-		render.scale.inMode = scalerMode32;
-		render.scale.cachePitch = render.src.width * 4;
+		render.scale.linePalHandler = nullptr;
+		render.scale.inMode         = scalerMode32;
+		render.scale.cachePitch     = render.src.width * 4;
 		break;
 	default:
-		E_Exit("RENDER:Wrong source bpp %u", render.src.bpp);
+		E_Exit("RENDER: Invalid pixel_format %u",
+		       static_cast<uint8_t>(render.src.pixel_format));
 	}
-	render.scale.blocks = render.src.width / SCALER_BLOCKSIZE;
+
+	render.scale.blocks    = render.src.width / SCALER_BLOCKSIZE;
 	render.scale.lastBlock = render.src.width % SCALER_BLOCKSIZE;
-	render.scale.inHeight = render.src.height;
-	/* Reset the palette change detection to it's initial value */
-	render.pal.first= 0;
-	render.pal.last = 255;
+	render.scale.inHeight  = render.src.height;
+
+	// Reset the palette change detection to it's initial value
+	render.pal.first   = 0;
+	render.pal.last    = 255;
 	render.pal.changed = false;
 	memset(render.pal.modified, 0, sizeof(render.pal.modified));
-	//Finish this frame using a copy only handler
-	RENDER_DrawLine = RENDER_FinishLineHandler;
-	render.scale.outWrite = 0;
-	/* Signal the next frame to first reinit the cache */
+
+	// Finish this frame using a copy only handler
+	RENDER_DrawLine       = finish_line_handler;
+	render.scale.outWrite = nullptr;
+
+	// Signal the next frame to first reinit the cache
 	render.scale.clearCache = true;
-	render.active=true;
+	render.active           = true;
 }
 
-static void RENDER_CallBack( GFX_CallBackFunctions_t function ) {
+static void render_callback(GFX_CallBackFunctions_t function)
+{
 	if (function == GFX_CallBackStop) {
-		RENDER_Halt( );	
+		halt_render();
 		return;
 	} else if (function == GFX_CallBackRedraw) {
 		render.scale.clearCache = true;
 		return;
-	} else if ( function == GFX_CallBackReset) {
-		GFX_EndUpdate( 0 );	
-		RENDER_Reset();
+	} else if (function == GFX_CallBackReset) {
+		GFX_EndUpdate(nullptr);
+		render_reset();
 	} else {
-		E_Exit("Unhandled GFX_CallBackReset %d", function );
+		E_Exit("Unhandled GFX_CallBackReset %d", function);
 	}
 }
 
-void RENDER_SetSize(Bitu width,
-                    Bitu height,
-                    unsigned bpp,
-                    double fps,
-                    double ratio,
-                    bool dblw,
-                    bool dblh)
+void RENDER_SetSize(const uint16_t width, const uint16_t height,
+                    const bool double_width, const bool double_height,
+                    const Fraction& render_pixel_aspect_ratio,
+                    const PixelFormat pixel_format,
+                    const double frames_per_second, const VideoMode& video_mode)
 {
-	RENDER_Halt( );
+	halt_render();
+
 	if (!width || !height || width > SCALER_MAXWIDTH || height > SCALER_MAXHEIGHT) {
-		return;	
-	}
-	if ( ratio > 1 ) {
-		double target = height * ratio + 0.025;
-		ratio = target / height;
-	} else {
-		//This would alter the width of the screen, we don't care about rounding errors here
-	}
-	render.src.width = width;
-	render.src.height = height;
-	render.src.bpp = bpp;
-	render.src.dblw = dblw;
-	render.src.dblh = dblh;
-	render.src.fps = fps;
-	render.src.ratio = ratio;
-	RENDER_Reset( );
-}
-
-extern void GFX_SetTitle(Bit32s cycles, int frameskip,bool paused);
-static void IncreaseFrameSkip(bool pressed) {
-	if (!pressed)
 		return;
-	if (render.frameskip.max<10) render.frameskip.max++;
-	LOG_MSG("Frame Skip at %d",render.frameskip.max);
-	GFX_SetTitle(-1,render.frameskip.max,false);
-}
-
-static void DecreaseFrameSkip(bool pressed) {
-	if (!pressed)
-		return;
-	if (render.frameskip.max>0) render.frameskip.max--;
-	LOG_MSG("Frame Skip at %d",render.frameskip.max);
-	GFX_SetTitle(-1,render.frameskip.max,false);
-}
-/* Disabled as I don't want to waste a keybind for that. Might be used in the future (Qbix)
-static void ChangeScaler(bool pressed) {
-	if (!pressed)
-		return;
-	render.scale.op = (scalerOperation)((int)render.scale.op+1);
-	if((render.scale.op) >= scalerLast || render.scale.size == 1) {
-		render.scale.op = (scalerOperation)0;
-		if(++render.scale.size > 3)
-			render.scale.size = 1;
 	}
-	RENDER_CallBack( GFX_CallBackReset );
-} */
 
-bool RENDER_GetForceUpdate(void) {
-	return render.forceUpdate;
+	render.src.width              = width;
+	render.src.height             = height;
+	render.src.double_width       = double_width;
+	render.src.double_height      = double_height;
+	render.src.pixel_aspect_ratio = render_pixel_aspect_ratio;
+	render.src.pixel_format       = pixel_format;
+	render.src.video_mode         = video_mode;
+
+	render.fps = frames_per_second;
+
+	render_reset();
 }
 
-void RENDER_SetForceUpdate(bool f) {
-	render.forceUpdate = f;
-}
+static bool force_square_pixels     = false;
+static bool force_vga_single_scan   = false;
+static bool force_no_pixel_doubling = false;
 
-#if C_OPENGL
-static bool RENDER_GetShader(std::string &shader_path, char *old_src)
+// We double-scan VGA modes and pixel-double all video modes by default unless:
+//
+//  1) Single-scanning or no pixel-doubling is forced by the OpenGL shader.
+//  2) The interpolation mode is nearest-neighbour.
+//
+// About the first point: the default `interpolation/sharp.glsl` shader forces
+// both because it scales pixels as flat adjacent rectangles. This not only
+// produces identical output versus double-scanning and pixel-doubling, but
+// also provides finer integer scaling steps (especially important on sub-4K
+// screens) and improves performance on low-end systems like the Raspberry Pi.
+//
+static void setup_scan_and_pixel_doubling()
 {
-	const std::unordered_map<std::string, const char *> builtin_shaders = {
-	        {"advinterp2x", advinterp2x_glsl},
-	        {"advinterp3x", advinterp3x_glsl},
-	        {"advmame2x", advmame2x_glsl},
-	        {"advmame3x", advmame3x_glsl},
-	        {"crt-easymode-flat", crt_easymode_tweaked_glsl},
-	        {"crt-fakelottes-flat", crt_fakelottes_tweaked_glsl},
-	        {"default", sharp_glsl},
-	        {"rgb2x", rgb2x_glsl},
-	        {"rgb3x", rgb3x_glsl},
-	        {"scan2x", scan2x_glsl},
-	        {"scan3x", scan3x_glsl},
-	        {"sharp", sharp_glsl},
-	        {"tv2x", tv2x_glsl},
-	        {"tv3x", tv3x_glsl},
-	};
+	const auto nearest_neighbour_enabled = (GFX_GetInterpolationMode() ==
+	                                        InterpolationMode::NearestNeighbour);
 
-	char* src;
-	std::stringstream buf;
-	std::ifstream fshader(shader_path.c_str(), std::ios_base::binary);
-	if (!fshader.is_open())
-		fshader.open(shader_path + ".glsl", std::ios_base::binary);
-	if (fshader.is_open()) {
-		buf << fshader.rdbuf();
-		fshader.close();
-	} else if (builtin_shaders.count(shader_path) > 0) {
-		buf << builtin_shaders.at(shader_path);
+	force_vga_single_scan   = nearest_neighbour_enabled;
+	force_no_pixel_doubling = nearest_neighbour_enabled;
+
+	if (GFX_GetRenderingBackend() == RenderingBackend::OpenGl) {
+		const auto shader_info = get_shader_manager().GetCurrentShaderInfo();
+
+		force_vga_single_scan |= shader_info.settings.force_single_scan;
+		force_no_pixel_doubling |= shader_info.settings.force_no_pixel_doubling;
 	}
 
-	if (!buf.str().empty()) {
-		std::string s = buf.str() + '\n';
-		if (first_shell) {
-			std::string pre_defs;
-			Bitu count = first_shell->GetEnvCount();
-			for (Bitu i=0; i < count; i++) {
-				std::string env;
-				if (!first_shell->GetEnvNum(i, env))
-					continue;
-				if (env.compare(0, 9, "GLSHADER_")==0) {
-					size_t brk = env.find('=');
-					if (brk == std::string::npos) continue;
-					env[brk] = ' ';
-					pre_defs += "#define " + env.substr(9) + '\n';
-				}
-			}
-			if (!pre_defs.empty()) {
-				// if "#version" occurs it must be before anything except comments and whitespace
-				size_t pos = s.find("#version ");
-
-				if (pos != std::string::npos)
-					pos = s.find('\n', pos + 9);
-
-				s.insert(pos, pre_defs);
-			}
-		}
-		// keep the same buffer if contents aren't different
-		if (old_src==NULL || s != old_src) {
-			src = strdup(s.c_str());
-			if (src==NULL) LOG_MSG("WARNING: Couldn't copy shader source");
-		} else src = old_src;
-	} else src = NULL;
-	render.shader_src = src;
-	return src != NULL;
+	VGA_EnableVgaDoubleScanning(!force_vga_single_scan);
+	VGA_EnablePixelDoubling(!force_no_pixel_doubling);
 }
-#endif
 
-void RENDER_Init(Section * sec) {
-	Section_prop * section=static_cast<Section_prop *>(sec);
-
-	//For restarting the renderer.
-	static bool running = false;
-	bool aspect = render.aspect;
-	Bitu scalersize = render.scale.size;
-	bool scalerforced = render.scale.forced;
-	scalerOperation_t scaleOp = render.scale.op;
-
-	render.pal.first=256;
-	render.pal.last=0;
-	render.aspect=section->Get_bool("aspect");
-	render.frameskip.max=section->Get_int("frameskip");
-	render.frameskip.count=0;
-	VGA_SetMonoPalette(section->Get_string("monochrome_palette"));
-	std::string cline;
-	std::string scaler;
-	//Check for commandline paramters and parse them through the configclass so they get checked against allowed values
-	if (control->cmdline->FindString("-scaler",cline,true)) {
-		section->HandleInputline(std::string("scaler=") + cline);
-	} else if (control->cmdline->FindString("-forcescaler",cline,true)) {
-		section->HandleInputline(std::string("scaler=") + cline + " forced");
+bool RENDER_MaybeAutoSwitchShader([[maybe_unused]] const uint16_t canvas_width,
+                                  [[maybe_unused]] const uint16_t canvas_height,
+                                  [[maybe_unused]] const VideoMode& video_mode,
+                                  [[maybe_unused]] const bool reinit_render)
+{
+	if (GFX_GetRenderingBackend() != RenderingBackend::OpenGl) {
+		return false;
 	}
-	   
-	Prop_multival* prop = section->Get_multival("scaler");
-	scaler = prop->GetSection()->Get_string("type");
-	std::string f = prop->GetSection()->Get_string("force");
-	render.scale.forced = false;
-	if(f == "forced") render.scale.forced = true;
-   
-	if (scaler == "none") { render.scale.op = scalerOpNormal;render.scale.size = 1; }
-	else if (scaler == "normal2x") { render.scale.op = scalerOpNormal;render.scale.size = 2; }
-	else if (scaler == "normal3x") { render.scale.op = scalerOpNormal;render.scale.size = 3; }
-#if RENDER_USE_ADVANCED_SCALERS>2
-	else if (scaler == "advmame2x") { render.scale.op = scalerOpAdvMame;render.scale.size = 2; }
-	else if (scaler == "advmame3x") { render.scale.op = scalerOpAdvMame;render.scale.size = 3; }
-	else if (scaler == "advinterp2x") { render.scale.op = scalerOpAdvInterp;render.scale.size = 2; }
-	else if (scaler == "advinterp3x") { render.scale.op = scalerOpAdvInterp;render.scale.size = 3; }
-	else if (scaler == "hq2x") { render.scale.op = scalerOpHQ;render.scale.size = 2; }
-	else if (scaler == "hq3x") { render.scale.op = scalerOpHQ;render.scale.size = 3; }
-	else if (scaler == "2xsai") { render.scale.op = scalerOpSaI;render.scale.size = 2; }
-	else if (scaler == "super2xsai") { render.scale.op = scalerOpSuperSaI;render.scale.size = 2; }
-	else if (scaler == "supereagle") { render.scale.op = scalerOpSuperEagle;render.scale.size = 2; }
-#endif
-#if RENDER_USE_ADVANCED_SCALERS>0
-	else if (scaler == "tv2x") { render.scale.op = scalerOpTV;render.scale.size = 2; }
-	else if (scaler == "tv3x") { render.scale.op = scalerOpTV;render.scale.size = 3; }
-	else if (scaler == "rgb2x"){ render.scale.op = scalerOpRGB;render.scale.size = 2; }
-	else if (scaler == "rgb3x"){ render.scale.op = scalerOpRGB;render.scale.size = 3; }
-	else if (scaler == "scan2x"){ render.scale.op = scalerOpScan;render.scale.size = 2; }
-	else if (scaler == "scan3x"){ render.scale.op = scalerOpScan;render.scale.size = 3; }
-#endif
 
-#if C_OPENGL
-	assert(control);
-	const Section *sdl_sec = control->GetSection("sdl");
-	assert(sdl_sec);
-	const bool using_opengl = starts_with("opengl",
-	                                      sdl_sec->GetPropValue("output"));
-	char* shader_src = render.shader_src;
-	Prop_path *sh = section->Get_path("glshader");
-	f = (std::string)sh->GetValue();
-	if (f.empty() || f=="none") render.shader_src = NULL;
-	else if (!RENDER_GetShader(sh->realpath,shader_src)) {
-		std::string path;
-		Cross::GetPlatformConfigDir(path);
-		path = path + "glshaders" + CROSS_FILESPLIT + f;
-		if (!RENDER_GetShader(path,shader_src) && (sh->realpath==f || !RENDER_GetShader(f,shader_src))) {
-			sh->SetValue("none");
-			LOG_MSG("RENDER: Shader file '%s' not found", f.c_str());
-		} else if (using_opengl) {
-			LOG_MSG("RENDER: Using GLSL shader '%s'", f.c_str());
+	// Currently, the init sequence is slightly different on Windows, macOS,
+	// and Linux. The first call to this function on Windows receives an
+	// uninitialised VideoMode param with width and height set to 0 which
+	// results in a crash. The proper fix is to make the init sequence 100%
+	// identical on all platforms, but in the interim this workaround will do.
+	if (canvas_width == 0 || canvas_height == 0 || video_mode.width == 0 ||
+	    video_mode.height == 0) {
+		return false;
+	}
+
+	get_shader_manager().NotifyRenderParametersChanged(canvas_width,
+	                                                   canvas_height,
+	                                                   video_mode);
+
+	const auto new_shader_name = get_shader_manager().GetCurrentShaderInfo().name;
+
+	const auto changed_shader = (new_shader_name != render.current_shader_name);
+
+	if (changed_shader) {
+		if (reinit_render) {
+			RENDER_Reinit();
+
+			// We can't set the new shader name here yet because
+			// then the "shader changed" reinit path wouldn't be
+			// trigger in RENDER_Init()
+		} else {
+			setup_scan_and_pixel_doubling();
+
+			// We must set the new shader name here as we're
+			// bypassing a full render reinit (RENDER_Init() is the
+			// only other place where 'render.current_shader_name'
+			// can be set).
+			render.current_shader_name = new_shader_name;
 		}
 	}
-	if (shader_src!=render.shader_src) free(shader_src);
-#endif
+	return changed_shader;
+}
 
-	//If something changed that needs a ReInit
-	// Only ReInit when there is a src.bpp (fixes crashes on startup and directly changing the scaler without a screen specified yet)
-	if(running && render.src.bpp && ((render.aspect != aspect) || (render.scale.op != scaleOp) || 
-				  (render.scale.size != scalersize) || (render.scale.forced != scalerforced) ||
+void RENDER_NotifyEgaModeWithVgaPalette()
+{
+	// If we're getting these notifications on non-VGA cards, that's a
+	// programming error.
+	assert(machine == MCH_VGA);
+
+	auto video_mode = VGA_GetCurrentVideoMode();
+	assert(video_mode.graphics_standard == GraphicsStandard::Ega);
+
+	if (!video_mode.has_vga_colors) {
+		video_mode.has_vga_colors = true;
+
+		// We are potentially auto-switching to a VGA shader now.
+		const auto canvas = GFX_GetCanvasSize();
+
+		constexpr auto reinit_render = true;
+		RENDER_MaybeAutoSwitchShader(canvas.w, canvas.h, video_mode, reinit_render);
+	}
+}
+
+std::deque<std::string> RENDER_GenerateShaderInventoryMessage()
+{
+	return get_shader_manager().GenerateShaderInventoryMessage();
+}
+
+static void reload_shader([[maybe_unused]] const bool pressed)
+{
+	if (GFX_GetRenderingBackend() != RenderingBackend::OpenGl) {
+		return;
+	}
+
+	if (!pressed) {
+		return;
+	}
+
+	render.force_reload_shader = true;
+	RENDER_Reinit();
+
+	// The shader settings might have been changed (e.g. force_single_scan,
+	// force_no_pixel_doubling), so force re-rendering the image using the
+	// new settings. Without this, the altered settings would only take
+	// effect on the next video mode change.
+	VGA_SetupDrawing(0);
+}
+
+constexpr auto MonochromePaletteAmber      = "amber";
+constexpr auto MonochromePaletteGreen      = "green";
+constexpr auto MonochromePaletteWhite      = "white";
+constexpr auto MonochromePalettePaperwhite = "paperwhite";
+
+static MonochromePalette to_monochrome_palette_enum(const char* setting)
+{
+	if (strcasecmp(setting, MonochromePaletteAmber) == 0) {
+		return MonochromePalette::Amber;
+	}
+	if (strcasecmp(setting, MonochromePaletteGreen) == 0) {
+		return MonochromePalette::Green;
+	}
+	if (strcasecmp(setting, MonochromePaletteWhite) == 0) {
+		return MonochromePalette::White;
+	}
+	if (strcasecmp(setting, MonochromePalettePaperwhite) == 0) {
+		return MonochromePalette::Paperwhite;
+	}
+	assertm(false, "Invalid monochrome_palette setting");
+	return {};
+}
+
+static const char* to_string(const enum MonochromePalette palette)
+{
+	switch (palette) {
+	case MonochromePalette::Amber: return MonochromePaletteAmber;
+	case MonochromePalette::Green: return MonochromePaletteGreen;
+	case MonochromePalette::White: return MonochromePaletteWhite;
+	case MonochromePalette::Paperwhite: return MonochromePalettePaperwhite;
+	default: assertm(false, "Invalid MonochromePalette value"); return {};
+	}
+}
+
+bool RENDER_IsAspectRatioCorrectionEnabled()
+{
+	return get_render_section()->Get_bool("aspect");
+}
+
+static IntegerScalingMode get_integer_scaling_mode_setting()
+{
+	const std::string mode = get_render_section()->Get_string("integer_scaling");
+
+	if (mode == "off") {
+		return IntegerScalingMode::Off;
+	} else if (mode == "auto") {
+		return IntegerScalingMode::Auto;
+	} else if (mode == "horizontal") {
+		return IntegerScalingMode::Horizontal;
+	} else if (mode == "vertical") {
+		return IntegerScalingMode::Vertical;
+	} else {
+		LOG_WARNING("RENDER: Unknown integer scaling mode '%s', defaulting to 'off'",
+		            mode.c_str());
+		return IntegerScalingMode::Off;
+	}
+}
+
+const std::string RENDER_GetCgaColorsSetting()
+{
+	return get_render_section()->Get_string("cga_colors");
+}
+
+static void init_render_settings(Section_prop& secprop)
+{
+	constexpr auto always        = Property::Changeable::Always;
+	constexpr auto deprecated    = Property::Changeable::Deprecated;
+	constexpr auto only_at_start = Property::Changeable::OnlyAtStart;
+
+	auto* int_prop = secprop.Add_int("frameskip", deprecated, 0);
+	int_prop->Set_help(
+	        "Consider capping frame-rates using the '[sdl] host_rate' setting.");
+
+	auto* bool_prop = secprop.Add_bool("aspect", always, true);
+	bool_prop->Set_help(
+	        "Apply aspect ratio correction for modern square-pixel flat-screen displays,\n"
+	        "so DOS resolutions with non-square pixels appear as they would on a 4:3 display\n"
+	        "aspect ratio CRT monitor the majority of DOS games were designed for (enabled\n"
+	        "by default). This setting only affects video modes that use non-square pixels,\n"
+	        "such as 320x200 or 640x400; square-pixel modes, such as 320x240, 640x480, and\n"
+	        "800x600 are displayed as-is.");
+
+	auto* string_prop = secprop.Add_string("integer_scaling", always, "auto");
+	string_prop->Set_help(
+	        "Constrain the horizontal or vertical scaling factor to integer values.\n"
+	        "The correct aspect ratio is always maintained according to the 'aspect'\n"
+	        "setting, which may result in a non-integer scaling factor in the other\n"
+	        "direction. If the image is larger than the viewport, the integer scaling\n"
+	        "constraint is auto-disabled (same as 'off'). Possible values:\n"
+	        "  auto:        'vertical' mode auto-enabled for adaptive CRT shaders only,\n"
+	        "               otherwise 'off' (default).\n"
+	        "  vertical:    Constrain the vertical scaling factor to integer values within\n"
+	        "               the viewport. This is the recommended setting when using CRT\n"
+	        "               shaders to avoid uneven scanlines and unwanted interference\n"
+	        "               artifacts.\n"
+	        "  horizontal:  Constrain the horizontal scaling factor to integer values within\n"
+	        "               the viewport.\n"
+	        "  off:         No integer scaling constraint is applied; the image fills the\n"
+	        "               viewport according to the 'aspect' setting.");
+
+	const char* integer_scaling_values[] = {
+	        "auto", "vertical", "horizontal", "off", nullptr};
+	string_prop->Set_values(integer_scaling_values);
+
+	string_prop = secprop.Add_string("monochrome_palette",
+	                                 always,
+	                                 MonochromePaletteAmber);
+	string_prop->Set_help(
+	        "Set the palette for monochrome display emulation ('amber' by default).\n"
+	        "Works only with the 'hercules' and 'cga_mono' machine types.\n"
+	        "Note: You can also cycle through the available palettes via hotkeys.");
+
+	const char* mono_pal[] = {MonochromePaletteAmber,
+	                          MonochromePaletteGreen,
+	                          MonochromePaletteWhite,
+	                          MonochromePalettePaperwhite,
+	                          nullptr};
+	string_prop->Set_values(mono_pal);
+
+	string_prop = secprop.Add_string("cga_colors", only_at_start, "default");
+	string_prop->Set_help(
+	        "Set the interpretation of CGA RGBI colours. Affects all machine types capable\n"
+	        "of displaying CGA or better graphics. Built-in presets:\n"
+	        "  default:       The canonical CGA palette, as emulated by VGA adapters\n"
+	        "                 (default).\n"
+	        "  tandy <bl>:    Emulation of an idealised Tandy monitor with adjustable brown\n"
+	        "                 level. The brown level can be provided as an optional second\n"
+	        "                 parameter (0 - red, 50 - brown, 100 - dark yellow;\n"
+	        "                 defaults to 50). E.g. tandy 100\n"
+	        "  tandy-warm:    Emulation of the actual colour output of an unknown Tandy\n"
+	        "                 monitor.\n"
+	        "  ibm5153 <c>:   Emulation of the actual colour output of an IBM 5153 monitor\n"
+	        "                 with a unique contrast control that dims non-bright colours\n"
+	        "                 only. The contrast can be optionally provided as a second\n"
+	        "                 parameter (0 to 100; defaults to 100), e.g. ibm5153 60\n"
+	        "  agi-amiga-v1, agi-amiga-v2, agi-amiga-v3:\n"
+	        "                 Palettes used by the Amiga ports of Sierra AGI games.\n"
+	        "  agi-amigaish:  A mix of EGA and Amiga colours used by the Sarien\n"
+	        "                 AGI-interpreter.\n"
+	        "  scumm-amiga:   Palette used by the Amiga ports of LucasArts EGA games.\n"
+	        "  colodore:      Commodore 64 inspired colours based on the Colodore palette.\n"
+	        "  colodore-sat:  Colodore palette with 20% more saturation.\n"
+	        "  dga16:         A modern take on the canonical CGA palette with dialed back\n"
+	        "                 contrast.\n"
+	        "You can also set custom colours by specifying 16 space or comma separated\n"
+	        "colour values, either as 3 or 6-digit hex codes (e.g. #f00 or #ff0000 for full\n"
+	        "red), or decimal RGB triplets (e.g. (255, 0, 255) for magenta). The 16 colours\n"
+	        "are ordered as follows:\n"
+	        "  black, blue, green, cyan, red, magenta, brown, light-grey, dark-grey,\n"
+	        "  light-blue, light-green, light-cyan, light-red, light-magenta, yellow, white.\n"
+	        "Their default values, shown here in 6-digit hex code format, are:\n"
+	        "  #000000 #0000aa #00aa00 #00aaaa #aa0000 #aa00aa #aa5500 #aaaaaa\n"
+	        "  #555555 #5555ff #55ff55 #55ffff #ff5555 #ff55ff #ffff55 #ffffff");
+
+	string_prop = secprop.Add_string("scaler", deprecated, "none");
+	string_prop->Set_help(
+	        "Software scalers are deprecated in favour of hardware-accelerated options:\n"
+	        "  - If you used the normal2x/3x scalers, set the desired 'windowresolution'\n"
+	        "    or 'viewport_resolution' instead, or consider using 'integer_scaling'.\n"
+	        "  - If you used an advanced scaler, consider one of the 'glshader'\n"
+	        "    options instead.");
+
 #if C_OPENGL
-				  (render.shader_src != shader_src) ||
+	string_prop = secprop.Add_path("glshader", always, "crt-auto");
+	string_prop->Set_help(
+	        "Set an adaptive CRT monitor emulation shader or a regular GLSL shader in OpenGL \n"
+	        "output modes.\n"
+	        "Adaptive CRT shader options:\n"
+	        "  crt-auto:          A CRT shader that prioritises developer intent and how\n"
+	        "                     people experienced the game at the time of release\n"
+	        "                     (default). The appropriate shader variant is automatically\n"
+	        "                     selected based the graphics standard of the current video\n"
+	        "                     mode and the viewport resolution, irrespective of the\n"
+	        "                     'machine' setting. This means that even on an emulated VGA\n"
+	        "                     card you'll get authentic single-scanned EGA monitor\n"
+	        "                     emulation with visible \"thick scanlines\" in EGA games.\n"
+	        "  crt-auto-machine:  Similar to 'crt-auto', but this picks a fixed CRT monitor\n"
+	        "                     appropriate for the video adapter configured via the\n"
+	        "                     'machine' setting. E.g., CGA and EGA games will appear\n"
+	        "                     double-scanned on an emulated VGA adapter.\n"
+	        "  crt-auto-arcade:   Emulation of an arcade or home computer monitor less sharp\n"
+	        "                     than a typical PC monitor with thick scanlines in low-\n"
+	        "                     resolution modes. This fantasy option does not exist in\n"
+	        "                     real life, but it can be a lot of fun, especially with DOS\n"
+	        "                     ports of Amiga games.\n"
+	        "Other options include 'sharp', 'none', a shader listed using the\n"
+	        "--list-glshaders command-line argument, or an absolute or relative path\n"
+	        "to a file. In all cases, you may omit the shader's '.glsl' file extension.");
 #endif
-				   render.scale.forced))
-		RENDER_CallBack( GFX_CallBackReset );
+}
 
-	if(!running) render.updating=true;
+void RENDER_AddConfigSection(const config_ptr_t& conf)
+{
+	assert(conf);
+
+	constexpr auto changeable_at_runtime = true;
+
+	Section_prop* sec = conf->AddSection_prop("render",
+	                                          &RENDER_Init,
+	                                          changeable_at_runtime);
+	assert(sec);
+	init_render_settings(*sec);
+}
+
+void RENDER_SyncMonochromePaletteSetting(const enum MonochromePalette palette)
+{
+	const auto string_prop = get_render_section()->GetStringProp(
+	        "monochrome_palette");
+	string_prop->SetValue(to_string(palette));
+}
+
+static bool handle_shader_changes()
+{
+	if (GFX_GetRenderingBackend() != RenderingBackend::OpenGl) {
+		return false;
+	}
+
+	auto& shader_manager = get_shader_manager();
+
+	if (GFX_GetRenderingBackend() == RenderingBackend::OpenGl) {
+		const auto section     = get_render_section();
+		const auto shader_name = shader_manager.MapShaderName(
+		        section->Get_string("glshader"));
+
+		shader_manager.NotifyGlshaderSettingChanged(shader_name);
+
+		const auto string_prop = section->GetStringProp("glshader");
+		string_prop->SetValue(shader_name);
+	}
+	const auto new_shader_name = shader_manager.GetCurrentShaderInfo().name;
+
+	const auto shader_changed = render.force_reload_shader ||
+	                            (new_shader_name != render.current_shader_name);
+
+	if (render.force_reload_shader) {
+		shader_manager.ReloadCurrentShader();
+	}
+
+	render.force_reload_shader = false;
+	render.current_shader_name = new_shader_name;
+
+	return shader_changed;
+}
+
+void RENDER_Init(Section* sec)
+{
+	Section_prop* section = static_cast<Section_prop*>(sec);
+	assert(section);
+
+	// For restarting the renderer
+	static auto running = false;
+
+	const auto prev_scale_size              = render.scale.size;
+	const auto prev_force_square_pixels     = force_square_pixels;
+	const auto prev_force_vga_single_scan   = force_vga_single_scan;
+	const auto prev_force_no_pixel_doubling = force_no_pixel_doubling;
+	const auto prev_integer_scaling_mode    = GFX_GetIntegerScalingMode();
+
+	render.pal.first = 256;
+	render.pal.last  = 0;
+
+	force_square_pixels = !section->Get_bool("aspect");
+	VGA_ForceSquarePixels(force_square_pixels);
+
+	const auto mono_palette = to_monochrome_palette_enum(
+	        section->Get_string("monochrome_palette"));
+	VGA_SetMonochromePalette(mono_palette);
+
+	// Only use the default 1x rendering scaler
+	render.scale.size = 1;
+
+	GFX_SetIntegerScalingMode(get_integer_scaling_mode_setting());
+
+	auto shader_changed = handle_shader_changes();
+
+	setup_scan_and_pixel_doubling();
+
+	const auto needs_reinit =
+	        ((force_square_pixels != prev_force_square_pixels) ||
+	         (render.scale.size != prev_scale_size) ||
+	         (GFX_GetIntegerScalingMode() != prev_integer_scaling_mode) ||
+	         shader_changed ||
+	         (prev_force_vga_single_scan != force_vga_single_scan) ||
+	         (prev_force_no_pixel_doubling != force_no_pixel_doubling));
+
+	if (running && needs_reinit) {
+		render_callback(GFX_CallBackReset);
+		VGA_SetupDrawing(0);
+	}
+	if (!running) {
+		render.updating = true;
+	}
+
 	running = true;
 
-	MAPPER_AddHandler(DecreaseFrameSkip, SDL_SCANCODE_UNKNOWN, 0,
-	                  "decfskip", "Dec Fskip");
-	MAPPER_AddHandler(IncreaseFrameSkip, SDL_SCANCODE_UNKNOWN, 0,
-	                  "incfskip", "Inc Fskip");
-	GFX_SetTitle(-1,render.frameskip.max,false);
+	MAPPER_AddHandler(reload_shader,
+	                  SDL_SCANCODE_F2,
+	                  PRIMARY_MOD,
+	                  "reloadshader",
+	                  "Reload Shader");
 }

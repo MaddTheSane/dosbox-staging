@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -71,12 +71,20 @@ private:
 public:
 	MidiHandler_coreaudio()
 	        : MidiHandler(),
-	          m_auGraph(0),
-	          m_synth(0),
+	          m_auGraph(nullptr),
+	          m_synth(nullptr),
 	          soundfont(nullptr)
 	{}
 
-	const char *GetName() const override { return "coreaudio"; }
+	std::string_view GetName() const override
+	{
+		return "coreaudio";
+	}
+
+	MidiDeviceType GetDeviceType() const override
+	{
+		return MidiDeviceType::External;
+	}
 
 	bool Open(const char *conf) override
 	{
@@ -164,13 +172,13 @@ public:
 						                          );
 						CFRelease(url);
 					} else {
-						LOG_MSG("Failed to allocate CFURLRef from  %s",soundfont);
+						LOG_WARNING("MIDI: Failed to allocate CFURLRef from  %s",soundfont);
 					}
 #endif
 					if (!err) {
-						LOG_MSG("MIDI:coreaudio: loaded soundfont: %s",soundfont);
+						LOG_MSG("MIDI: coreaudio: loaded soundfont: %s",soundfont);
 					} else {
-						LOG_MSG("Error loading CoreAudio SoundFont %s",soundfont);
+						LOG_WARNING("MIDI: Error loading CoreAudio SoundFont %s",soundfont);
 						// after trying and failing to load a soundfont it's better
 						// to fail initializing the CoreAudio driver or it might crash
 						return false;
@@ -186,7 +194,7 @@ public:
 		if (m_auGraph) {
 			AUGraphStop(m_auGraph);
 			DisposeAUGraph(m_auGraph);
-			m_auGraph = 0;
+			m_auGraph = nullptr;
 		}
 		return false;
 	}
@@ -194,14 +202,14 @@ public:
 	void Close() override
 	{
 		if (m_auGraph) {
-			HaltSequence();
+			Reset();
 			AUGraphStop(m_auGraph);
 			DisposeAUGraph(m_auGraph);
-			m_auGraph = 0;
+			m_auGraph = nullptr;
 		}
 	}
 
-	void PlayMsg(const uint8_t *msg) override
+	void PlayMsg(const MidiMessage& msg) override
 	{
 		MusicDeviceMIDIEvent(m_synth, msg[0], msg[1], msg[2], 0);
 	}

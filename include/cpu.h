@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -19,7 +20,9 @@
 #ifndef DOSBOX_CPU_H
 #define DOSBOX_CPU_H
 
-#include "dosbox.h" 
+#include "dosbox.h"
+
+#include "support.h"
 
 #ifndef DOSBOX_REGS_H
 #include "regs.h"
@@ -37,27 +40,31 @@
 
 #define CPU_CYCLES_LOWER_LIMIT		200
 
-
-#define CPU_ARCHTYPE_MIXED			0xff
-#define CPU_ARCHTYPE_386SLOW		0x30
-#define CPU_ARCHTYPE_386FAST		0x35
-#define CPU_ARCHTYPE_486OLDSLOW		0x40
-#define CPU_ARCHTYPE_486NEWSLOW		0x45
-#define CPU_ARCHTYPE_PENTIUMSLOW	0x50
+enum class ArchitectureType {
+	Intel86         = 0x05,
+	Intel186        = 0x15,
+	Intel286        = 0x25,
+	Intel386Slow    = 0x30,
+	Intel386Fast    = 0x35,
+	Intel486OldSlow = 0x40,
+	Intel486NewSlow = 0x45,
+	PentiumSlow     = 0x50,
+	Mixed           = 0xff,
+};
 
 /* CPU Cycle Timing */
-extern Bit32s CPU_Cycles;
-extern Bit32s CPU_CycleLeft;
-extern Bit32s CPU_CycleMax;
-extern Bit32s CPU_OldCycleMax;
-extern Bit32s CPU_CyclePercUsed;
-extern Bit32s CPU_CycleLimit;
-extern Bit64s CPU_IODelayRemoved;
+extern int32_t CPU_Cycles;
+extern int32_t CPU_CycleLeft;
+extern int32_t CPU_CycleMax;
+extern int32_t CPU_OldCycleMax;
+extern int32_t CPU_CyclePercUsed;
+extern int32_t CPU_CycleLimit;
+extern int64_t CPU_IODelayRemoved;
 extern bool CPU_CycleAutoAdjust;
 extern bool CPU_SkipCycleAutoAdjust;
 extern Bitu CPU_AutoDetermineMode;
 
-extern Bitu CPU_ArchitectureType;
+extern ArchitectureType CPU_ArchitectureType;
 
 extern Bitu CPU_PrefetchQueueSize;
 
@@ -66,17 +73,22 @@ extern Bitu CPU_PrefetchQueueSize;
 typedef Bits (CPU_Decoder)(void);
 extern CPU_Decoder * cpudecoder;
 
-Bits CPU_Core_Normal_Run(void);
-Bits CPU_Core_Normal_Trap_Run(void);
-Bits CPU_Core_Simple_Run(void);
-Bits CPU_Core_Simple_Trap_Run(void);
-Bits CPU_Core_Full_Run(void);
-Bits CPU_Core_Dyn_X86_Run(void);
-Bits CPU_Core_Dyn_X86_Trap_Run(void);
-Bits CPU_Core_Dynrec_Run(void);
-Bits CPU_Core_Dynrec_Trap_Run(void);
-Bits CPU_Core_Prefetch_Run(void);
-Bits CPU_Core_Prefetch_Trap_Run(void);
+constexpr bool CPU_ReuseCodepages = true;
+#if defined(WIN32)
+constexpr bool CPU_UseRwxMemProtect = true;
+#endif
+
+Bits CPU_Core_Normal_Run() noexcept;
+Bits CPU_Core_Normal_Trap_Run() noexcept;
+Bits CPU_Core_Simple_Run() noexcept;
+Bits CPU_Core_Simple_Trap_Run() noexcept;
+Bits CPU_Core_Full_Run() noexcept;
+Bits CPU_Core_Dyn_X86_Run() noexcept;
+Bits CPU_Core_Dyn_X86_Trap_Run() noexcept;
+Bits CPU_Core_Dynrec_Run() noexcept;
+Bits CPU_Core_Dynrec_Trap_Run() noexcept;
+Bits CPU_Core_Prefetch_Run() noexcept;
+Bits CPU_Core_Prefetch_Trap_Run() noexcept;
 
 void CPU_Enable_SkipAutoAdjust(void);
 void CPU_Disable_SkipAutoAdjust(void);
@@ -85,7 +97,7 @@ void CPU_Reset_AutoAdjust(void);
 
 //CPU Stuff
 
-extern Bit16u parity_lookup[256];
+extern uint16_t parity_lookup[256];
 
 bool CPU_LLDT(Bitu selector);
 bool CPU_LTR(Bitu selector);
@@ -106,13 +118,13 @@ void CPU_LSL(Bitu selector,Bitu & limit);
 void CPU_SET_CRX(Bitu cr,Bitu value);
 bool CPU_WRITE_CRX(Bitu cr,Bitu value);
 Bitu CPU_GET_CRX(Bitu cr);
-bool CPU_READ_CRX(Bitu cr,Bit32u & retvalue);
+bool CPU_READ_CRX(Bitu cr,uint32_t & retvalue);
 
 bool CPU_WRITE_DRX(Bitu dr,Bitu value);
-bool CPU_READ_DRX(Bitu dr,Bit32u & retvalue);
+bool CPU_READ_DRX(Bitu dr,uint32_t & retvalue);
 
 bool CPU_WRITE_TRX(Bitu dr,Bitu value);
-bool CPU_READ_TRX(Bitu dr,Bit32u & retvalue);
+bool CPU_READ_TRX(Bitu dr,uint32_t & retvalue);
 
 Bitu CPU_SMSW(void);
 bool CPU_LMSW(Bitu word);
@@ -142,19 +154,19 @@ void CPU_ENTER(bool use32,Bitu bytes,Bitu level);
 #define CPU_INT_NOIOPLCHECK		0x8
 
 void CPU_Interrupt(Bitu num,Bitu type,Bitu oldeip);
-static INLINE void CPU_HW_Interrupt(Bitu num) {
+static inline void CPU_HW_Interrupt(Bitu num) {
 	CPU_Interrupt(num,0,reg_eip);
 }
-static INLINE void CPU_SW_Interrupt(Bitu num,Bitu oldeip) {
+static inline void CPU_SW_Interrupt(Bitu num,Bitu oldeip) {
 	CPU_Interrupt(num,CPU_INT_SOFTWARE,oldeip);
 }
-static INLINE void CPU_SW_Interrupt_NoIOPLCheck(Bitu num,Bitu oldeip) {
+static inline void CPU_SW_Interrupt_NoIOPLCheck(Bitu num,Bitu oldeip) {
 	CPU_Interrupt(num,CPU_INT_SOFTWARE|CPU_INT_NOIOPLCHECK,oldeip);
 }
 
 bool CPU_PrepareException(Bitu which,Bitu error);
 void CPU_Exception(Bitu which,Bitu error=0);
-void CPU_DebugException(Bit32u triggers,Bitu oldeip);
+void CPU_DebugException(uint32_t triggers,Bitu oldeip);
 
 bool CPU_SetSegGeneral(SegNames seg,Bitu value);
 bool CPU_PopSeg(SegNames seg,bool use32);
@@ -164,8 +176,6 @@ Bitu CPU_Pop16(void);
 Bitu CPU_Pop32(void);
 void CPU_Push16(Bitu value);
 void CPU_Push32(Bitu value);
-
-void CPU_SetFlags(Bitu word,Bitu mask);
 
 #define EXCEPTION_DB			1
 #define EXCEPTION_UD			6
@@ -236,95 +246,95 @@ void CPU_SetFlags(Bitu word,Bitu mask);
 
 struct S_Descriptor {
 #ifdef WORDS_BIGENDIAN
-	Bit32u base_0_15	:16;
-	Bit32u limit_0_15	:16;
-	Bit32u base_24_31	:8;
-	Bit32u g			:1;
-	Bit32u big			:1;
-	Bit32u r			:1;
-	Bit32u avl			:1;
-	Bit32u limit_16_19	:4;
-	Bit32u p			:1;
-	Bit32u dpl			:2;
-	Bit32u type			:5;
-	Bit32u base_16_23	:8;
+	uint32_t base_0_15	:16;
+	uint32_t limit_0_15	:16;
+	uint32_t base_24_31	:8;
+	uint32_t g			:1;
+	uint32_t big			:1;
+	uint32_t r			:1;
+	uint32_t avl			:1;
+	uint32_t limit_16_19	:4;
+	uint32_t p			:1;
+	uint32_t dpl			:2;
+	uint32_t type			:5;
+	uint32_t base_16_23	:8;
 #else
-	Bit32u limit_0_15	:16;
-	Bit32u base_0_15	:16;
-	Bit32u base_16_23	:8;
-	Bit32u type			:5;
-	Bit32u dpl			:2;
-	Bit32u p			:1;
-	Bit32u limit_16_19	:4;
-	Bit32u avl			:1;
-	Bit32u r			:1;
-	Bit32u big			:1;
-	Bit32u g			:1;
-	Bit32u base_24_31	:8;
+	uint32_t limit_0_15	:16;
+	uint32_t base_0_15	:16;
+	uint32_t base_16_23	:8;
+	uint32_t type			:5;
+	uint32_t dpl			:2;
+	uint32_t p			:1;
+	uint32_t limit_16_19	:4;
+	uint32_t avl			:1;
+	uint32_t r			:1;
+	uint32_t big			:1;
+	uint32_t g			:1;
+	uint32_t base_24_31	:8;
 #endif
 }GCC_ATTRIBUTE(packed);
 
 struct G_Descriptor {
 #ifdef WORDS_BIGENDIAN
-	Bit32u selector:	16;
-	Bit32u offset_0_15	:16;
-	Bit32u offset_16_31	:16;
-	Bit32u p			:1;
-	Bit32u dpl			:2;
-	Bit32u type			:5;
-	Bit32u reserved		:3;
-	Bit32u paramcount	:5;
+	uint32_t selector:	16;
+	uint32_t offset_0_15	:16;
+	uint32_t offset_16_31	:16;
+	uint32_t p			:1;
+	uint32_t dpl			:2;
+	uint32_t type			:5;
+	uint32_t reserved		:3;
+	uint32_t paramcount	:5;
 #else
-	Bit32u offset_0_15	:16;
-	Bit32u selector		:16;
-	Bit32u paramcount	:5;
-	Bit32u reserved		:3;
-	Bit32u type			:5;
-	Bit32u dpl			:2;
-	Bit32u p			:1;
-	Bit32u offset_16_31	:16;
+	uint32_t offset_0_15	:16;
+	uint32_t selector		:16;
+	uint32_t paramcount	:5;
+	uint32_t reserved		:3;
+	uint32_t type			:5;
+	uint32_t dpl			:2;
+	uint32_t p			:1;
+	uint32_t offset_16_31	:16;
 #endif
 } GCC_ATTRIBUTE(packed);
 
 struct TSS_16 {	
-    Bit16u back;                 /* Back link to other task */
-    Bit16u sp0;				     /* The CK stack pointer */
-    Bit16u ss0;					 /* The CK stack selector */
-	Bit16u sp1;                  /* The parent KL stack pointer */
-    Bit16u ss1;                  /* The parent KL stack selector */
-	Bit16u sp2;                  /* Unused */
-    Bit16u ss2;                  /* Unused */
-    Bit16u ip;                   /* The instruction pointer */
-    Bit16u flags;                /* The flags */
-    Bit16u ax, cx, dx, bx;       /* The general purpose registers */
-    Bit16u sp, bp, si, di;       /* The special purpose registers */
-    Bit16u es;                   /* The extra selector */
-    Bit16u cs;                   /* The code selector */
-    Bit16u ss;                   /* The application stack selector */
-    Bit16u ds;                   /* The data selector */
-    Bit16u ldt;                  /* The local descriptor table */
+    uint16_t back;                 /* Back link to other task */
+    uint16_t sp0;				     /* The CK stack pointer */
+    uint16_t ss0;					 /* The CK stack selector */
+	uint16_t sp1;                  /* The parent KL stack pointer */
+    uint16_t ss1;                  /* The parent KL stack selector */
+	uint16_t sp2;                  /* Unused */
+    uint16_t ss2;                  /* Unused */
+    uint16_t ip;                   /* The instruction pointer */
+    uint16_t flags;                /* The flags */
+    uint16_t ax, cx, dx, bx;       /* The general purpose registers */
+    uint16_t sp, bp, si, di;       /* The special purpose registers */
+    uint16_t es;                   /* The extra selector */
+    uint16_t cs;                   /* The code selector */
+    uint16_t ss;                   /* The application stack selector */
+    uint16_t ds;                   /* The data selector */
+    uint16_t ldt;                  /* The local descriptor table */
 } GCC_ATTRIBUTE(packed);
 
 struct TSS_32 {	
-    Bit32u back;                /* Back link to other task */
-	Bit32u esp0;		         /* The CK stack pointer */
-    Bit32u ss0;					 /* The CK stack selector */
-	Bit32u esp1;                 /* The parent KL stack pointer */
-    Bit32u ss1;                  /* The parent KL stack selector */
-	Bit32u esp2;                 /* Unused */
-    Bit32u ss2;                  /* Unused */
-	Bit32u cr3;                  /* The page directory pointer */
-    Bit32u eip;                  /* The instruction pointer */
-    Bit32u eflags;               /* The flags */
-    Bit32u eax, ecx, edx, ebx;   /* The general purpose registers */
-    Bit32u esp, ebp, esi, edi;   /* The special purpose registers */
-    Bit32u es;                   /* The extra selector */
-    Bit32u cs;                   /* The code selector */
-    Bit32u ss;                   /* The application stack selector */
-    Bit32u ds;                   /* The data selector */
-    Bit32u fs;                   /* And another extra selector */
-    Bit32u gs;                   /* ... and another one */
-    Bit32u ldt;                  /* The local descriptor table */
+    uint32_t back;                /* Back link to other task */
+	uint32_t esp0;		         /* The CK stack pointer */
+    uint32_t ss0;					 /* The CK stack selector */
+	uint32_t esp1;                 /* The parent KL stack pointer */
+    uint32_t ss1;                  /* The parent KL stack selector */
+	uint32_t esp2;                 /* Unused */
+    uint32_t ss2;                  /* Unused */
+	uint32_t cr3;                  /* The page directory pointer */
+    uint32_t eip;                  /* The instruction pointer */
+    uint32_t eflags;               /* The flags */
+    uint32_t eax, ecx, edx, ebx;   /* The general purpose registers */
+    uint32_t esp, ebp, esi, edi;   /* The special purpose registers */
+    uint32_t es;                   /* The extra selector */
+    uint32_t cs;                   /* The code selector */
+    uint32_t ss;                   /* The application stack selector */
+    uint32_t ds;                   /* The data selector */
+    uint32_t fs;                   /* And another extra selector */
+    uint32_t gs;                   /* ... and another one */
+    uint32_t ldt;                  /* The local descriptor table */
 } GCC_ATTRIBUTE(packed);
 
 #ifdef _MSC_VER
@@ -338,32 +348,57 @@ public:
 	void Load(PhysPt address);
 	void Save(PhysPt address);
 
-	PhysPt GetBase (void) { 
-		return (saved.seg.base_24_31<<24) | (saved.seg.base_16_23<<16) | saved.seg.base_0_15; 
+	PhysPt GetBase()
+	{
+		const auto base = (saved.seg.base_24_31  << 24) |
+		                  (saved.seg.base_16_23 << 16) |
+		                   saved.seg.base_0_15;
+		return static_cast<PhysPt>(base);
 	}
-	Bitu GetLimit (void) {
-		Bitu limit = (saved.seg.limit_16_19<<16) | saved.seg.limit_0_15;
-		if (saved.seg.g)	return (limit<<12) | 0xFFF;
-		return limit;
+
+	uint32_t GetLimit()
+	{
+		const auto limit_16_19 = check_cast<uint8_t>(saved.seg.limit_16_19); // 4 bits
+		const auto limit_0_15 = check_cast<uint16_t>(saved.seg.limit_0_15); // 16 bits
+		const auto limit = (limit_16_19 << 16) | limit_0_15;
+		if (saved.seg.g)
+			return static_cast<uint32_t>((limit << 12) | 0xFFF);
+		return static_cast<uint32_t>(limit);
 	}
-	Bitu GetOffset(void) {
-		return (saved.gate.offset_16_31 << 16) | saved.gate.offset_0_15;
+
+	uint32_t GetOffset()
+	{
+		const auto offset_16_31 = check_cast<uint16_t>(saved.gate.offset_16_31); // 16 bits
+		const auto offset_0_15 = check_cast<uint16_t>(saved.gate.offset_0_15); // 16 bits
+		const auto offset = (offset_16_31 << 16) | offset_0_15;
+		return static_cast<uint32_t>(offset);
 	}
-	Bitu GetSelector(void) {
-		return saved.gate.selector;
+
+	uint16_t GetSelector()
+	{
+		return check_cast<uint16_t>(saved.gate.selector); // 16 bit
 	}
-	Bitu Type(void) {
-		return saved.seg.type;
+
+	uint8_t Type()
+	{
+		return check_cast<uint8_t>(saved.seg.type); // 5 bits
 	}
-	Bitu Conforming(void) {
-		return saved.seg.type & 8;
+
+	uint8_t Conforming()
+	{
+		return check_cast<uint8_t>(saved.seg.type & 8); // 5 bit
 	}
-	Bitu DPL(void) {
-		return saved.seg.dpl;
+
+	uint8_t DPL()
+	{
+		return check_cast<uint8_t>(saved.seg.dpl); // 2 bit
 	}
-	Bitu Big(void) {
-		return saved.seg.big;
+
+	uint8_t Big()
+	{
+		return check_cast<uint8_t>(saved.seg.big); // 1 bit
 	}
+
 public:
 	union {
 		uint32_t fill[2];
@@ -380,9 +415,10 @@ public:
 	void	SetLimit		(Bitu _limit)	{ table_limit= _limit;	}
 
 	bool GetDescriptor	(Bitu selector, Descriptor& desc) {
-		selector&=~7;
+		selector &= ~7ul;
+		const auto nonbitu_selector = check_cast<PhysPt>(selector);
 		if (selector>=table_limit) return false;
-		desc.Load(table_base+(selector));
+		desc.Load(table_base + nonbitu_selector);
 		return true;
 	}
 protected:
@@ -393,26 +429,28 @@ protected:
 class GDTDescriptorTable final : public DescriptorTable {
 public:
 	bool GetDescriptor(Bitu selector, Descriptor& desc) {
-		Bitu address=selector & ~7;
+		Bitu address = selector & ~7ul;
+		const auto nonbitu_address = check_cast<PhysPt>(address);
 		if (selector & 4) {
 			if (address>=ldt_limit) return false;
-			desc.Load(ldt_base+address);
+			desc.Load(ldt_base + nonbitu_address);
 			return true;
 		} else {
 			if (address>=table_limit) return false;
-			desc.Load(table_base+address);
+			desc.Load(table_base + nonbitu_address);
 			return true;
 		}
 	}
 	bool SetDescriptor(Bitu selector, Descriptor& desc) {
-		Bitu address=selector & ~7;
+		Bitu address = selector & ~7ul;
+		const auto nonbitu_address = check_cast<PhysPt>(address);
 		if (selector & 4) {
 			if (address>=ldt_limit) return false;
-			desc.Save(ldt_base+address);
+			desc.Save(ldt_base + nonbitu_address);
 			return true;
 		} else {
 			if (address>=table_limit) return false;
-			desc.Save(table_base+address);
+			desc.Save(table_base + nonbitu_address);
 			return true;
 		}
 	} 
@@ -479,20 +517,14 @@ struct CPUBlock {
 	} exception;
 	Bits direction;
 	bool trap_skip;
-	Bit32u drx[8];
-	Bit32u trx[8];
+	uint32_t drx[8];
+	uint32_t trx[8];
 };
 
 extern CPUBlock cpu;
 
-static INLINE void CPU_SetFlagsd(Bitu word) {
-	Bitu mask=cpu.cpl ? FMASK_NORMAL : FMASK_ALL;
-	CPU_SetFlags(word,mask);
-}
-
-static INLINE void CPU_SetFlagsw(Bitu word) {
-	Bitu mask=(cpu.cpl ? FMASK_NORMAL : FMASK_ALL) & 0xffff;
-	CPU_SetFlags(word,mask);
-}
+void CPU_SetFlags(const uint32_t word, uint32_t mask);
+void CPU_SetFlagsd(const uint32_t word);
+void CPU_SetFlagsw(const uint32_t word);
 
 #endif

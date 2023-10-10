@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -27,8 +27,12 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+// clang-format off
+// 'windows.h' must be included first, otherwise we'll get compilation errors
 #include <windows.h>
 #include <mmsystem.h>
+// clang-format on
+
 #include <string>
 #include <sstream>
 
@@ -36,19 +40,30 @@
 
 class MidiHandler_win32 final : public MidiHandler {
 private:
-	HMIDIOUT m_out;
-	MIDIHDR m_hdr;
-	HANDLE m_event;
+	HMIDIOUT m_out = nullptr;
+	MIDIHDR m_hdr = {};
+	HANDLE m_event = nullptr;
 	bool isOpen;
 public:
 	MidiHandler_win32() : MidiHandler(), isOpen(false) {}
+	
+	MidiHandler_win32(const MidiHandler_win32&) = delete;
+	MidiHandler_win32& operator=(const MidiHandler_win32&) = delete;
 
-	const char *GetName() const override { return "win32"; }
+	std::string_view GetName() const override
+	{
+		return "win32";
+	}
+
+	MidiDeviceType GetDeviceType() const override
+	{
+		return MidiDeviceType::External;
+	}
 
 	bool Open(const char *conf) override
 	{
 		if (isOpen) return false;
-		m_event = CreateEvent (NULL, true, true, NULL);
+		m_event = CreateEvent (nullptr, true, true, nullptr);
 		MMRESULT res = MMSYSERR_NOERROR;
 		if(conf && *conf) {
 			std::string strconf(conf);
@@ -73,7 +88,7 @@ public:
 			if (nummer < total) {
 				MIDIOUTCAPS mididev;
 				midiOutGetDevCaps(nummer, &mididev, sizeof(MIDIOUTCAPS));
-				LOG_MSG("MIDI: win32 selected %s",mididev.szPname);
+				LOG_MSG("MIDI:WIN32: Selected output device %s",mididev.szPname);
 				res = midiOutOpen(&m_out, nummer, (DWORD_PTR)m_event, 0, CALLBACK_EVENT);
 			}
 		} else {
@@ -86,24 +101,31 @@ public:
 
 	void Close() override
 	{
-		if (!isOpen) return;
+		if (!isOpen) {
+			return;
+		}
 
-		HaltSequence();
+		Reset();
 
 		isOpen = false;
 		midiOutClose(m_out);
-		CloseHandle (m_event);
+		CloseHandle(m_event);
 	}
 
-	void PlayMsg(const uint8_t *msg) override
+	void PlayMsg(const MidiMessage& data) override
 	{
-		midiOutShortMsg(m_out, read_unaligned_uint32(msg));
+		const auto status  = data[0];
+		const auto data1   = data[1];
+		const auto data2   = data[2];
+		const uint32_t msg = status + (data1 << 8) + (data2 << 16);
+
+		midiOutShortMsg(m_out, msg);
 	}
 
 	void PlaySysex(uint8_t *sysex, size_t len) override
 	{
 		if (WaitForSingleObject (m_event, 2000) == WAIT_TIMEOUT) {
-			LOG(LOG_MISC,LOG_ERROR)("Can't send midi message");
+			LOG_WARNING("MIDI:WIN32: Can't send midi message");
 			return;
 		}
 		midiOutUnprepareHeader (m_out, &m_hdr, sizeof (m_hdr));

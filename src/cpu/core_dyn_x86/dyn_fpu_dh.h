@@ -21,11 +21,11 @@
 #if C_FPU
 
 static void FPU_FLD_16(PhysPt addr) {
-	dyn_dh_fpu.temp.m1 = (Bit32u)mem_readw(addr);
+	dyn_dh_fpu.temp.m1 = (uint32_t)mem_readw(addr);
 }
 
 static void FPU_FST_16(PhysPt addr) {
-	mem_writew(addr,(Bit16u)dyn_dh_fpu.temp.m1);
+	mem_writew(addr,(uint16_t)dyn_dh_fpu.temp.m1);
 }
 
 static void FPU_FLD_32(PhysPt addr) {
@@ -60,11 +60,11 @@ static void FPU_FST_80(PhysPt addr) {
 
 static void FPU_FLDCW_DH(PhysPt addr){
 	dyn_dh_fpu.cw = mem_readw(addr);
-	dyn_dh_fpu.temp.m1 = (Bit32u)(dyn_dh_fpu.cw|0x3f);
+	dyn_dh_fpu.temp.m1 = (uint32_t)(dyn_dh_fpu.cw|0x3f);
 }
 
 static void FPU_FNSTCW_DH(PhysPt addr){
-	mem_writew(addr,(Bit16u)(dyn_dh_fpu.cw&0xffff));
+	mem_writew(addr,(uint16_t)(dyn_dh_fpu.cw&0xffff));
 }
 
 static void FPU_FNINIT_DH(void){
@@ -73,12 +73,12 @@ static void FPU_FNINIT_DH(void){
 
 static void FPU_FSTENV_DH(PhysPt addr){
 	if(!cpu.code.big) {
-		mem_writew(addr+0,(Bit16u)dyn_dh_fpu.cw);
-		mem_writew(addr+2,(Bit16u)dyn_dh_fpu.temp.m2);
+		mem_writew(addr+0,dyn_dh_fpu.cw);
+		mem_writew(addr+2,(uint16_t)dyn_dh_fpu.temp.m2);
 		mem_writew(addr+4,dyn_dh_fpu.temp.m3);
 	} else { 
 		mem_writed(addr+0,dyn_dh_fpu.temp.m1);
-		mem_writew(addr+0,(Bit16u)dyn_dh_fpu.cw);
+		mem_writew(addr+0,dyn_dh_fpu.cw);
 		mem_writed(addr+4,dyn_dh_fpu.temp.m2);
 		mem_writed(addr+8,dyn_dh_fpu.temp.m3);
 	}
@@ -86,12 +86,12 @@ static void FPU_FSTENV_DH(PhysPt addr){
 
 static void FPU_FLDENV_DH(PhysPt addr){
 	if(!cpu.code.big) {
-		dyn_dh_fpu.cw = (Bit32u)mem_readw(addr);
+		dyn_dh_fpu.cw = (uint32_t)mem_readw(addr);
 		dyn_dh_fpu.temp.m1 = dyn_dh_fpu.cw|0x3f;
-		dyn_dh_fpu.temp.m2 = (Bit32u)mem_readw(addr+2);
+		dyn_dh_fpu.temp.m2 = (uint32_t)mem_readw(addr+2);
 		dyn_dh_fpu.temp.m3 = mem_readw(addr+4);
 	} else { 
-		dyn_dh_fpu.cw = (Bit32u)mem_readw(addr);
+		dyn_dh_fpu.cw = (uint32_t)mem_readw(addr);
 		dyn_dh_fpu.temp.m1 = mem_readd(addr)|0x3f;
 		dyn_dh_fpu.temp.m2 = mem_readd(addr+4);
 		dyn_dh_fpu.temp.m3 = mem_readw(addr+8);
@@ -101,7 +101,7 @@ static void FPU_FLDENV_DH(PhysPt addr){
 
 static void FPU_FSAVE_DH(PhysPt addr){
 	if (!cpu.code.big) {
-		mem_writew(addr,(Bit16u)dyn_dh_fpu.cw);
+		mem_writew(addr,dyn_dh_fpu.cw);
 		addr+=2;
 		mem_writeb(addr++,dyn_dh_fpu.temp_state[0x04]);
 		mem_writeb(addr++,dyn_dh_fpu.temp_state[0x05]);
@@ -117,7 +117,7 @@ static void FPU_FSAVE_DH(PhysPt addr){
 		mem_writeb(addr++,dyn_dh_fpu.temp_state[0x19]);
 		for(Bitu i=28;i<108;i++) mem_writeb(addr++,dyn_dh_fpu.temp_state[i]);
 	} else {
-		mem_writew(addr,(Bit16u)dyn_dh_fpu.cw);
+		mem_writew(addr,dyn_dh_fpu.cw);
 		addr+=2;
 		for(Bitu i=2;i<108;i++) mem_writeb(addr++,dyn_dh_fpu.temp_state[i]);
 	}
@@ -125,7 +125,7 @@ static void FPU_FSAVE_DH(PhysPt addr){
 
 static void FPU_FRSTOR_DH(PhysPt addr){
 	if (!cpu.code.big) {
-		dyn_dh_fpu.cw = (Bit32u)mem_readw(addr);
+		dyn_dh_fpu.cw = (uint32_t)mem_readw(addr);
 		dyn_dh_fpu.temp_state[0x00] = mem_readb(addr++)|0x3f;
 		dyn_dh_fpu.temp_state[0x01] = mem_readb(addr++);
 		dyn_dh_fpu.temp_state[0x04] = mem_readb(addr++);
@@ -142,17 +142,17 @@ static void FPU_FRSTOR_DH(PhysPt addr){
 		dyn_dh_fpu.temp_state[0x19] = mem_readb(addr++);
 		for(Bitu i=28;i<108;i++) dyn_dh_fpu.temp_state[i] = mem_readb(addr++);
 	} else {
-		dyn_dh_fpu.cw = (Bit32u)mem_readw(addr);
+		dyn_dh_fpu.cw = (uint32_t)mem_readw(addr);
 		for(Bitu i=0;i<108;i++) dyn_dh_fpu.temp_state[i] = mem_readb(addr++);
 		dyn_dh_fpu.temp_state[0]|=0x3f;
 	}
 }
 
-static void dh_fpu_mem(Bit8u inst, Bitu reg=decode.modrm.reg, void* mem=&dyn_dh_fpu.temp.m1) {
+static void dh_fpu_mem(uint8_t inst, Bitu reg=decode.modrm.reg, void* mem=&dyn_dh_fpu.temp.m1) {
 #if C_TARGETCPU == X86
 	cache_addb(inst);
 	cache_addb(0x05|(reg<<3));
-	cache_addd((Bit32u)(mem));
+	cache_addd((uint32_t)(mem));
 #else // X86_64
 	opcode(reg).setabsaddr(mem).Emit8(inst);
 #endif
@@ -188,9 +188,6 @@ static void dh_fpu_esc1(){
 			FPU_LOG_WARN(1,true,group,sub);
 			break;
 		case 0x02: /* FST float*/
-			dh_fpu_mem(0xd9);
-			gen_call_function((void*)&FPU_FST_32,"%Drd",DREG(EA));
-			break;
 		case 0x03: /* FSTP float*/
 			dh_fpu_mem(0xd9);
 			gen_call_function((void*)&FPU_FST_32,"%Drd",DREG(EA));
@@ -273,9 +270,6 @@ static void dh_fpu_esc3(){
 			FPU_LOG_WARN(3, true, 1, sub);
 			break;
 		case 0x02:	/* FIST */
-			dh_fpu_mem(0xdb);
-			gen_call_function((void*)&FPU_FST_32,"%Drd",DREG(EA));
-			break;
 		case 0x03:	/* FISTP */
 			dh_fpu_mem(0xdb);
 			gen_call_function((void*)&FPU_FST_32,"%Drd",DREG(EA));
@@ -325,9 +319,6 @@ static void dh_fpu_esc5(){
 			FPU_LOG_WARN(5,true,1,sub);
 			break;
 		case 0x02:   /* FST double real*/
-			dh_fpu_mem(0xdd);
-			gen_call_function((void*)&FPU_FST_64,"%Drd",DREG(EA));
-			break;
 		case 0x03:	/* FSTP double real*/
 			dh_fpu_mem(0xdd);
 			gen_call_function((void*)&FPU_FST_64,"%Drd",DREG(EA));
@@ -371,13 +362,7 @@ static void dh_fpu_esc7(){
 	if (decode.modrm.val >= 0xc0) { 
 		switch (group){
 		case 0x00: /* FFREEP STi*/
-			cache_addb(0xdf);
-			cache_addb(decode.modrm.val);
-			break;
 		case 0x01: /* FXCH STi*/
-			cache_addb(0xdf);
-			cache_addb(decode.modrm.val);
-			break;
 		case 0x02:  /* FSTP STi*/
 		case 0x03:  /* FSTP STi*/
 			cache_addb(0xdf);
@@ -403,18 +388,15 @@ static void dh_fpu_esc7(){
 	} else {
 		dyn_fill_ea(); 
 		switch(group){
-		case 0x00:  /* FILD Bit16s */
+		case 0x00:  /* FILD int16_t */
 			gen_call_function((void*)&FPU_FLD_16,"%Drd",DREG(EA));
 			dh_fpu_mem(0xdf);
 			break;
 		case 0x01:
 			FPU_LOG_WARN(7,true,1,sub);
 			break;
-		case 0x02:   /* FIST Bit16s */
-			dh_fpu_mem(0xdf);
-			gen_call_function((void*)&FPU_FST_16,"%Drd",DREG(EA));
-			break;
-		case 0x03:	/* FISTP Bit16s */
+		case 0x02:   /* FIST int16_t */
+		case 0x03:	/* FISTP int16_t */
 			dh_fpu_mem(0xdf);
 			gen_call_function((void*)&FPU_FST_16,"%Drd",DREG(EA));
 			break;
@@ -422,7 +404,7 @@ static void dh_fpu_esc7(){
 			gen_call_function((void*)&FPU_FLD_80,"%Drd",DREG(EA));
 			dh_fpu_mem(0xdf);
 			break;
-		case 0x05:  /* FILD Bit64s */
+		case 0x05:  /* FILD int64_t */
 			gen_call_function((void*)&FPU_FLD_64,"%Drd",DREG(EA));
 			dh_fpu_mem(0xdf);
 			break;
@@ -430,7 +412,7 @@ static void dh_fpu_esc7(){
 			dh_fpu_mem(0xdf);
 			gen_call_function((void*)&FPU_FST_80,"%Drd",DREG(EA));
 			break;
-		case 0x07:  /* FISTP Bit64s */
+		case 0x07:  /* FISTP int64_t */
 			dh_fpu_mem(0xdf);
 			gen_call_function((void*)&FPU_FST_64,"%Drd",DREG(EA));
 			break;

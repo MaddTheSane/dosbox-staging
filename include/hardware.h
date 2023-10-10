@@ -1,4 +1,7 @@
 /*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2023-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -22,44 +25,30 @@
 #include "dosbox.h"
 
 #include <stdio.h>
+#include <string>
 
 class Section;
-enum OPL_Mode {
-	OPL_none,OPL_cms,OPL_opl2,OPL_dualopl2,OPL_opl3,OPL_opl3gold
-};
-#define CAPTURE_WAVE	0x01
-#define CAPTURE_OPL		0x02
-#define CAPTURE_MIDI	0x04
-#define CAPTURE_IMAGE	0x08
-#define CAPTURE_VIDEO	0x10
 
-extern Bitu CaptureState;
+enum class OplMode { None, Cms, Opl2, DualOpl2, Opl3, Opl3Gold };
 
-void OPL_Init(Section* sec,OPL_Mode mode);
-void CMS_Init(Section* sec);
-void OPL_ShutDown(Section* sec);
-void CMS_ShutDown(Section* sec);
+void OPL_Init(Section *sec, OplMode mode);
+void CMS_Init(Section *sec);
+void OPL_ShutDown(Section* sec = nullptr);
+void CMS_ShutDown(Section* sec = nullptr);
 
 bool PS1AUDIO_IsEnabled();
 bool SB_Get_Address(uint16_t &sbaddr, uint8_t &sbirq, uint8_t &sbdma);
 bool TS_Get_Address(Bitu& tsaddr, Bitu& tsirq, Bitu& tsdma);
 
-extern Bit8u adlib_commandreg;
-FILE * OpenCaptureFile(const char * type,const char * ext);
+extern uint8_t adlib_commandreg;
 
-void CAPTURE_AddWave(Bit32u freq, Bit32u len, Bit16s * data);
-#define CAPTURE_FLAG_DBLW	0x1
-#define CAPTURE_FLAG_DBLH	0x2
-void CAPTURE_AddImage(Bitu width, Bitu height, Bitu bpp, Bitu pitch, Bitu flags, float fps, Bit8u * data, Bit8u * pal);
-void CAPTURE_AddMidi(bool sysex, Bitu len, Bit8u * data);
-void CAPTURE_VideoStart();
-void CAPTURE_VideoStop();
-
-class Config;
 // Gravis UltraSound configuration and initialization
-void GUS_AddConfigSection(Config *conf);
+void GUS_AddConfigSection(const config_ptr_t &conf);
+
+// IBM Music Feature Card configuration and initialization
+void IMFC_AddConfigSection(const config_ptr_t& conf);
 
 // Innovation SSI-2001 configuration and initialization
-void INNOVATION_AddConfigSection(Config *conf);
+void INNOVATION_AddConfigSection(const config_ptr_t &conf);
 
 #endif

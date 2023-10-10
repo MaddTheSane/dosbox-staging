@@ -16,31 +16,22 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-enum STRING_OP {
-	R_OUTSB,R_OUTSW,R_OUTSD,
-	R_INSB,R_INSW,R_INSD,
-	R_MOVSB,R_MOVSW,R_MOVSD,
-	R_LODSB,R_LODSW,R_LODSD,
-	R_STOSB,R_STOSW,R_STOSD,
-	R_SCASB,R_SCASW,R_SCASD,
-	R_CMPSB,R_CMPSW,R_CMPSD
-};
+#include "../string_ops.h"
 
 #define LoadD(_BLAH) _BLAH
 
 static void DoString(STRING_OP type) {
-	PhysPt  si_base,di_base;
-	Bitu	si_index,di_index;
-	Bitu	add_mask;
-	Bitu	count,count_left;
-	Bits	add_index;
-	
-	si_base=BaseDS;
-	di_base=SegBase(es);
-	add_mask=AddrMaskTable[core.prefixes & PREFIX_ADDR];
-	si_index=reg_esi & add_mask;
-	di_index=reg_edi & add_mask;
-	count=reg_ecx & add_mask;
+	const auto si_base = BaseDS;
+	const auto di_base = SegBase(es);
+
+	const auto add_mask = AddrMaskTable[core.prefixes & PREFIX_ADDR];
+
+	auto si_index = reg_esi & add_mask;
+	auto di_index = reg_edi & add_mask;
+
+	auto count = reg_ecx & add_mask;
+	int32_t count_left = 0;
+
 	if (!TEST_PREFIX_REP) {
 		count=1;
 	} else {
@@ -58,7 +49,7 @@ static void DoString(STRING_OP type) {
 			count_left=0;
 		}
 	}
-	add_index=cpu.direction;
+	auto add_index = cpu.direction;
 	if (count) switch (type) {
 	case R_OUTSB:
 		for (;count>0;count--) {
@@ -165,7 +156,7 @@ static void DoString(STRING_OP type) {
 		break;
 	case R_SCASB:
 		{
-			Bit8u val2;
+			uint8_t val2 = 0;
 			for (;count>0;) {
 				count--;CPU_Cycles--;
 				val2=LoadMb(di_base+di_index);
@@ -178,7 +169,7 @@ static void DoString(STRING_OP type) {
 	case R_SCASW:
 		{
 			add_index *= 2;
-			Bit16u val2;
+			uint16_t val2 = 0;
 			for (;count>0;) {
 				count--;CPU_Cycles--;
 				val2=LoadMw(di_base+di_index);
@@ -191,7 +182,7 @@ static void DoString(STRING_OP type) {
 	case R_SCASD:
 		{
 			add_index *= 4;
-			Bit32u val2;
+			uint32_t val2 = 0;
 			for (;count>0;) {
 				count--;CPU_Cycles--;
 				val2=LoadMd(di_base+di_index);
@@ -203,7 +194,8 @@ static void DoString(STRING_OP type) {
 		break;
 	case R_CMPSB:
 		{
-			Bit8u val1,val2;
+			uint8_t val1 = 0;
+			uint8_t val2 = 0;
 			for (;count>0;) {
 				count--;CPU_Cycles--;
 				val1=LoadMb(si_base+si_index);
@@ -218,7 +210,8 @@ static void DoString(STRING_OP type) {
 	case R_CMPSW:
 		{
 			add_index *= 2;
-			Bit16u val1,val2;
+			uint16_t val1 = 0;
+			uint16_t val2 = 0;
 			for (;count>0;) {
 				count--;CPU_Cycles--;
 				val1=LoadMw(si_base+si_index);
@@ -233,7 +226,8 @@ static void DoString(STRING_OP type) {
 	case R_CMPSD:
 		{
 			add_index *= 4;
-			Bit32u val1,val2;
+			uint32_t val1 = 0;
+			uint32_t val2 = 0;
 			for (;count>0;) {
 				count--;CPU_Cycles--;
 				val1=LoadMd(si_base+si_index);

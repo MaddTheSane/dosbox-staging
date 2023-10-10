@@ -140,9 +140,12 @@
 #include "emu.h"
 #include "sn76496.h"
 
+#include <algorithm>
+#include <cassert>
+
 #define MAX_OUTPUT 0x7fff
 //When you go over this create sample
-#define RATE_MAX ( 1 << 30)
+#define RATE_MAX (1 << 10)
 
 sn76496_base_device::sn76496_base_device(const machine_config &mconfig,
                                          device_type type,
@@ -271,12 +274,15 @@ void sn76496_base_device::device_start()
 	m_current_clock = m_clock_divider-1;
 
 	// set gain
-	gain = 0;
+	gain = 16;
 
 	gain &= 0xff;
 
+	// four channels, each gets 1/4 of the total range
+	constexpr int32_t max_output_per_channel = MAX_OUTPUT / 4;
+
 	// increase max output basing on gain (0.2 dB per step)
-	out = MAX_OUTPUT / 4; // four channels, each gets 1/4 of the total range
+	out = max_output_per_channel;
 	while (gain-- > 0)
 		out *= 1.023292992; // = (10 ^ (0.2/20))
 
@@ -284,8 +290,8 @@ void sn76496_base_device::device_start()
 	for (i = 0; i < 15; i++)
 	{
 		// limit volume to avoid clipping
-		if (out > MAX_OUTPUT / 4) m_vol_table[i] = MAX_OUTPUT / 4;
-		else m_vol_table[i] = static_cast<int32_t>(out);
+		m_vol_table[i] = std::min(static_cast<int32_t>(out),
+		                          max_output_per_channel);
 
 		out /= 1.258925412; /* = 10 ^ (2/20) = 2dB */
 	}
@@ -393,11 +399,13 @@ void sn76496_base_device::countdown_cycles()
 	}
 }
 
-void sn76496_base_device::sound_stream_update(MAYBE_UNUSED sound_stream &stream, MAYBE_UNUSED stream_sample_t **inputs, stream_sample_t **outputs, int samples)
+void sn76496_base_device::sound_stream_update([[maybe_unused]] sound_stream &stream, [[maybe_unused]] stream_sample_t **inputs, stream_sample_t **outputs, int samples)
 {
 	int i;
+
+	assert(outputs);
 	stream_sample_t *lbuffer = outputs[0];
-	stream_sample_t *rbuffer = (m_stereo)? outputs[1] : 0;//nullptr;
+	stream_sample_t *rbuffer = (m_stereo) ? outputs[1] : nullptr;
 
 	int16_t out;
 	int16_t out2 = 0;
@@ -472,8 +480,14 @@ void sn76496_base_device::sound_stream_update(MAYBE_UNUSED sound_stream &stream,
 		}
 
 		if (m_negate) { out = -out; out2 = -out2; }
+
+		assert(lbuffer);
 		*(lbuffer++) = out;
-		if (m_stereo) *(rbuffer++) = out2;
+
+		if (m_stereo) {
+			assert(rbuffer);
+			*(rbuffer++) = out2;
+		}
 		samples--;
 	}
 }

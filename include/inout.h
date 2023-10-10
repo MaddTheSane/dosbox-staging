@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -27,7 +27,7 @@
 #include <functional>
 
 using io_port_t = uint16_t; // DOS only supports 16-bit port addresses
-using io_val_t = uint32_t; // Handling exists up to a dword (or less)
+using io_val_t  = uint32_t; // Handling exists up to a dword (or less)
 
 void IO_WriteB(io_port_t port, uint8_t val);
 void IO_WriteW(io_port_t port, uint16_t val);
@@ -39,10 +39,16 @@ uint32_t IO_ReadD(io_port_t port);
 
 // type-sized IO handler API
 enum class io_width_t : uint8_t {
-	byte = sizeof(uint8_t),
-	word = sizeof(uint16_t),
-	dword = sizeof(uint32_t),
+	byte = 1, // bytes
+	word = 2, // bytes
+	dword = 4, // bytes
 };
+
+// Sanity check the IO sizes
+static_assert(static_cast<size_t>(io_width_t::byte) == sizeof(uint8_t), "io_width_t::byte must be 1 byte");
+static_assert(static_cast<size_t>(io_width_t::word) == sizeof(uint16_t), "io_width_t::word must be 2 bytes");
+static_assert(static_cast<size_t>(io_width_t::dword) == sizeof(uint32_t), "io_width_t::dword must be 4 bytes");
+
 constexpr int io_widths = 3; // byte, word, and dword
 
 using io_read_f = std::function<io_val_t(io_port_t port, io_width_t width)>;
@@ -97,14 +103,41 @@ public:
 	~IO_WriteHandleObject();
 };
 
-static INLINE void IO_Write(io_port_t port, Bit8u val)
+static inline void IO_Write(io_port_t port, uint8_t val)
 {
 	IO_WriteB(port,val);
 }
 
-static INLINE Bit8u IO_Read(io_port_t port){
+static inline uint8_t IO_Read(io_port_t port)
+{
 	// cast to be dropped after deprecating the Bitu IO handler API
-	return (Bit8u)IO_ReadB(port);
+	return IO_ReadB(port);
 }
+
+// Hardware I/O port numbers
+
+// Intel 8042 keyboard/mouse port microcontroller
+constexpr io_port_t port_num_i8042_data    = 0x60u;
+constexpr io_port_t port_num_i8042_status  = 0x64u; // read-only
+constexpr io_port_t port_num_i8042_command = 0x64u; // write-only
+
+// Intel 8255 microcontrollers
+constexpr io_port_t port_num_i8255_1 = 0x61u;
+constexpr io_port_t port_num_i8255_2 = 0x62u;
+
+// PS/2 control port, mainly for fast A20
+constexpr io_port_t port_num_fast_a20 = 0x92u;
+
+// PCI bus registers
+constexpr io_port_t port_num_pci_config_address = 0xcf8u;
+constexpr io_port_t port_num_pci_config_data    = 0xcfcu;
+
+// VirtualBox communication interface
+// (can be moved, but two last bits have to be 0)
+constexpr io_port_t port_num_virtualbox = 0x5654u;
+
+// VMware communication interface
+constexpr io_port_t port_num_vmware    = 0x5658u;
+constexpr io_port_t port_num_vmware_hb = 0x5659u; // high bandwidth
 
 #endif

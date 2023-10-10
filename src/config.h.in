@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -22,13 +22,29 @@
 #define DOSBOX_CONFIG_H
 
 /* Version and branding tweaks
- */
+*/
 
-// Emulator version
+// Name of project, lower-case without spaces
+#define CANONICAL_PROJECT_NAME "@project_name@"
+
+// Emulator Semantic Version (MAJOR.MINOR.PATCH), incremented as follows:
+//  - MAJOR version when you make incompatible API changes
+//  - MINOR version when you add functionality in a backwards compatible manner
+//  - PATCH version when you make backwards compatible bug fixes
+// Additional labels for pre-release and build metadata are available as extensions to the MAJOR.MINOR.PATCH format.
+// Ref: https://semver.org/
+
 #define VERSION "@version@"
 
-// Suffix appended to the default .conf file name
-#define CONF_SUFFIX "@conf_suffix@"
+/* Strings to be returned by virtual drivers, etc.
+*/
+
+// Name of the emulator
+#define DOSBOX_NAME "DOSBox Staging"
+// Development team name
+#define DOSBOX_TEAM "The " DOSBOX_NAME " Team"
+// Copyright string
+#define DOSBOX_COPYRIGHT "(C) " DOSBOX_TEAM
 
 /* Operating System
  */
@@ -43,7 +59,9 @@
 #mesondefine MACOSX
 
 // Defined if compiling for Windows (any option)
+#ifndef WIN32
 #mesondefine WIN32
+#endif
 
 /* CPU and FPU emulation
  *
@@ -55,6 +73,9 @@
 
 // Define to 1 if target CPU supports unaligned memory access
 #mesondefine C_UNALIGNED_MEMORY
+
+// Define to 1 if the target platform needs per-page dynamic core write or execute (W^X) tagging
+#mesondefine C_PER_PAGE_W_OR_X
 
 // Define to 1 to use x86/x86_64 dynamic cpu core
 // Can not be used together with C_DYNREC
@@ -86,9 +107,6 @@
 // Define to 1 to enable IPX over Internet networking (using SDL2_net)
 #mesondefine C_IPX
 
-// Define to 1 to enable NE2000 ethernet passthrough
-#mesondefine C_NE2000
-
 // Enable serial port passthrough support
 #mesondefine C_DIRECTSERIAL
 
@@ -98,8 +116,14 @@
 // Define to 1 to enable FluidSynth integration (built-in MIDI synth)
 #mesondefine C_FLUIDSYNTH
 
-// Define to 1 to enable screenshots in .png format
-#mesondefine C_SSHOT
+// Define to 1 to enable libslirp Ethernet support
+#mesondefine C_SLIRP
+
+// Define to 1 to enable Novell NE 2000 NIC emulation
+#mesondefine C_NE2000
+
+// Define to 1 to enable the Tracy profiling server
+#mesondefine C_TRACY
 
 // Define to 1 to enable internal debugger (using ncurses or pdcurses)
 #mesondefine C_DEBUG
@@ -110,11 +134,26 @@
 // Define to 1 to enable MT-32 emulator
 #mesondefine C_MT32EMU
 
+// Define to 1 to enable mouse mapping support
+#mesondefine C_MANYMOUSE
+
+// ManyMouse optionally supports the X Input 2.0 protocol (regardless of OS). It
+// uses the following define to definitively indicate if it should or shouldn't
+// use the X Input 2.0 protocol. If this is left undefined, then ManyMouse makes
+// an assumption about availability based on OS type.
+#mesondefine SUPPORT_XINPUT2
+
 // Compiler supports Core Audio headers
 #mesondefine C_COREAUDIO
 
 // Compiler supports Core MIDI headers
 #mesondefine C_COREMIDI
+
+// Compiler supports Core Foundation headers
+#mesondefine C_COREFOUNDATION
+
+// Compiler supports Core Services headers
+#mesondefine C_CORESERVICES
 
 // Define to 1 to enable ALSA MIDI support
 #mesondefine C_ALSA
@@ -166,9 +205,14 @@
 // Defind if function setpriority is available
 #mesondefine HAVE_SETPRIORITY
 
+// Defind if function strnlen is available
+#mesondefine HAVE_STRNLEN
+
 // field d_type in struct dirent is not defined in POSIX
 // Some OSes do not implement it (e.g. Haiku)
 #mesondefine HAVE_STRUCT_DIRENT_D_TYPE
+
+
 
 /* Available headers
  *
@@ -200,5 +244,10 @@
 // Enables mathematical constants (such as M_PI) in Windows math.h header
 // https://docs.microsoft.com/en-us/cpp/c-runtime-library/math-constants
 #mesondefine _USE_MATH_DEFINES
+
+// Holds the "--datadir" specified during project setup. This can
+// be used as a fallback if the user hasn't populated their
+// XDG_DATA_HOME or XDG_DATA_DIRS to include the --datadir.
+#mesondefine CUSTOM_DATADIR
 
 #endif

@@ -15,18 +15,17 @@
  *  with this program; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
-
-#include <stdio.h>
-
 #include "dosbox.h"
-#include "mem.h"
-#include "cpu.h"
-#include "lazyflags.h"
-#include "inout.h"
+
 #include "callback.h"
-#include "pic.h"
+#include "cpu.h"
 #include "fpu.h"
+#include "inout.h"
+#include "lazyflags.h"
+#include "mem.h"
 #include "paging.h"
+#include "pic.h"
+#include "tracy.h"
 
 #if C_DEBUG
 #include "debug.h"
@@ -89,7 +88,7 @@ extern Bitu cycle_count;
 
 typedef PhysPt (*GetEAHandler)(void);
 
-static const Bit32u AddrMaskTable[2]={0x0000ffff,0xffffffff};
+static const uint32_t AddrMaskTable[2]={0x0000ffff,0xffffffff};
 
 static struct {
 	Bitu opcode_index;
@@ -109,19 +108,19 @@ static struct {
 #define BaseDS		core.base_ds
 #define BaseSS		core.base_ss
 
-static INLINE Bit8u Fetchb() {
-	Bit8u temp=LoadMb(core.cseip);
+static inline uint8_t Fetchb() {
+	uint8_t temp=LoadMb(core.cseip);
 	core.cseip+=1;
 	return temp;
 }
 
-static INLINE Bit16u Fetchw() {
-	Bit16u temp=LoadMw(core.cseip);
+static inline uint16_t Fetchw() {
+	uint16_t temp=LoadMw(core.cseip);
 	core.cseip+=2;
 	return temp;
 }
-static INLINE Bit32u Fetchd() {
-	Bit32u temp=LoadMd(core.cseip);
+static inline uint32_t Fetchd() {
+	uint32_t temp=LoadMd(core.cseip);
 	core.cseip+=4;
 	return temp;
 }
@@ -138,7 +137,9 @@ static INLINE Bit32u Fetchd() {
 
 #define EALookupTable (core.ea_table)
 
-Bits CPU_Core_Normal_Run(void) {
+Bits CPU_Core_Normal_Run() noexcept
+{
+	ZoneScoped;
 	while (CPU_Cycles-->0) {
 		LOADIP;
 		core.opcode_index=cpu.code.big*0x200;
@@ -190,7 +191,8 @@ decode_end:
 	return CBRET_NONE;
 }
 
-Bits CPU_Core_Normal_Trap_Run(void) {
+Bits CPU_Core_Normal_Trap_Run() noexcept
+{
 	Bits oldCycles = CPU_Cycles;
 	CPU_Cycles = 1;
 	cpu.trap_skip = false;
@@ -202,8 +204,6 @@ Bits CPU_Core_Normal_Trap_Run(void) {
 
 	return ret;
 }
-
-
 
 void CPU_Core_Normal_Init(void) {
 

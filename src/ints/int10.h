@@ -26,9 +26,10 @@
 #include "mem.h"
 #include "vga.h"
 
-#define S3_LFB_BASE		0xC0000000
+// forward declarations
+class Rgb666;
 
-#define BIOSMEM_SEG		0x40
+#define BIOSMEM_SEG 0x40
 
 #define BIOSMEM_INITIAL_MODE  0x10
 #define BIOSMEM_CURRENT_MODE  0x49
@@ -50,6 +51,8 @@
 #define BIOSMEM_CRTCPU_PAGE   0x8A
 #define BIOSMEM_VS_POINTER    0xA8
 
+constexpr uint16_t MinVesaBiosModeNumber = 0x100;
+constexpr uint16_t MaxVesaBiosModeNumber = 0x7ff;
 
 /*
  *
@@ -100,22 +103,50 @@
 #define VGAMEM_CTEXT 0xB800
 #define VGAMEM_MTEXT 0xB000
 
-#define BIOS_NCOLS Bit16u ncols=real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS);
-#define BIOS_NROWS Bit16u nrows=IS_EGAVGA_ARCH?((Bit16u)real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS)+1):25;
-#define BIOS_CHEIGHT Bit8u cheight=IS_EGAVGA_ARCH?real_readb(BIOSMEM_SEG,BIOSMEM_CHAR_HEIGHT):8;
+#define BIOS_NCOLS uint16_t ncols=real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS);
+#define BIOS_NROWS uint16_t nrows=IS_EGAVGA_ARCH?((uint16_t)real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS)+1):25;
+#define BIOS_CHEIGHT uint8_t cheight=IS_EGAVGA_ARCH?real_readb(BIOSMEM_SEG,BIOSMEM_CHAR_HEIGHT):8;
 
 uint16_t INT10_GetTextColumns();
 uint16_t INT10_GetTextRows();
 
-extern Bit8u int10_font_08[256 * 8];
-extern Bit8u int10_font_14[256 * 14];
-extern Bit8u int10_font_16[256 * 16];
-extern Bit8u int10_font_14_alternate[20 * 15 + 1];
-extern Bit8u int10_font_16_alternate[19 * 17 + 1];
+extern uint8_t int10_font_08[256 * 8];
+extern uint8_t int10_font_14[256 * 14];
+extern uint8_t int10_font_16[256 * 16];
+extern uint8_t int10_font_14_alternate[20 * 15 + 1];
+extern uint8_t int10_font_16_alternate[19 * 17 + 1];
+
+struct palette_t {
+	// 64 entries
+	std::vector<Rgb666> mono_text = {};
+
+	// 64 entries
+	std::vector<Rgb666> mono_text_s3 = {};
+
+	// 16 entries. This is default canonical 16-colour CGA palette as emulated
+	// by VGA cards.
+	std::vector<Rgb666> cga16 = {};
+
+	// 64 entries. This is the default 64-colour 6-bit RGB EGA palette as
+	// emulated by VGA cards. The BIOS sets up these colours in the first 64
+	// of the 256 VGA colour registers in EGA modes.
+	std::vector<Rgb666> cga64 = {};
+
+	// 64 entries
+	std::vector<Rgb666> ega = {};
+
+	// 256 entries. This is the default 256-colour VGA palette.
+	std::vector<Rgb666> vga = {};
+};
+
+extern palette_t palette;
 
 struct VideoModeBlock {
+	// BIOS video mode number
 	uint16_t mode;
+
 	VGAModes type;
+
 	uint16_t swidth, sheight;
 	uint8_t twidth, theight;
 	uint8_t cwidth, cheight;
@@ -129,11 +160,21 @@ struct VideoModeBlock {
 };
 
 extern std::vector<VideoModeBlock> ModeList_VGA;
-extern VideoModeBlock * CurMode;
+extern std::vector<VideoModeBlock> ModeList_VGA_Paradise;
+extern std::vector<VideoModeBlock> ModeList_VGA_Tseng;
 
-enum class VESA_MODE_PREF {
-	COMPATIBLE, // optimizes out-of-the-box compatibility with games
-	ALL, // use all VESA modes (compromise being some games might not handle them properly)
+using video_mode_block_iterator_t = std::vector<VideoModeBlock>::const_iterator;
+
+// Holds the last set "coarse" video mode via an INT 10H BIOS call.
+// A "refined", more accurate version of the current mode is stored in the
+// `vga.mode` global (e.g. M_TEXT may get refined into M_CGA_TEXT_COMPOSITE,
+// M_CGA4 into M_TANDY4 or M_CGA4_COMPOSITE, etc.)
+extern video_mode_block_iterator_t CurMode;
+
+enum class VesaModePref {
+	Compatible,  // Prunes the available S3 modes to maximize DOS game compatibility
+	Halfline, // Replaces mode 120h with the halfline mode used by Extreme Assault
+	All, // Enables all S3 864 and Trio VESA modes (but some games might not handle them properly)
 };
 
 struct Int10Data {
@@ -154,49 +195,57 @@ struct Int10Data {
 		RealPt wait_retrace;
 		RealPt set_window;
 		RealPt pmode_interface;
-		Bit16u pmode_interface_size;
-		Bit16u pmode_interface_start;
-		Bit16u pmode_interface_window;
-		Bit16u pmode_interface_palette;
-		Bit16u used;
+		uint16_t pmode_interface_size;
+		uint16_t pmode_interface_start;
+		uint16_t pmode_interface_window;
+		uint16_t pmode_interface_palette;
+		uint16_t used;
 	} rom = {};
-	Bit16u vesa_setmode = 0;
+	uint16_t vesa_setmode = 0;
 
-	VESA_MODE_PREF vesa_mode_preference = VESA_MODE_PREF::COMPATIBLE;
+	VesaModePref vesa_mode_preference = VesaModePref::Compatible;
 	bool vesa_nolfb = false;
 	bool vesa_oldvbe = false;
 };
 
 extern Int10Data int10;
 
-static inline Bit8u CURSOR_POS_COL(Bit8u page) {
-	return real_readb(BIOSMEM_SEG,BIOSMEM_CURSOR_POS+page*2);
+inline uint8_t CURSOR_POS_COL(const uint8_t page)
+{
+	const auto cursor_offset = static_cast<uint16_t>(page * 2);
+	return real_readb(BIOSMEM_SEG, BIOSMEM_CURSOR_POS + cursor_offset);
 }
 
-static inline Bit8u CURSOR_POS_ROW(Bit8u page) {
-	return real_readb(BIOSMEM_SEG,BIOSMEM_CURSOR_POS+page*2+1);
+inline uint8_t CURSOR_POS_ROW(const uint8_t page)
+{
+	const auto cursor_offset = static_cast<uint16_t>(page * 2 + 1);
+	return real_readb(BIOSMEM_SEG, BIOSMEM_CURSOR_POS + cursor_offset);
 }
 
-bool INT10_SetVideoMode(Bit16u mode);
+void INT10_SetupPalette();
+
+bool INT10_SetVideoMode(uint16_t mode);
 void INT10_SetCurMode(void);
 
-void INT10_ScrollWindow(Bit8u rul,Bit8u cul,Bit8u rlr,Bit8u clr,Bit8s nlines,Bit8u attr,Bit8u page);
+bool INT10_IsTextMode(const VideoModeBlock& mode_block);
 
-void INT10_SetActivePage(Bit8u page);
-void INT10_DisplayCombinationCode(Bit16u * dcc,bool set);
+void INT10_ScrollWindow(uint8_t rul,uint8_t cul,uint8_t rlr,uint8_t clr,int8_t nlines,uint8_t attr,uint8_t page);
+
+void INT10_SetActivePage(uint8_t page);
+void INT10_DisplayCombinationCode(uint16_t * dcc,bool set);
 void INT10_GetFuncStateInformation(PhysPt save);
 
-void INT10_SetCursorShape(Bit8u first,Bit8u last);
-void INT10_SetCursorPos(Bit8u row,Bit8u col,Bit8u page);
-void INT10_TeletypeOutput(Bit8u chr,Bit8u attr);
-void INT10_TeletypeOutputAttr(Bit8u chr,Bit8u attr,bool useattr);
-void INT10_ReadCharAttr(Bit16u * result,Bit8u page);
+void INT10_SetCursorShape(uint8_t first,uint8_t last);
+void INT10_SetCursorPos(uint8_t row,uint8_t col,uint8_t page);
+void INT10_TeletypeOutput(uint8_t chr,uint8_t attr);
+void INT10_TeletypeOutputAttr(uint8_t chr,uint8_t attr,bool useattr);
+void INT10_ReadCharAttr(uint16_t * result,uint8_t page);
 void INT10_WriteChar(uint8_t chr, uint8_t attr, uint8_t page, uint16_t count, bool showattr);
-void INT10_WriteString(Bit8u row,Bit8u col,Bit8u flag,Bit8u attr,PhysPt string,Bit16u count,Bit8u page);
+void INT10_WriteString(uint8_t row,uint8_t col,uint8_t flag,uint8_t attr,PhysPt string,uint16_t count,uint8_t page);
 
 /* Graphics Stuff */
-void INT10_PutPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u color);
-void INT10_GetPixel(Bit16u x,Bit16u y,Bit8u page,Bit8u * color);
+void INT10_PutPixel(uint16_t x,uint16_t y,uint8_t page,uint8_t color);
+void INT10_GetPixel(uint16_t x,uint16_t y,uint8_t page,uint8_t * color);
 
 /* Font Stuff */
 void INT10_LoadFont(PhysPt font,bool reload,Bitu count,Bitu offset,Bitu map,Bitu height);
@@ -204,37 +253,38 @@ void INT10_ReloadFont(void);
 
 /* Palette Group */
 void INT10_SetBackgroundBorder(uint8_t val);
-void INT10_SetColorSelect(Bit8u val);
+void INT10_SetColorSelect(uint8_t val);
 void INT10_SetSinglePaletteRegister(uint8_t reg, uint8_t val);
 void INT10_SetOverscanBorderColor(uint8_t val);
 void INT10_SetAllPaletteRegisters(PhysPt data);
-void INT10_ToggleBlinkingBit(Bit8u state);
-void INT10_GetSinglePaletteRegister(Bit8u reg,Bit8u * val);
-void INT10_GetOverscanBorderColor(Bit8u * val);
+void INT10_ToggleBlinkingBit(uint8_t state);
+void INT10_GetSinglePaletteRegister(uint8_t reg,uint8_t * val);
+void INT10_GetOverscanBorderColor(uint8_t * val);
 void INT10_GetAllPaletteRegisters(PhysPt data);
-void INT10_SetSingleDACRegister(Bit8u index,Bit8u red,Bit8u green,Bit8u blue);
-void INT10_GetSingleDACRegister(Bit8u index,Bit8u * red,Bit8u * green,Bit8u * blue);
-void INT10_SetDACBlock(Bit16u index,Bit16u count,PhysPt data);
-void INT10_GetDACBlock(Bit16u index,Bit16u count,PhysPt data);
-void INT10_SelectDACPage(Bit8u function,Bit8u mode);
-void INT10_GetDACPage(Bit8u* mode,Bit8u* page);
-void INT10_SetPelMask(Bit8u mask);
-void INT10_GetPelMask(Bit8u & mask);
-void INT10_PerformGrayScaleSumming(Bit16u start_reg,Bit16u count);
+void INT10_SetSingleDACRegister(uint8_t index,uint8_t red,uint8_t green,uint8_t blue);
+void INT10_GetSingleDACRegister(uint8_t index,uint8_t * red,uint8_t * green,uint8_t * blue);
+void INT10_SetDACBlock(uint16_t index,uint16_t count,PhysPt data);
+void INT10_GetDACBlock(uint16_t index,uint16_t count,PhysPt data);
+void INT10_SelectDACPage(uint8_t function,uint8_t mode);
+void INT10_GetDACPage(uint8_t* mode,uint8_t* page);
+void INT10_SetPelMask(uint8_t mask);
+void INT10_GetPelMask(uint8_t & mask);
+void INT10_PerformGrayScaleSumming(uint16_t start_reg,uint16_t count);
 
 
 /* Vesa Group */
-Bit8u VESA_GetSVGAInformation(Bit16u seg,Bit16u off);
-Bit8u VESA_GetSVGAModeInformation(Bit16u mode,Bit16u seg,Bit16u off);
-Bit8u VESA_SetSVGAMode(Bit16u mode);
-Bit8u VESA_GetSVGAMode(Bit16u & mode);
-Bit8u VESA_SetCPUWindow(Bit8u window,Bit8u address);
-Bit8u VESA_GetCPUWindow(Bit8u window,Bit16u & address);
-Bit8u VESA_ScanLineLength(Bit8u subcall, Bit16u val, Bit16u & bytes,Bit16u & pixels,Bit16u & lines);
-Bit8u VESA_SetDisplayStart(Bit16u x,Bit16u y,bool wait);
-Bit8u VESA_GetDisplayStart(Bit16u & x,Bit16u & y);
-Bit8u VESA_SetPalette(PhysPt data,Bitu index,Bitu count,bool wait);
-Bit8u VESA_GetPalette(PhysPt data,Bitu index,Bitu count);
+uint8_t VESA_GetSVGAInformation(const uint16_t segment, const uint16_t offset);
+bool VESA_IsVesaMode(const uint16_t bios_mode_number);
+uint8_t VESA_GetSVGAModeInformation(uint16_t mode,uint16_t seg,uint16_t off);
+uint8_t VESA_SetSVGAMode(uint16_t mode);
+uint8_t VESA_GetSVGAMode(uint16_t & mode);
+uint8_t VESA_SetCPUWindow(uint8_t window,uint8_t address);
+uint8_t VESA_GetCPUWindow(uint8_t window,uint16_t & address);
+uint8_t VESA_ScanLineLength(uint8_t subcall, uint16_t val, uint16_t & bytes,uint16_t & pixels,uint16_t & lines);
+uint8_t VESA_SetDisplayStart(uint16_t x,uint16_t y,bool wait);
+uint8_t VESA_GetDisplayStart(uint16_t & x,uint16_t & y);
+uint8_t VESA_SetPalette(PhysPt data,Bitu index,Bitu count,bool wait);
+uint8_t VESA_GetPalette(PhysPt data,Bitu index,Bitu count);
 
 /* Sub Groups */
 void INT10_SetupRomMemory(void);
@@ -243,12 +293,12 @@ void INT10_SetupVESA(void);
 
 /* EGA RIL */
 RealPt INT10_EGA_RIL_GetVersionPt(void);
-void INT10_EGA_RIL_ReadRegister(Bit8u & bl, Bit16u dx);
-void INT10_EGA_RIL_WriteRegister(Bit8u & bl, Bit8u bh, Bit16u dx);
-void INT10_EGA_RIL_ReadRegisterRange(Bit8u ch, Bit8u cl, Bit16u dx, PhysPt dst);
-void INT10_EGA_RIL_WriteRegisterRange(Bit8u ch, Bit8u cl, Bit16u dx, PhysPt dst);
-void INT10_EGA_RIL_ReadRegisterSet(Bit16u cx, PhysPt tbl);
-void INT10_EGA_RIL_WriteRegisterSet(Bit16u cx, PhysPt tbl);
+void INT10_EGA_RIL_ReadRegister(uint8_t & bl, uint16_t dx);
+void INT10_EGA_RIL_WriteRegister(uint8_t & bl, uint8_t bh, uint16_t dx);
+void INT10_EGA_RIL_ReadRegisterRange(uint8_t ch, uint8_t cl, uint16_t dx, PhysPt dst);
+void INT10_EGA_RIL_WriteRegisterRange(uint8_t ch, uint8_t cl, uint16_t dx, PhysPt dst);
+void INT10_EGA_RIL_ReadRegisterSet(uint16_t cx, PhysPt tbl);
+void INT10_EGA_RIL_WriteRegisterSet(uint16_t cx, PhysPt tbl);
 
 /* Video State */
 Bitu INT10_VideoState_GetSize(Bitu state);
@@ -256,7 +306,7 @@ bool INT10_VideoState_Save(Bitu state,RealPt buffer);
 bool INT10_VideoState_Restore(Bitu state,RealPt buffer);
 
 /* Video Parameter Tables */
-Bit16u INT10_SetupVideoParameterTable(PhysPt basepos);
+uint16_t INT10_SetupVideoParameterTable(PhysPt basepos);
 void INT10_SetupBasicVideoParameterTable(void);
 
 #endif

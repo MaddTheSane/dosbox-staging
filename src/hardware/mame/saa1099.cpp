@@ -71,62 +71,91 @@
 #include "emu.h"
 #include "saa1099.h"
 
+#include <cassert>
 #include <cfloat>
 #include <cmath>
+#include <climits>
+
+#include "mixer.h"
 
 #define LEFT    0x00
 #define RIGHT   0x01
 
-static const int amplitude_lookup[16] = {
-		0*32767/16,  1*32767/16,  2*32767/16,   3*32767/16,
-		4*32767/16,  5*32767/16,  6*32767/16,   7*32767/16,
-		8*32767/16,  9*32767/16, 10*32767/16, 11*32767/16,
-	12*32767/16, 13*32767/16, 14*32767/16, 15*32767/16
-};
+constexpr uint16_t amplitude_lookup[16] = {0 * 32767 / 16,
+                                           1 * 32767 / 16,
+                                           2 * 32767 / 16,
+                                           3 * 32767 / 16,
+                                           4 * 32767 / 16,
+                                           5 * 32767 / 16,
+                                           6 * 32767 / 16,
+                                           7 * 32767 / 16,
+                                           8 * 32767 / 16,
+                                           9 * 32767 / 16,
+                                           10 * 32767 / 16,
+                                           11 * 32767 / 16,
+                                           12 * 32767 / 16,
+                                           13 * 32767 / 16,
+                                           14 * 32767 / 16,
+                                           15 * 32767 / 16};
 
-static const uint8_t envelope[8][64] = {
-	/* zero amplitude */
-	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-	/* maximum amplitude */
-	{15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-		15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-		15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
-		15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15, },
-	/* single decay */
-	{15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-	/* repetitive decay */
-	{15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
-		15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
-		15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
-		15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 },
-	/* single triangular */
-	{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
-		15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-	/* repetitive triangular */
-	{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
-		15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
-		0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
-		15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 },
-	/* single attack */
-	{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-	/* repetitive attack */
-	{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
-		0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
-		0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
-		0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15 }
+constexpr uint8_t envelope[8][64] = {
+        /* zero amplitude */
+        {
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        },
+        /* maximum amplitude */
+        {
+                15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+                15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+                15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+                15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+        },
+        /* single decay */
+        {
+                15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
+                0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        },
+        /* repetitive decay */
+        {
+                15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
+                15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
+                15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
+                15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
+        },
+        /* single triangular */
+        {
+                0,  1,  2,  3,  4,  5,  6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5,  4,  3,  2,  1,  0,
+                0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0,  0,  0,  0,  0,  0,
+                0,  0,  0,  0,  0,  0,  0, 0, 0, 0, 0,  0,  0,  0,  0,  0,
+        },
+        /* repetitive triangular */
+        {
+                0,  1,  2,  3,  4,  5,  6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5,  4,  3,  2,  1,  0,
+                0,  1,  2,  3,  4,  5,  6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5,  4,  3,  2,  1,  0,
+        },
+        /* single attack */
+        {
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,
+        },
+        /* repetitive attack */
+        {
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+        },
 };
-
 
 // device type definition
 //DEFINE_DEVICE_TYPE(SAA1099, saa1099_device, "saa1099", "Philips SAA1099")
@@ -142,13 +171,13 @@ static const uint8_t envelope[8][64] = {
 
 #define FILL_ARRAY( _FILL_ ) memset( _FILL_, 0, sizeof( _FILL_ ) )
 
-saa1099_device::saa1099_device(const machine_config &mconfig,
-                               const char *tag,
-                               device_t *owner,
-                               uint32_t clock)
+saa1099_device::saa1099_device(const machine_config &mconfig, const char *tag, device_t *owner,
+                               const uint32_t clock, const int rate_divisor)
         : device_t(mconfig, SAA1099, tag, owner, clock),
           device_sound_interface(mconfig, *this),
-          m_stream(0),
+          m_stream(nullptr),
+          m_noise_freqs{2 * clock / 256.0, 2 * clock / 512.0, 2 * clock / 1024.0},
+
 #if 0
           m_noise_params{ 0, 0 },
           m_env_enable{ 0, 0 },
@@ -161,7 +190,7 @@ saa1099_device::saa1099_device(const machine_config &mconfig,
           m_all_ch_enable(0),
           m_sync_state(0),
           m_selected_reg(0),
-          m_sample_rate(0.0),
+          m_sample_rate(static_cast<double>(clock) / rate_divisor),
           m_chip_clock(0)
 {
 	FILL_ARRAY( m_noise_params );
@@ -182,10 +211,10 @@ void saa1099_device::device_start()
 {
 	/* copy global parameters */
 	m_chip_clock = clock();
-	m_sample_rate = clock() / 256;
 
 	/* for each chip allocate one stream */
-	m_stream = stream_alloc(0, 2, m_sample_rate);
+	assert(m_sample_rate >= 0 && m_sample_rate <= INT_MAX);
+	m_stream = stream_alloc(0, 2, static_cast<int>(m_sample_rate));
 
 	save_item(NAME(m_noise_params));
 	save_item(NAME(m_env_enable));
@@ -224,8 +253,8 @@ void saa1099_device::device_start()
 //  sound_stream_update - handle a stream update
 //-------------------------------------------------
 
-void saa1099_device::sound_stream_update(MAYBE_UNUSED sound_stream &stream,
-                                         MAYBE_UNUSED stream_sample_t **inputs,
+void saa1099_device::sound_stream_update([[maybe_unused]] sound_stream &stream,
+                                         [[maybe_unused]] stream_sample_t **inputs,
                                          stream_sample_t **outputs,
                                          int samples)
 {
@@ -243,9 +272,9 @@ void saa1099_device::sound_stream_update(MAYBE_UNUSED sound_stream &stream,
 	{
 		switch (m_noise_params[ch])
 		{
-		case 0: m_noise[ch].freq = m_chip_clock / 256.0 * 2; break;
-		case 1: m_noise[ch].freq = m_chip_clock / 512.0 * 2; break;
-		case 2: m_noise[ch].freq = m_chip_clock / 1024.0 * 2; break;
+		case 0: m_noise[ch].freq = m_noise_freqs[0]; break;
+		case 1: m_noise[ch].freq = m_noise_freqs[1]; break;
+		case 2: m_noise[ch].freq = m_noise_freqs[2]; break;
 		case 3:
 			m_noise[ch].freq = m_channels[ch * 3].freq;
 			break; // todo: this case will be
@@ -262,45 +291,35 @@ void saa1099_device::sound_stream_update(MAYBE_UNUSED sound_stream &stream,
 		int output_l = 0, output_r = 0;
 
 		/* for each channel */
-		for (ch = 0; ch < 6; ch++)
-		{
-			auto channel = m_channels[ch];
-
-			auto calc_channel_freq = [this, channel]() {
-				return static_cast<double>((2 * m_chip_clock / 512)
-				                           << channel.octave) /
-				       (511.0 - channel.frequency);
-			};
-
-			if (abs(channel.freq) <= DBL_EPSILON) {
-				channel.freq = calc_channel_freq();
+		uint8_t ch_num = 0;
+		for (auto &channel : m_channels) {
+			if (channel.freq == 0.0) {
+				channel.update_freq(m_chip_clock);
 			}
-
 			/* check the actual position in the square wave */
 			channel.counter -= channel.freq;
 			while (channel.counter < 0) {
-				/* calculate new frequency now after the half
-				 * wave is updated */
-				channel.freq = calc_channel_freq();
-
 				channel.counter += m_sample_rate;
 				channel.level ^= 1;
 
 				/* eventually clock the envelope counters */
-				if (ch == 1 && m_env_clock[0] == 0)
+				if (ch_num == 1 && m_env_clock[0] == 0)
 					envelope_w(0);
-				if (ch == 4 && m_env_clock[1] == 0)
+				if (ch_num == 4 && m_env_clock[1] == 0)
 					envelope_w(1);
 			}
 
 			// if the noise is enabled
 			if (channel.noise_enable) {
-				// if the noise level is high (noise 0: chan 0-2, noise 1: chan 3-5)
-				if (m_noise[ch/3].level & 1)
-				{
-					// subtract to avoid overflows, also use only half amplitude
-					output_l -= channel.amplitude[LEFT] * channel.envelope[LEFT] / 16 / 2;
-					output_r -= channel.amplitude[RIGHT] * channel.envelope[RIGHT] / 16 / 2;
+				// if the noise level is high (noise 0: chan
+				// 0-2, noise 1: chan 3-5)
+				if (m_noise[ch_num / 3].level & 1) {
+					// subtract to avoid overflows, also use
+					// only half amplitude
+					output_l -= channel.amplitude[LEFT] *
+					            channel.envelope[LEFT] / 16 / 2;
+					output_r -= channel.amplitude[RIGHT] *
+					            channel.envelope[RIGHT] / 16 / 2;
 				}
 			}
 			// if the square wave is enabled
@@ -308,9 +327,11 @@ void saa1099_device::sound_stream_update(MAYBE_UNUSED sound_stream &stream,
 				// if the channel level is high
 				if (channel.level & 1) {
 					output_l += channel.amplitude[LEFT] * channel.envelope[LEFT] / 16;
-					output_r += channel.amplitude[RIGHT] * channel.envelope[RIGHT] / 16;
+					output_r += channel.amplitude[RIGHT] *
+					            channel.envelope[RIGHT] / 16;
 				}
 			}
+			++ch_num;
 		}
 
 		for (ch = 0; ch < 2; ch++)
@@ -329,8 +350,15 @@ void saa1099_device::sound_stream_update(MAYBE_UNUSED sound_stream &stream,
 			}
 		}
 		/* write sound data to the buffer */
-		outputs[LEFT][j] = output_l / 6;
-		outputs[RIGHT][j] = output_r / 6;
+		const auto left_sample = output_l / 6;
+		assert(left_sample >= Min16BitSampleValue &&
+		       left_sample <= Max16BitSampleValue);
+		outputs[LEFT][j] = static_cast<int16_t>(left_sample);
+
+		const auto right_sample = output_r / 6;
+		assert(right_sample >= Min16BitSampleValue &&
+		       right_sample <= Max16BitSampleValue);
+		outputs[RIGHT][j] = static_cast<int16_t>(right_sample);
 	}
 }
 
@@ -396,6 +424,10 @@ WRITE8_MEMBER( saa1099_device::control_w )
 	}
 }
 
+void saa1099_device::saa1099_channel::update_freq(const int chip_clock)
+{
+	freq = (chip_clock >> (8 - octave)) / (511.0 - frequency);
+}
 
 WRITE8_MEMBER( saa1099_device::data_w )
 {
@@ -417,12 +449,15 @@ WRITE8_MEMBER( saa1099_device::data_w )
 	case 0x08:  case 0x09:  case 0x0a:  case 0x0b:  case 0x0c:  case 0x0d:
 		ch = reg & 7;
 		m_channels[ch].frequency = data & 0xff;
+		m_channels[ch].update_freq(m_chip_clock);
 		break;
 	/* channel i octave */
 	case 0x10:  case 0x11:  case 0x12:
 		ch = (reg - 0x10) << 1;
 		m_channels[ch + 0].octave = data & 0x07;
+		m_channels[ch + 0].update_freq(m_chip_clock);
 		m_channels[ch + 1].octave = (data >> 4) & 0x07;
+		m_channels[ch + 1].update_freq(m_chip_clock);
 		break;
 	/* channel i frequency enable */
 	case 0x14:

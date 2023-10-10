@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -24,18 +24,20 @@
 #include <array>
 #include <iomanip>
 #include <memory>
+#include <queue>
 #include <string>
 #include <unistd.h>
 #include <vector>
 
+#include "autoexec.h"
 #include "control.h"
 #include "dma.h"
 #include "hardware.h"
+#include "math_utils.h"
 #include "mixer.h"
 #include "pic.h"
 #include "setup.h"
 #include "shell.h"
-#include "soft_limiter.h"
 #include "string_utils.h"
 
 #define LOG_GUS 0 // set to 1 for detailed logging
@@ -46,15 +48,18 @@
 // AdLib emulation state constant
 constexpr uint8_t ADLIB_CMD_DEFAULT = 85u;
 
+// Environment variable names
+const auto ultrasnd_env_name = "ULTRASND";
+const auto ultradir_env_name = "ULTRADIR";
+
 // Buffer and memory constants
-constexpr int BUFFER_FRAMES = 48;
-constexpr uint32_t RAM_SIZE = 1024 * 1024;        // 1 MiB
+constexpr uint32_t RAM_SIZE = 1024 * 1024; // 1 MB
 
 // DMA transfer size and rate constants
-constexpr uint32_t BYTES_PER_DMA_XFER = 8 * 1024;         // 8 KiB per transfer
-constexpr uint32_t ISA_BUS_THROUGHPUT = 32 * 1024 * 1024; // 32 MiB/s
+constexpr uint32_t BYTES_PER_DMA_XFER = 8 * 1024;         // 8 KB per transfer
+constexpr uint32_t ISA_BUS_THROUGHPUT = 32 * 1024 * 1024; // 32 MB/s
 constexpr uint16_t DMA_TRANSFERS_PER_S = ISA_BUS_THROUGHPUT / BYTES_PER_DMA_XFER;
-constexpr double MS_PER_DMA_XFER = 1000.0 / DMA_TRANSFERS_PER_S;
+constexpr double MS_PER_DMA_XFER = millis_in_second / DMA_TRANSFERS_PER_S;
 
 // Voice-channel and state related constants
 constexpr uint8_t MAX_VOICES = 32u;
@@ -110,17 +115,15 @@ struct VoiceCtrl {
 };
 
 // Collection types involving constant quantities
-using address_array_t = std::array<uint8_t, DMA_IRQ_ADDRESSES>;
-using autoexec_array_t = std::array<AutoexecObject, 2>;
+using address_array_t     = std::array<uint8_t, DMA_IRQ_ADDRESSES>;
 using pan_scalars_array_t = std::array<AudioFrame, PAN_POSITIONS>;
-using ram_array_t = std::array<uint8_t, RAM_SIZE>;
-using read_io_array_t = std::array<IO_ReadHandleObject, READ_HANDLERS>;
+using ram_array_t         = std::vector<uint8_t>;
+using read_io_array_t     = std::array<IO_ReadHandleObject, READ_HANDLERS>;
 using vol_scalars_array_t = std::array<float, VOLUME_LEVELS>;
-using write_io_array_t = std::array<IO_WriteHandleObject, WRITE_HANDLERS>;
-using mixer_channel_ptr_t = std::unique_ptr<MixerChannel, decltype(&MIXER_DelChannel)>;
+using write_io_array_t    = std::array<IO_WriteHandleObject, WRITE_HANDLERS>;
 
 // A Voice is used by the Gus class and instantiates 32 of these.
-// Each voice represents a single "mono" render_buffer of audio having its own
+// Each voice represents a single "mono" stream of audio having its own
 // characteristics defined by the running program, such as:
 //   - being 8bit or 16bit
 //   - having a "position" along a left-right axis (panned)
@@ -131,11 +134,12 @@ using mixer_channel_ptr_t = std::unique_ptr<MixerChannel, decltype(&MIXER_DelCha
 class Voice {
 public:
 	Voice(uint8_t num, VoiceIrq &irq) noexcept;
-	void GenerateSamples(std::vector<float> &render_buffer,
-	                     const ram_array_t &ram,
-	                     const vol_scalars_array_t &vol_scalars,
-	                     const pan_scalars_array_t &pan_scalars,
-	                     uint16_t requested_frames);
+	Voice(Voice&&) = default;
+
+	void RenderFrames(const ram_array_t& ram,
+	                  const vol_scalars_array_t& vol_scalars,
+	                  const pan_scalars_array_t& pan_scalars,
+	                  std::vector<AudioFrame>& frames);
 
 	uint8_t ReadVolState() const noexcept;
 	uint8_t ReadWaveState() const noexcept;
@@ -157,7 +161,7 @@ private:
 	Voice(const Voice &) = delete;            // prevent copying
 	Voice &operator=(const Voice &) = delete; // prevent assignment
 	bool CheckWaveRolloverCondition() noexcept;
-	bool Is8Bit() const noexcept;
+	bool Is16Bit() const noexcept;
 	float GetVolScalar(const vol_scalars_array_t &vol_scalars);
 	float GetSample(const ram_array_t &ram) noexcept;
 	int32_t PopWavePos() noexcept;
@@ -188,8 +192,6 @@ private:
 static void GUS_TimerEvent(uint32_t t);
 static void GUS_DMA_Event(uint32_t val);
 
-using voice_array_t = std::array<std::unique_ptr<Voice>, MAX_VOICES>;
-
 // The Gravis UltraSound GF1 DSP (classic)
 // This class:
 //   - Registers, receives, and responds to port address inputs, which are used
@@ -198,14 +200,17 @@ using voice_array_t = std::array<std::unique_ptr<Voice>, MAX_VOICES>;
 //   - Provides shared resources to all of the Voices, such as the volume
 //     reducing table, constant-power panning table, and IRQ states.
 //   - Accumulates the audio from each active voice into a floating point
-//     vector (the render_buffer), without resampling.
+//     audio frame.
 //   - Populates an autoexec line (ULTRASND=...) with its port, irq, and dma
 //     addresses.
 //
 class Gus {
 public:
-	Gus(uint16_t port, uint8_t dma, uint8_t irq, const std::string &dir);
+	Gus(const io_port_t port_pref, const uint8_t dma_pref, const uint8_t irq_pref,
+	    const char* ultradir, const std::string& filter_prefs);
+
 	virtual ~Gus();
+
 	bool CheckTimer(size_t t);
 	void PrintStats();
 
@@ -231,14 +236,17 @@ private:
 	void BeginPlayback();
 	void CheckIrq();
 	void CheckVoiceIrq();
-	uint32_t Dma8Addr() noexcept;
-	uint32_t Dma16Addr() noexcept;
-	void DmaCallback(DmaChannel *chan, DMAEvent event);
+	uint32_t GetDmaOffset() noexcept;
+	void UpdateDmaAddr(uint32_t offset) noexcept;
+	void DmaCallback(const DmaChannel* chan, DMAEvent event);
 	void StartDmaTransfers();
 	bool IsDmaPcm16Bit() noexcept;
 	bool IsDmaXfer16Bit() noexcept;
 	uint16_t ReadFromRegister();
-	void PopulateAutoExec(uint16_t port, const std::string &dir);
+
+	void SetupEnvironment(const uint16_t port, const char* ultradir_env_val);
+	void ClearEnvironment();
+
 	void PopulatePanScalars() noexcept;
 	void PopulateVolScalars() noexcept;
 	void PrepareForPlayback() noexcept;
@@ -246,40 +254,48 @@ private:
 
 	void RegisterIoHandlers();
 	void Reset(uint8_t state);
-	void SetLevelCallback(const AudioFrame &levels);
+
+	const std::vector<AudioFrame>& RenderFrames(const int num_requested_frames);
+
+	void RenderUpToNow();
 	void StopPlayback();
 	void UpdateDmaAddress(uint8_t new_address);
 	void UpdateWaveMsw(int32_t &addr) const noexcept;
 	void UpdateWaveLsw(int32_t &addr) const noexcept;
-	void WriteToPort(io_port_t port, uint16_t val, io_width_t width);
+	void WriteToPort(io_port_t port, io_val_t value, io_width_t width);
 
 	void WriteToRegister();
 
 	// Collections
+	std::queue<AudioFrame> fifo     = {};
 	vol_scalars_array_t vol_scalars = {{}};
-	std::vector<float> render_buffer = {};
-	std::vector<int16_t> play_buffer = {};
 	pan_scalars_array_t pan_scalars = {{}};
-	ram_array_t ram = {{0u}};
-	read_io_array_t read_handlers = {};   // std::functions
-	write_io_array_t write_handlers = {}; // std::functions
+	ram_array_t ram                 = {};
+	read_io_array_t read_handlers   = {};
+	write_io_array_t write_handlers = {};
+	std::vector<Voice> voices       = {};
+	std::vector<AudioFrame> rendered_frames = {};
+
 	const address_array_t dma_addresses = {
 	        {MIN_DMA_ADDRESS, 1, 3, 5, 6, MAX_IRQ_ADDRESS, 0, 0}};
 	const address_array_t irq_addresses = {
 	        {MIN_IRQ_ADDRESS, 2, 5, 3, 7, 11, 12, MAX_IRQ_ADDRESS}};
-	voice_array_t voices = {{nullptr}};
-	autoexec_array_t autoexec_lines = {};
 
 	// Struct and pointer members
 	VoiceIrq voice_irq = {};
-	SoftLimiter soft_limiter;
 	Voice *target_voice = nullptr;
 	DmaChannel *dma_channel = nullptr;
-	mixer_channel_ptr_t audio_channel{nullptr, MIXER_DelChannel};
+	mixer_channel_t audio_channel = nullptr;
+
+	// Playback related
+	double last_rendered_ms = 0.0;
+	double ms_per_render    = 0.0;
+	int frame_rate_hz       = 0;
+
 	uint8_t &adlib_command_reg = adlib_commandreg;
 
 	// Port address
-	uint16_t port_base = 0u;
+	io_port_t port_base = 0u;
 
 	// Voice states
 	uint32_t active_voice_mask = 0u;
@@ -287,9 +303,8 @@ private:
 	uint8_t active_voices = 0u;
 	uint8_t prev_logged_voices = 0u;
 
-	// Register and playback rate
+	// RAM and register data 
 	uint32_t dram_addr = 0u;
-	uint32_t playback_rate = 0u;
 	uint16_t register_data = 0u;
 	uint8_t selected_register = 0u;
 
@@ -300,6 +315,7 @@ private:
 
 	// DMA states
 	uint16_t dma_addr = 0u;
+	uint8_t dma_addr_nibble = 0u;
 	// dma_ctrl would normally be a uint8_t as real hardware uses 8 bits,
 	// but we store the DMA terminal count status in the 9th bit
 	uint16_t dma_ctrl = 0u;
@@ -313,8 +329,9 @@ private:
 
 	bool dac_enabled = false;
 	bool irq_enabled = false;
+	bool irq_previously_interrupted = false;
 	bool is_running = false;
-	bool should_change_irq_dma = false;
+	bool should_change_irq_dma      = false;
 };
 
 using namespace std::placeholders;
@@ -401,9 +418,9 @@ void Voice::IncrementCtrlPos(VoiceCtrl &ctrl, bool dont_loop_or_restart) noexcep
 	return;
 }
 
-bool Voice::Is8Bit() const noexcept
+bool Voice::Is16Bit() const noexcept
 {
-	return !(wave_ctrl.state & CTRL::BIT16);
+	return (wave_ctrl.state & CTRL::BIT16);
 }
 
 float Voice::GetSample(const ram_array_t &ram) noexcept
@@ -412,45 +429,41 @@ float Voice::GetSample(const ram_array_t &ram) noexcept
 	const auto addr = pos / WAVE_WIDTH;
 	const auto fraction = pos & (WAVE_WIDTH - 1);
 	const bool should_interpolate = wave_ctrl.inc < WAVE_WIDTH && fraction;
-	float sample = Is8Bit() ? Read8BitSample(ram, addr)
-	                        : Read16BitSample(ram, addr);
+	const auto is_16bit = Is16Bit();
+	float sample = is_16bit ? Read16BitSample(ram, addr)
+	                        : Read8BitSample(ram, addr);
 	if (should_interpolate) {
 		const auto next_addr = addr + 1;
-		const float next_sample = Is8Bit() ? Read8BitSample(ram, next_addr)
-		                                   : Read16BitSample(ram, next_addr);
+		const float next_sample = is_16bit ? Read16BitSample(ram, next_addr)
+		                                   : Read8BitSample(ram, next_addr);
 		constexpr float WAVE_WIDTH_INV = 1.0 / WAVE_WIDTH;
 		sample += (next_sample - sample) *
 		          static_cast<float>(fraction) * WAVE_WIDTH_INV;
 	}
-	assert(sample >= static_cast<float>(MIN_AUDIO) &&
-	       sample <= static_cast<float>(MAX_AUDIO));
+	assert(sample >= static_cast<float>(Min16BitSampleValue) &&
+	       sample <= static_cast<float>(Max16BitSampleValue));
 	return sample;
 }
 
-void Voice::GenerateSamples(std::vector<float> &render_buffer,
-                            const ram_array_t &ram,
-                            const vol_scalars_array_t &vol_scalars,
-                            const pan_scalars_array_t &pan_scalars,
-                            const uint16_t requested_frames)
+void Voice::RenderFrames(const ram_array_t& ram,
+                         const vol_scalars_array_t& vol_scalars,
+                         const pan_scalars_array_t& pan_scalars,
+                         std::vector<AudioFrame>& frames)
 {
 	if (vol_ctrl.state & wave_ctrl.state & CTRL::DISABLED)
 		return;
 
-	// Setup our iterators and pan percents
-	auto val = render_buffer.begin();
-	const auto last_val = val + requested_frames * 2; // L * R channels
-	assert(last_val <= render_buffer.end());
 	const auto pan_scalar = pan_scalars.at(pan_position);
 
-	// Add the samples to the render_buffer, angled in L-R space
-	while (val < last_val) {
+	// Sum the voice's samples into the exising frames, angled in L-R space
+	for (auto& frame : frames) {
 		float sample = GetSample(ram);
 		sample *= PopVolScalar(vol_scalars);
-		*val++ += sample * pan_scalar.left;
-		*val++ += sample * pan_scalar.right;
+		frame.left += sample * pan_scalar.left;
+		frame.right += sample * pan_scalar.right;
 	}
 	// Keep track of how many ms this voice has generated
-	Is8Bit() ? generated_8bit_ms++ : generated_16bit_ms++;
+	Is16Bit() ? generated_16bit_ms++ : generated_8bit_ms++;
 }
 
 // Returns the current wave position and increments the position
@@ -484,10 +497,9 @@ float Voice::Read8BitSample(const ram_array_t &ram, const int32_t addr) const no
 // Read a 16-bit sample returned as a float
 float Voice::Read16BitSample(const ram_array_t &ram, const int32_t addr) const noexcept
 {
-	// Calculate offset of the 16-bit sample
-	const auto lower = addr & 0b1100'0000'0000'0000'0000;
-	const auto upper = addr & 0b0001'1111'1111'1111'1111;
-	const auto i = static_cast<size_t>(lower | (upper << 1));
+	const auto upper = addr & 0b1100'0000'0000'0000'0000;
+	const auto lower = addr & 0b0001'1111'1111'1111'1111;
+	const auto i = static_cast<uint32_t>(upper | (lower << 1));
 	return static_cast<int16_t>(host_readw(&ram.at(i)));
 }
 
@@ -583,38 +595,64 @@ void Voice::WriteWaveRate(uint16_t val) noexcept
 	wave_ctrl.inc = ceil_udivide(val, 2u);
 }
 
-Gus::Gus(uint16_t port, uint8_t dma, uint8_t irq, const std::string &ultradir)
-        : render_buffer(BUFFER_FRAMES * 2), // 2 samples/frame, L & R channels
-          play_buffer(BUFFER_FRAMES * 2),   // 2 samples/frame, L & R channels
-          soft_limiter("GUS"),
-          port_base(port - 0x200u),
-          dma2(dma),
-          irq1(irq),
-          irq2(irq)
+Gus::Gus(const io_port_t port_pref, const uint8_t dma_pref, const uint8_t irq_pref,
+         const char* ultradir, const std::string& filter_prefs)
+        : ram(RAM_SIZE),
+          dma2(dma_pref),
+          irq1(irq_pref),
+          irq2(irq_pref)
 {
+	// port operations are "zero-based" from the datum to the user's port
+	constexpr io_port_t port_datum = 0x200;
+	port_base = port_pref - port_datum;
+
 	// Create the internal voice channels
 	for (uint8_t i = 0; i < MAX_VOICES; ++i) {
-		voices.at(i) = std::make_unique<Voice>(i, voice_irq);
+		voices.emplace_back(i, voice_irq);
 	}
+	assert(voices.size() == MAX_VOICES);
 
 	RegisterIoHandlers();
 
 	// Register the Audio and DMA channels
 	const auto mixer_callback = std::bind(&Gus::AudioCallback, this,
 	                                      std::placeholders::_1);
-	audio_channel = mixer_channel_ptr_t(MIXER_AddChannel(mixer_callback, 1, "GUS"),
-	                                    MIXER_DelChannel);
-	assert(audio_channel);
-	// Let the mixer command adjust the GUS's internal amplitude level's
-	const auto set_level_callback = std::bind(&Gus::SetLevelCallback, this, _1);
-	audio_channel->RegisterLevelCallBack(set_level_callback);
 
-	UpdateDmaAddress(dma);
+	audio_channel = MIXER_AddChannel(mixer_callback,
+	                                 use_mixer_rate,
+	                                 "GUS",
+	                                 {ChannelFeature::Sleep,
+	                                  ChannelFeature::Stereo,
+	                                  ChannelFeature::ReverbSend,
+	                                  ChannelFeature::ChorusSend,
+	                                  ChannelFeature::DigitalAudio});
+
+	assert(audio_channel);
+
+	// GUS is prone to accumulating beyond the 16-bit range so we scale back
+	// by RMS.
+	constexpr auto rms_squared = static_cast<float>(M_SQRT1_2);
+	audio_channel->Set0dbScalar(rms_squared);
+
+	if (!audio_channel->TryParseAndSetCustomFilter(filter_prefs)) {
+		if (filter_prefs != "off")
+			LOG_WARNING("GUS: Invalid 'gus_filter' value: '%s', using 'off'",
+			            filter_prefs.c_str());
+
+		audio_channel->SetHighPassFilter(FilterState::Off);
+		audio_channel->SetLowPassFilter(FilterState::Off);
+	}
+
+	ms_per_render = millis_in_second / audio_channel->GetSampleRate();
+
+	UpdateDmaAddress(dma_pref);
 
 	// Populate the volume, pan, and auto-exec arrays
 	PopulateVolScalars();
 	PopulatePanScalars();
-	PopulateAutoExec(port, ultradir);
+	SetupEnvironment(port_pref, ultradir);
+
+	LOG_MSG("GUS: Running on port %xh, IRQ %d, and DMA %d", port_pref, irq1, dma1);
 }
 
 void Gus::ActivateVoices(uint8_t requested_voices)
@@ -624,45 +662,96 @@ void Gus::ActivateVoices(uint8_t requested_voices)
 		active_voices = requested_voices;
 		assert(active_voices <= voices.size());
 		active_voice_mask = 0xffffffffu >> (MAX_VOICES - active_voices);
-		playback_rate = static_cast<uint32_t>(
-		        round(1000000.0 / (1.619695497 * active_voices)));
-		audio_channel->SetFreq(playback_rate);
+
+		// Gravis' calculation to convert from number of active voices
+		// to playback frame rate. Ref: UltraSound Lowlevel ToolKit
+		// v2.22 (21 December 1994), pp. 3 of 113.
+		frame_rate_hz = static_cast<int>(1000000.0 /
+		                                 (1.619695497 * active_voices));
+		ms_per_render = millis_in_second / frame_rate_hz;
+
+		audio_channel->SetSampleRate(frame_rate_hz);
 	}
 }
 
-void Gus::SetLevelCallback(const AudioFrame &levels)
+const std::vector<AudioFrame>& Gus::RenderFrames(const int num_requested_frames)
 {
-	soft_limiter.UpdateLevels(levels, 1);
-}
+	// Size and zero the vector
+	rendered_frames.resize(check_cast<size_t>(num_requested_frames));
+	for (auto& frame : rendered_frames) {
+		frame = {0.0f, 0.0f};
+	}
 
-void Gus::AudioCallback(const uint16_t requested_frames)
-{
-	uint16_t generated_frames = 0;
-	while (generated_frames < requested_frames) {
-		const uint16_t frames = static_cast<uint16_t>(
-		        std::min(BUFFER_FRAMES, requested_frames - generated_frames));
-
-		// Zero our buffer. The audio sequence for each active voice
-		// will be accumulated one at a time by the buffer's elements.
-		assert(frames <= render_buffer.size());
-		const auto num_samples = frames * 2;
-		std::fill_n(render_buffer.begin(), num_samples, 0.0f);
-
-		if (dac_enabled) {
-			auto voice = voices.begin();
-			const auto last_voice = voice + active_voices;
-			while (voice < last_voice && *voice) {
-				voice->get()->GenerateSamples(render_buffer,
-				                              ram, vol_scalars,
-				                              pan_scalars, frames);
-				++voice;
-			}
+	if (dac_enabled) {
+		auto voice = voices.begin();
+		const auto last_voice = voice + active_voices;
+		while (voice < last_voice) {
+			// Render all of the requested frames from each voice
+			// before moving onto the next voice. This ensures each
+			// voice can deliver all its samples without being
+			// affected by state changes that (might) occur when
+			// rendering subsequent voices.
+			voice->RenderFrames(ram, vol_scalars, pan_scalars, rendered_frames);
+			++voice;
 		}
-		soft_limiter.Process(render_buffer, frames, play_buffer);
-		audio_channel->AddSamples_s16(frames, play_buffer.data());
-		CheckVoiceIrq();
-		generated_frames += frames;
 	}
+	// If the DAC isn't enabled we still check the IRQ return a silent vector
+
+	CheckVoiceIrq();
+	return rendered_frames;
+}
+
+void Gus::RenderUpToNow()
+{
+	const auto now = PIC_FullIndex();
+
+	// Wake up the channel and update the last rendered time datum.
+	assert(audio_channel);
+	if (audio_channel->WakeUp()) {
+		last_rendered_ms = now;
+		return;
+	}
+
+	const auto elapsed_ms = now - last_rendered_ms;
+	if (elapsed_ms > ms_per_render) {
+		// How many frames have elapsed since we last rendered?
+		const auto num_elapsed_frames = iround(
+		        std::floor(elapsed_ms / ms_per_render));
+		assert(num_elapsed_frames > 0);
+
+		// Enqueue in the FIFO that will be drained when the mixer pulls
+		// frames
+		for (auto& frame : RenderFrames(num_elapsed_frames)) {
+			fifo.emplace(frame);
+		}
+		last_rendered_ms += num_elapsed_frames * ms_per_render;
+	}
+}
+
+void Gus::AudioCallback(const uint16_t num_requested_frames)
+{
+	assert(audio_channel);
+
+#if 0
+	if (fifo.size())
+		LOG_MSG("GUS: Queued %2lu cycle-accurate frames", fifo.size());
+#endif
+
+	auto num_frames_remaining = num_requested_frames;
+
+	// First, send any frames we've queued since the last callback
+	while (num_frames_remaining && fifo.size()) {
+		audio_channel->AddSamples_sfloat(1, &fifo.front()[0]);
+		fifo.pop();
+		--num_frames_remaining;
+	}
+	// If the queue's run dry, render the remainder and sync-up our time datum
+	if (num_frames_remaining > 0) {
+		const auto frames = RenderFrames(num_frames_remaining);
+		audio_channel->AddSamples_sfloat(num_frames_remaining,
+		                                 &frames[0][0]);
+	}
+	last_rendered_ms = PIC_FullIndex();
 }
 
 void Gus::BeginPlayback()
@@ -671,8 +760,7 @@ void Gus::BeginPlayback()
 	irq_enabled = ((register_data & 0x400) != 0);
 	audio_channel->Enable(true);
 	if (prev_logged_voices != active_voices) {
-		LOG_MSG("GUS: Activated %u voices at %u Hz", active_voices,
-		        playback_rate);
+		LOG_MSG("GUS: Activated %u voices at %d Hz", active_voices, frame_rate_hz);
 		prev_logged_voices = active_voices;
 	}
 	is_running = true;
@@ -684,6 +772,20 @@ void Gus::CheckIrq()
 	const bool lines_enabled = mix_ctrl & 0x08;
 	if (should_interrupt && lines_enabled)
 		PIC_ActivateIRQ(irq1);
+	else if (irq_previously_interrupted)
+		PIC_DeActivateIRQ(irq1);
+
+#if LOG_GUS
+	const auto state_str = should_interrupt && lines_enabled ? "activated"
+	                     : irq_previously_interrupted        ? "deactivated"
+	                                                         : "unchanged";
+	LOG_MSG("GUS: CheckIrq: IRQ %s (should_interrupt: %d, lines: %d)",
+	        state_str,
+	        should_interrupt,
+	        lines_enabled);
+#endif
+
+	irq_previously_interrupted = should_interrupt;
 }
 
 bool Gus::CheckTimer(const size_t t)
@@ -703,8 +805,10 @@ void Gus::CheckVoiceIrq()
 	irq_status &= 0x9f;
 	const Bitu totalmask = (voice_irq.vol_state | voice_irq.wave_state) &
 	                       active_voice_mask;
-	if (!totalmask)
+	if (!totalmask) {
+		CheckIrq();
 		return;
+	}
 	if (voice_irq.vol_state)
 		irq_status |= 0x40;
 	if (voice_irq.wave_state)
@@ -717,54 +821,85 @@ void Gus::CheckVoiceIrq()
 	}
 }
 
-uint32_t Gus::Dma8Addr() noexcept
+// Returns a 20-bit offset into the GUS's memory space holding the next
+// DMA sample that will be read or written to via DMA. This offset
+// is derived from the 16-bit DMA address register.
+uint32_t Gus::GetDmaOffset() noexcept
 {
-	return static_cast<uint32_t>(dma_addr << 4);
+	uint32_t adjusted;
+	if(IsDmaXfer16Bit()) {
+		const auto upper = dma_addr & 0b1100'0000'0000'0000;
+		const auto lower = dma_addr & 0b0001'1111'1111'1111;
+		adjusted = static_cast<uint32_t>(upper | (lower << 1));
+	}
+	else {
+		adjusted = dma_addr;
+	}
+	return check_cast<uint32_t>(adjusted << 4) + dma_addr_nibble;
 }
 
-uint32_t Gus::Dma16Addr() noexcept
+// Update the current 16-bit DMA position from the the given 20-bit RAM offset
+void Gus::UpdateDmaAddr(uint32_t offset) noexcept
 {
-	const auto lower = dma_addr & 0b0001'1111'1111'1111;
-	const auto upper = dma_addr & 0b1100'0000'0000'0000;
-	const auto combined = (lower << 1) | upper;
-	return static_cast<uint32_t>(combined << 4);
+	uint32_t adjusted;
+	if (IsDmaXfer16Bit()) {
+		const auto upper = offset & 0b1100'0000'0000'0000'0000;
+		const auto lower = offset & 0b0011'1111'1111'1111'1110;
+		adjusted = upper | (lower >> 1);
+	}
+	else {
+		// Take the top 16 bits from the 20 bit address
+		adjusted = offset & 0b1111'1111'1111'1111'0000;
+	}
+	// pack it into the 16-bit register
+	dma_addr = static_cast<uint16_t>(adjusted >> 4);
+
+	// hang onto the last nibble
+	dma_addr_nibble = check_cast<uint8_t>(adjusted & 0xf);
 }
 
 bool Gus::PerformDmaTransfer()
 {
-	if (dma_channel->masked || !(dma_ctrl & 0x01))
+	if (dma_channel->is_masked || !(dma_ctrl & 0x01)) {
 		return false;
+	}
 
 #if LOG_GUS
 	LOG_MSG("GUS DMA event: max %u bytes. DMA: tc=%u mask=0 cnt=%u",
-	        BYTES_PER_DMA_XFER, dma_channel->tcount ? 1 : 0,
-	        dma_channel->currcnt + 1);
+	        BYTES_PER_DMA_XFER,
+	        dma_channel->has_reached_terminal_count ? 1 : 0,
+	        dma_channel->curr_count + 1);
 #endif
 
-	const auto offset = IsDmaXfer16Bit() ? Dma16Addr() : Dma8Addr();
-	const uint16_t desired = dma_channel->currcnt + 1;
+	// Get the current DMA offset relative to the block of GUS memory
+	const auto offset = GetDmaOffset();
 
-	// All of the operations below involve reading, writing, or skipping
-	// starting at the offset for N-desired samples
+	// Get the pending DMA count from channel
+	const uint16_t desired = dma_channel->curr_count + 1;
+
+	// Will the maximum transfer stay within the GUS RAM's size?
 	assert(static_cast<size_t>(offset) + desired <= ram.size());
 
-	// Copy samples via DMA from GUS memory
-	if (dma_ctrl & 0x2) {
-		dma_channel->Write(desired, &ram.at(offset));
-	}
-	// Skip DMA content
-	else if (!(dma_ctrl & 0x80)) {
-		dma_channel->Read(desired, &ram.at(offset));
-	}
-	// Copy samples via DMA into GUS memory
-	else {
-		//
-		const auto samples = dma_channel->Read(desired, &ram.at(offset));
+	// Perform the DMA transfer
+	const bool is_reading = !(dma_ctrl & 0x2);
+	const auto transfered =
+	        (is_reading ? dma_channel->Read(desired, &ram.at(offset))
+	                    : dma_channel->Write(desired, &ram.at(offset)));
+
+	// Did we get everything we asked for?
+	assert(transfered == desired);
+
+	// scale the transfer by the DMA channel's bit-depth
+	const auto bytes_transfered = transfered * (dma_channel->is_16bit + 1u);
+
+	// Update the GUS's DMA address with the current position
+	UpdateDmaAddr(check_cast<uint32_t>(offset + bytes_transfered));
+
+	// If requested, invert the loaded samples' most-significant bits
+	if (is_reading && dma_ctrl & 0x80) {
 		auto ram_pos = ram.begin() + offset;
-		const auto positions = samples *
-		                       (static_cast<size_t>(dma_channel->DMA16) + 1u);
-		const auto ram_pos_end = ram_pos + positions;
-		// adjust our start and skip size if handling 16-bit
+		const auto ram_pos_end = ram_pos + bytes_transfered;
+		// adjust our start and skip size if handling 16-bit PCM samples
 		ram_pos += IsDmaPcm16Bit() ? 1u : 0u;
 		const auto skip = IsDmaPcm16Bit() ? 2u : 1u;
 		assert(ram_pos >= ram.begin() && ram_pos <= ram_pos_end && ram_pos_end <= ram.end());
@@ -779,6 +914,7 @@ bool Gus::PerformDmaTransfer()
 		dma_ctrl |= DMA_TC_STATUS_BITMASK;
 		irq_status |= 0x80;
 		CheckIrq();
+		assert(dma_channel->has_reached_terminal_count);
 		return false;
 	}
 	return true;
@@ -812,31 +948,40 @@ void Gus::StartDmaTransfers()
 	PIC_AddEvent(GUS_DMA_Event, MS_PER_DMA_XFER);
 }
 
-void Gus::DmaCallback(DmaChannel *, DMAEvent event)
+void Gus::DmaCallback(const DmaChannel*, DMAEvent event)
 {
 	if (event == DMA_UNMASKED)
 		StartDmaTransfers();
 }
 
-void Gus::PopulateAutoExec(uint16_t port, const std::string &ultradir)
+void Gus::SetupEnvironment(uint16_t port, const char* ultradir_env_val)
 {
 	// Ensure our port and addresses will fit in our format widths
 	// The config selection controls their actual values, so this is a
 	// maximum-limit.
 	assert(port < 0xfff);
 	assert(dma1 < 10 && dma2 < 10);
-	assert(irq1 < 10 && irq2 < 10);
+	assert(irq1 <= 12 && irq2 <= 12);
 
 	// ULTRASND variable
-	char set_ultrasnd[] = "@SET ULTRASND=HHH,D,D,I,I";
-	safe_sprintf(set_ultrasnd, 
-	         "@SET ULTRASND=%x,%u,%u,%u,%u", port, dma1, dma2, irq1, irq2);
-	LOG_MSG("GUS: %s", set_ultrasnd);
-	autoexec_lines.at(0).Install(set_ultrasnd);
+	char ultrasnd_env_val[] = "HHH,D,D,II,II";
+	safe_sprintf(ultrasnd_env_val, "%x,%u,%u,%u,%u", port, dma1, dma2, irq1, irq2);
+	LOG_MSG("GUS: Setting '%s' environment variable to '%s'",
+	        ultrasnd_env_name,
+	        ultrasnd_env_val);
+	AUTOEXEC_SetVariable(ultrasnd_env_name, ultrasnd_env_val);
 
 	// ULTRADIR variable
-	std::string dirline = "@SET ULTRADIR=" + ultradir;
-	autoexec_lines.at(1).Install(dirline);
+	LOG_MSG("GUS: Setting '%s' environment variable to '%s'",
+	        ultradir_env_name,
+	        ultradir_env_val);
+	AUTOEXEC_SetVariable(ultradir_env_name, ultradir_env_val);
+}
+
+void Gus::ClearEnvironment()
+{
+	AUTOEXEC_SetVariable(ultrasnd_env_name, "");
+	AUTOEXEC_SetVariable(ultradir_env_name, "");
 }
 
 // Generate logarithmic to linear volume conversion tables
@@ -908,9 +1053,11 @@ void Gus::PopulatePanScalars() noexcept
 		pan_scalar->right = static_cast<float>(sin(angle));
 		++pan_scalar;
 		++i;
-		// DEBUG_LOG_MSG("GUS: pan_scalar[%u] = %f | %f", i,
-		//               pan_scalar->left,
-		//               pan_scalar->right);
+
+		// LOG_DEBUG("GUS: pan_scalar[%u] = %f | %f",
+		//          i,
+		//          pan_scalar->left,
+		//          pan_scalar->right);
 	}
 }
 
@@ -918,7 +1065,7 @@ void Gus::PrepareForPlayback() noexcept
 {
 	// Initialize the voice states
 	for (auto &voice : voices)
-		voice->ResetCtrls();
+		voice.ResetCtrls();
 
 	// Initialize the OPL emulator state
 	adlib_command_reg = ADLIB_CMD_DEFAULT;
@@ -941,21 +1088,19 @@ void Gus::PrintStats()
 	uint32_t used_8bit_voices = 0u;
 	uint32_t used_16bit_voices = 0u;
 	for (const auto &voice : voices) {
-		if (voice->generated_8bit_ms) {
-			combined_8bit_ms += voice->generated_8bit_ms;
+		if (voice.generated_8bit_ms) {
+			combined_8bit_ms += voice.generated_8bit_ms;
 			used_8bit_voices++;
 		}
-		if (voice->generated_16bit_ms) {
-			combined_16bit_ms += voice->generated_16bit_ms;
+		if (voice.generated_16bit_ms) {
+			combined_16bit_ms += voice.generated_16bit_ms;
 			used_16bit_voices++;
 		}
 	}
 	const uint32_t combined_ms = combined_8bit_ms + combined_16bit_ms;
 
 	// Is there enough information to be meaningful?
-	const auto peak = soft_limiter.GetPeaks();
-	if (combined_ms < 10000u || (peak.left + peak.right) < 10 ||
-	    !(used_8bit_voices + used_16bit_voices))
+	if (combined_ms < 10000u || !(used_8bit_voices + used_16bit_voices))
 		return;
 
 	// Print info about the type of audio and voices used
@@ -975,7 +1120,6 @@ void Gus::PrintStats()
 		        ratio_8bit, used_8bit_voices, ratio_16bit,
 		        used_16bit_voices);
 	}
-	soft_limiter.PrintStats();
 }
 
 uint16_t Gus::ReadFromPort(const io_port_t port, io_width_t width)
@@ -1140,11 +1284,10 @@ void Gus::StopPlayback()
 	// Halt playback before altering the DSP state
 	audio_channel->Enable(false);
 
-	soft_limiter.Reset();
-
 	dac_enabled = false;
 	irq_enabled = false;
 	irq_status = 0;
+	irq_previously_interrupted = false;
 
 	dma_ctrl = 0u;
 	mix_ctrl = 0xb; // latches enabled, LINEs disabled
@@ -1155,7 +1298,7 @@ void Gus::StopPlayback()
 	voice_index = 0u;
 	active_voices = 0u;
 
-	dma_addr = 0u;
+	UpdateDmaAddr(0);
 	dram_addr = 0u;
 	register_data = 0u;
 	selected_register = 0u;
@@ -1172,28 +1315,37 @@ static void GUS_TimerEvent(uint32_t t)
 	}
 }
 
+static void gus_destroy(Section*);
+
 void Gus::UpdateDmaAddress(const uint8_t new_address)
 {
 	// Has it changed?
-	if (new_address == dma1)
+	if (new_address == dma1) {
 		return;
+	}
 
-	// Unregister the current callback
-	if (dma_channel)
-		dma_channel->Register_Callback(nullptr);
+	// Reset the old channel
+	if (dma_channel) {
+		dma_channel->Reset();
+	}
 
 	// Update the address, channel, and callback
 	dma1 = new_address;
-	dma_channel = GetDMAChannel(dma1);
+	dma_channel = DMA_GetChannel(dma1);
 	assert(dma_channel);
-	dma_channel->Register_Callback(std::bind(&Gus::DmaCallback, this, _1, _2));
+	dma_channel->ReserveFor("GUS", gus_destroy);
+	dma_channel->RegisterCallback(std::bind(&Gus::DmaCallback, this, _1, _2));
 #if LOG_GUS
 	LOG_MSG("GUS: Assigned DMA1 address to %u", dma1);
 #endif
 }
 
-void Gus::WriteToPort(io_port_t port, uint16_t val, io_width_t width)
+void Gus::WriteToPort(io_port_t port, io_val_t value, io_width_t width)
 {
+	RenderUpToNow();
+
+	const auto val = check_cast<uint16_t>(value);
+
 	//	LOG_MSG("GUS: Write to port %x val %x", port, val);
 	switch (port - port_base) {
 	case 0x200:
@@ -1251,7 +1403,7 @@ void Gus::WriteToPort(io_port_t port, uint16_t val, io_width_t width)
 		break;
 	case 0x302:
 		voice_index = val & 31;
-		target_voice = voices.at(voice_index).get();
+		target_voice = &voices.at(voice_index);
 		break;
 	case 0x303:
 		selected_register = static_cast<uint8_t>(val);
@@ -1298,6 +1450,8 @@ void Gus::UpdateWaveMsw(int32_t &addr) const noexcept
 
 void Gus::WriteToRegister()
 {
+	RenderUpToNow();
+
 	// Registers that write to the general DSP
 	switch (selected_register) {
 	case 0xe: // Set number of active voices
@@ -1319,6 +1473,7 @@ void Gus::WriteToRegister()
 		return;
 	case 0x42: // Gravis DRAM DMA address register
 		dma_addr = register_data;
+		dma_addr_nibble = 0u; // invalidate the nibble
 		return;
 	case 0x43: // LSW Peek/poke DRAM position
 		dram_addr = (0xf0000 & dram_addr) |
@@ -1336,6 +1491,8 @@ void Gus::WriteToRegister()
 		timer_two.should_raise_irq = (timer_ctrl & 0x08) > 0;
 		if (!timer_two.should_raise_irq)
 			irq_status &= ~0x08;
+		if (!timer_one.should_raise_irq && !timer_two.should_raise_irq)
+			CheckIrq();
 		return;
 	case 0x46: // Timer 1 control
 		timer_one.value = static_cast<uint8_t>(register_data >> 8);
@@ -1439,20 +1596,30 @@ void Gus::WriteToRegister()
 
 Gus::~Gus()
 {
-	DEBUG_LOG_MSG("GUS: Shutting down");
+	LOG_MSG("GUS: Shutting down");
 	StopPlayback();
 
-	// remove the mixer channel
-	audio_channel.reset();
+	// Prevent discovery of the GUS via the environment
+	ClearEnvironment();
 
-	// remove the IO handlers
+	// Stop the game from accessing the IO ports
 	for (auto &rh : read_handlers)
 		rh.Uninstall();
 	for (auto &wh : write_handlers)
 		wh.Uninstall();
+
+	// Deregister the mixer channel, after which it's cleaned up
+	assert(audio_channel);
+	MIXER_DeregisterChannel(audio_channel);
+
+	// Deregister the DMA source once the mixer channel is gone, which can
+	// pull samples from DMA.
+	if (dma_channel) {
+		dma_channel->Reset();
+	}
 }
 
-static void gus_destroy(MAYBE_UNUSED Section *sec)
+static void gus_destroy([[maybe_unused]] Section *sec)
 {
 	// GUS destroy is run when the user wants to deactivate the GUS:
 	// C:\> config -set gus=false
@@ -1474,13 +1641,24 @@ static void gus_init(Section *sec)
 
 	// Read the GUS config settings
 	const auto port = static_cast<uint16_t>(conf->Get_hex("gusbase"));
-	const auto dma = clamp(static_cast<uint8_t>(conf->Get_int("gusdma")), MIN_DMA_ADDRESS, MAX_DMA_ADDRESS);
-	const auto irq = clamp(static_cast<uint8_t>(conf->Get_int("gusirq")), MIN_IRQ_ADDRESS, MAX_IRQ_ADDRESS);
-	const std::string ultradir = conf->Get_string("ultradir");
+
+	const auto dma = clamp(static_cast<uint8_t>(conf->Get_int("gusdma")),
+	                       MIN_DMA_ADDRESS,
+	                       MAX_DMA_ADDRESS);
+
+	const auto irq = clamp(static_cast<uint8_t>(conf->Get_int("gusirq")),
+	                       MIN_IRQ_ADDRESS,
+	                       MAX_IRQ_ADDRESS);
+
+	const auto ultradir = conf->Get_string("ultradir");
+
+	const std::string filter_prefs = conf->Get_string("gus_filter");
 
 	// Instantiate the GUS with the settings
-	gus = std::make_unique<Gus>(port, dma, irq, ultradir);
-	sec->AddDestroyFunction(&gus_destroy, true);
+	gus = std::make_unique<Gus>(port, dma, irq, ultradir, filter_prefs);
+
+	constexpr auto changeable_at_runtime = true;
+	sec->AddDestroyFunction(&gus_destroy, changeable_at_runtime);
 }
 
 void init_gus_dosbox_settings(Section_prop &secprop)
@@ -1489,40 +1667,55 @@ void init_gus_dosbox_settings(Section_prop &secprop)
 
 	auto *bool_prop = secprop.Add_bool("gus", when_idle, false);
 	assert(bool_prop);
-	bool_prop->Set_help("Enable Gravis UltraSound emulation.");
+	bool_prop->Set_help(
+	        "Enable Gravis UltraSound emulation (disabled by default).\n"
+	        "The default settings of base address 240, IRQ 5, and DMA 3 have been chosen\n"
+	        "so the GUS can coexist with a Sound Blaster card. This works fine for the\n"
+	        "majority of programs, but some games and demos expect the GUS factory\n"
+	        "defaults of base address 220, IRQ 11, DMA 1.");
 
 	auto *hex_prop = secprop.Add_hex("gusbase", when_idle, 0x240);
 	assert(hex_prop);
 	const char *const bases[] = {"240", "220", "260", "280",  "2a0",
 	                             "2c0", "2e0", "300", nullptr};
 	hex_prop->Set_values(bases);
-	hex_prop->Set_help("The IO base address of the Gravis UltraSound.");
+	hex_prop->Set_help("The IO base address of the Gravis UltraSound (240 by default).");
 
 	auto *int_prop = secprop.Add_int("gusirq", when_idle, 5);
 	assert(int_prop);
-	const char *const irqs[] = {"5",  "3",  "7",  "9",
+	const char *const irqs[] = {"3",  "5",  "7",  "9",
 	                            "10", "11", "12", nullptr};
 	int_prop->Set_values(irqs);
-	int_prop->Set_help("The IRQ number of the Gravis UltraSound.");
+	int_prop->Set_help("The IRQ number of the Gravis UltraSound (5 by default).");
 
 	int_prop = secprop.Add_int("gusdma", when_idle, 3);
 	assert(int_prop);
-	const char *const dmas[] = {"3", "0", "1", "5", "6", "7", nullptr};
+	const char *const dmas[] = {"0", "1", "3", "5", "6", "7", nullptr};
 	int_prop->Set_values(dmas);
-	int_prop->Set_help("The DMA channel of the Gravis UltraSound.");
+	int_prop->Set_help("The DMA channel of the Gravis UltraSound (3 by default).");
 
-	auto *str_prop = secprop.Add_string("ultradir", when_idle, "C:\\ULTRASND");
+	auto* str_prop = secprop.Add_string("ultradir", when_idle, "C:\\ULTRASND");
 	assert(str_prop);
-	str_prop->Set_help("Path to UltraSound directory. In this directory\n"
-	                   "there should be a MIDI directory that contains\n"
-	                   "the patch files for GUS playback. Patch sets used\n"
-	                   "with Timidity should work fine.");
+	str_prop->Set_help(
+	        "Path to UltraSound directory ('C:\\ULTRASND' by default).\n"
+	        "In this directory there should be a 'MIDI' directory that contains the patch\n"
+	        "files for GUS playback.");
+
+	str_prop = secprop.Add_string("gus_filter", when_idle, "off");
+	assert(str_prop);
+	str_prop->Set_help(
+	        "Filter for the Gravis UltraSound audio output:\n"
+	        "  off:       Don't filter the output (default).\n"
+	        "  <custom>:  Custom filter definition; see 'sb_filter' for details.");
 }
 
-void GUS_AddConfigSection(Config *conf)
+void GUS_AddConfigSection(const config_ptr_t& conf)
 {
 	assert(conf);
-	Section_prop *sec = conf->AddSection_prop("gus", &gus_init, true);
+
+	constexpr auto changeable_at_runtime = true;
+
+	Section_prop* sec = conf->AddSection_prop("gus", &gus_init, changeable_at_runtime);
 	assert(sec);
 	init_gus_dosbox_settings(*sec);
 }

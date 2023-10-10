@@ -133,7 +133,7 @@
 	{ inst(reg_eax,Fetchd(),LoadRd,SaveRd);}
 
 #define FPU_ESC(code) {														\
-	Bit8u rm=Fetchb();														\
+	uint8_t rm=Fetchb();														\
 	if (rm >= 0xc0) {															\
 		FPU_ESC ## code ## _Normal(rm);										\
 	} else {																\
@@ -167,9 +167,9 @@
 		case 6: \
 			if (rm < 0x40) \
 				break; \
-			FALLTHROUGH; \
+			[[fallthrough]]; \
 		case 2: \
 		case 3: BaseDS = BaseSS; \
 		} \
-		eaa = BaseDS + (Bit16u)(eaa - BaseDS); \
+		eaa = BaseDS + (uint16_t)(eaa - BaseDS); \
 	} while (0)

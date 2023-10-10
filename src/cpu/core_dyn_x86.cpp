@@ -38,20 +38,17 @@
 
 #include <limits.h>
 
-#ifndef PAGESIZE
-#define PAGESIZE 4096
-#endif
-
 #endif // HAVE_MPROTECT
 
 #include "callback.h"
-#include "regs.h"
-#include "mem.h"
 #include "cpu.h"
 #include "debug.h"
-#include "paging.h"
-#include "inout.h"
 #include "fpu.h"
+#include "inout.h"
+#include "mem.h"
+#include "paging.h"
+#include "regs.h"
+#include "tracy.h"
 
 #define CACHE_MAXSIZE	(4096*3)
 #define CACHE_TOTAL		(1024*1024*8)
@@ -153,7 +150,7 @@ static DynReg DynRegs[G_MAX];
 #define DREG(_WHICH_) &DynRegs[G_ ## _WHICH_ ]
 
 static struct {
-	Bit32u ea,tmpb,tmpd,stack,shift,newesp;
+	uint32_t ea,tmpb,tmpd,stack,shift,newesp;
 } extra_regs;
 
 #define IllegalOption(msg) E_Exit("DYNX86: illegal option in " msg)
@@ -163,40 +160,48 @@ static struct {
 
 static struct {
 	Bitu callback;
-	Bitu readdata;
+	uint32_t readdata;
 } core_dyn;
 
-#if defined(X86_DYNFPU_DH_ENABLED)
-static struct dyn_dh_fpu {
-	Bit16u		cw,host_cw;
-	bool		state_used;
+#	if defined(X86_DYNFPU_DH_ENABLED)
+
+struct dyn_dh_fpu {
+	uint16_t cw                 = 0x37f;
+	uint16_t host_cw            = 0;
+	bool state_used             = false;
+
 	// some fields expanded here for alignment purposes
 	struct {
-		Bit32u cw;
-		Bit32u sw;
-		Bit32u tag;
-		Bit32u ip;
-		Bit32u cs;
-		Bit32u ea;
-		Bit32u ds;
-		Bit8u st_reg[8][10];
-	} state;
-	FPU_P_Reg	temp,temp2;
-	Bit32u		dh_fpu_enabled;
-	Bit8u		temp_state[128];
-} dyn_dh_fpu;
-#endif
+		uint32_t cw  = 0x37f;
+		uint32_t sw  = 0;
+		uint32_t tag = 0xffff;
+		uint32_t ip  = 0;
+		uint32_t cs  = 0;
+		uint32_t ea  = 0;
+		uint32_t ds  = 0;
 
-#define X86         0x01
-#define X86_64      0x02
+		uint8_t st_reg[8][10] = {};
+	} state = {};
 
-#if C_TARGETCPU == X86_64
-#include "core_dyn_x86/risc_x64.h"
-#elif C_TARGETCPU == X86
-#include "core_dyn_x86/risc_x86.h"
-#else
-#error DYN_X86 core not supported for this CPU target.
-#endif
+	FPU_P_Reg temp  = {};
+	FPU_P_Reg temp2 = {};
+
+	uint32_t dh_fpu_enabled = true;
+	uint8_t temp_state[128] = {};
+} dyn_dh_fpu = {};
+
+#	endif
+
+#	define X86    0x01
+#	define X86_64 0x02
+
+#	if C_TARGETCPU == X86_64
+#		include "core_dyn_x86/risc_x64.h"
+#	elif C_TARGETCPU == X86
+#		include "core_dyn_x86/risc_x86.h"
+#	else
+#		error DYN_X86 core not supported for this CPU target.
+#	endif
 
 struct DynState {
 	DynReg regs[G_MAX];
@@ -251,19 +256,70 @@ static void dyn_restoreregister(DynReg * src_reg, DynReg * dst_reg) {
 
 #include "core_dyn_x86/decoder.h"
 
-Bits CPU_Core_Dyn_X86_Run(void) {
-	// helper class to auto-save DH_FPU state on function exit
-	class auto_dh_fpu {
-	public:
-		~auto_dh_fpu()
-		{
-#if defined(X86_DYNFPU_DH_ENABLED)
-			if (dyn_dh_fpu.state_used)
-				gen_dh_fpu_save();
-#endif
-		}
-	};
-	auto_dh_fpu fpu_saver;
+#	if defined(X86_DYNFPU_DH_ENABLED)
+
+enum class CoreType { Dynamic,  Normal };
+static auto last_core = CoreType::Dynamic;
+
+static void maybe_sync_host_fpu_to_dh()
+{
+	if (dyn_dh_fpu.state_used) {
+		gen_dh_fpu_save();
+	}
+}
+
+// The active core being run (dynamic or normal) synchronizes its respective FPU
+// from the opposite FPU if the other core was last run. Subsequent runs that
+// stay within the same core do not need synchronization.
+
+static BlockReturn sync_normal_fpu_and_run_dyn_code(const uint8_t* code) noexcept
+{
+	if (last_core == CoreType::Normal) {
+		FPU_SET_TOP(TOP);
+		dyn_dh_fpu.state.tag = FPU_GetTag();
+		dyn_dh_fpu.state.cw  = FPU_GetCW();
+		dyn_dh_fpu.state.sw  = FPU_GetSW();
+		FPU_GetPRegsTo(dyn_dh_fpu.state.st_reg);
+		last_core = CoreType::Dynamic;
+	}
+	return gen_runcode(code);
+}
+
+static Bits sync_dh_fpu_and_run_normal_core() noexcept
+{
+	if (last_core == CoreType::Dynamic) {
+		maybe_sync_host_fpu_to_dh();
+		FPU_SetTag(static_cast<uint16_t>(dyn_dh_fpu.state.tag & 0xffff));
+		FPU_SetCW(static_cast<uint16_t>(dyn_dh_fpu.state.cw & 0xffff));
+		FPU_SetSW(static_cast<uint16_t>(dyn_dh_fpu.state.sw & 0xffff));
+		TOP = FPU_GET_TOP();
+		FPU_SetPRegsFrom(dyn_dh_fpu.state.st_reg);
+		last_core = CoreType::Normal;
+	}
+	assert(!dyn_dh_fpu.state_used);
+	return CPU_Core_Normal_Run();
+}
+
+struct HostFpuToDhCopier {
+	~HostFpuToDhCopier()
+	{
+		maybe_sync_host_fpu_to_dh();
+	}
+};
+
+#	else
+auto sync_dh_fpu_and_run_normal_core  = CPU_Core_Normal_Run;
+auto sync_normal_fpu_and_run_dyn_code = gen_runcode;
+#	endif
+
+Bits CPU_Core_Dyn_X86_Run() noexcept
+{
+	ZoneScoped;
+
+#	if defined(X86_DYNFPU_DH_ENABLED)
+	// activates at each return point below (on scope closure)
+	HostFpuToDhCopier host_fpu_to_dh_copier;
+#	endif
 
 	/* Determine the linear address of CS:EIP */
 restart_core:
@@ -273,13 +329,13 @@ restart_core:
 		if (DEBUG_HeavyIsBreakpoint()) return debugCallback;
 #endif
 #endif
-	CodePageHandler * chandler=0;
+	CodePageHandler * chandler=nullptr;
 	if (GCC_UNLIKELY(MakeCodePage(ip_point,chandler))) {
 		CPU_Exception(cpu.exception.which,cpu.exception.error);
 		goto restart_core;
 	}
 	if (!chandler) {
-		return CPU_Core_Normal_Run();
+		return sync_dh_fpu_and_run_normal_core();
 	}
 	/* Find correct Dynamic Block to run */
 	CacheBlock * block=chandler->FindCacheBlock(ip_point&4095);
@@ -287,11 +343,11 @@ restart_core:
 		if (!chandler->invalidation_map || (chandler->invalidation_map[ip_point&4095]<4)) {
 			block=CreateCacheBlock(chandler,ip_point,32);
 		} else {
-			Bit32s old_cycles=CPU_Cycles;
+			int32_t old_cycles=CPU_Cycles;
 			CPU_Cycles=1;
-			// manually save
-			fpu_saver = auto_dh_fpu();
-			Bits nc_retcode=CPU_Core_Normal_Run();
+
+			const auto nc_retcode = sync_dh_fpu_and_run_normal_core();
+
 			if (!nc_retcode) {
 				CPU_Cycles=old_cycles-1;
 				goto restart_core;
@@ -301,9 +357,9 @@ restart_core:
 		}
 	}
 run_block:
-	cache.block.running=0;
-	BlockReturn ret=gen_runcode(block->cache.start);
-#if C_DEBUG
+	cache.block.running=nullptr;
+	const auto ret = sync_normal_fpu_and_run_dyn_code(block->cache.start);
+#	if C_DEBUG
 	cycle_count += 32;
 #endif
 	switch (ret) {
@@ -344,16 +400,18 @@ run_block:
 		// LOG_MSG("selfmodification of running block at %x:%x",
 		//         SegValue(cs), reg_eip);
 		cpu.exception.which=0;
-		FALLTHROUGH; // let the normal core handle the block-modifying
+		[[fallthrough]]; // let the normal core handle the block-modifying
 		             // instruction
 	case BR_Opcode:
 		CPU_CycleLeft+=CPU_Cycles;
 		CPU_Cycles=1;
-		return CPU_Core_Normal_Run();
+		{
+			return sync_dh_fpu_and_run_normal_core();
+		}
 	case BR_Link1:
 	case BR_Link2:
 		{
-			Bit32u temp_ip=SegPhys(cs)+reg_eip;
+			uint32_t temp_ip=SegPhys(cs)+reg_eip;
 			CodePageHandler* temp_handler = reinterpret_cast<CodePageHandler *>(get_tlb_readhandler(temp_ip));
 			if (temp_handler->flags & (cpu.code.big ? PFLAG_HASCODE32:PFLAG_HASCODE16)) {
 				block=temp_handler->FindCacheBlock(temp_ip & 4095);
@@ -367,12 +425,13 @@ run_block:
 	return CBRET_NONE;
 }
 
-Bits CPU_Core_Dyn_X86_Trap_Run(void) {
-	Bit32s oldCycles = CPU_Cycles;
+Bits CPU_Core_Dyn_X86_Trap_Run() noexcept
+{
+	int32_t oldCycles = CPU_Cycles;
 	CPU_Cycles = 1;
 	cpu.trap_skip = false;
 
-	Bits ret=CPU_Core_Normal_Run();
+	const auto ret = sync_dh_fpu_and_run_normal_core();
 	if (!cpu.trap_skip) CPU_DebugException(DBINT_STEP,reg_eip);
 	CPU_Cycles = oldCycles-1;
 	cpudecoder = &CPU_Core_Dyn_X86_Run;
@@ -383,7 +442,7 @@ Bits CPU_Core_Dyn_X86_Trap_Run(void) {
 void CPU_Core_Dyn_X86_Init(void) {
 	Bits i;
 	/* Setup the global registers and their flags */
-	for (i=0;i<G_MAX;i++) DynRegs[i].genreg=0;
+	for (i=0;i<G_MAX;i++) DynRegs[i].genreg=nullptr;
 	DynRegs[G_EAX].data=&reg_eax;
 	DynRegs[G_EAX].flags=DYNFLG_HAS8|DYNFLG_HAS16|DYNFLG_LOAD|DYNFLG_SAVE;
 	DynRegs[G_ECX].data=&reg_ecx;
@@ -436,23 +495,15 @@ void CPU_Core_Dyn_X86_Init(void) {
 	DynRegs[G_TMPW].flags=DYNFLG_HAS16;
 	DynRegs[G_SHIFT].data=&extra_regs.shift;
 	DynRegs[G_SHIFT].flags=DYNFLG_HAS8|DYNFLG_HAS16;
-	DynRegs[G_EXIT].data=0;
+	DynRegs[G_EXIT].data=nullptr;
 	DynRegs[G_EXIT].flags=DYNFLG_HAS16;
 	/* Init the generator */
 	gen_init();
 
 #if defined(X86_DYNFPU_DH_ENABLED)
 	/* Init the fpu state */
-	dyn_dh_fpu.dh_fpu_enabled=true;
-	dyn_dh_fpu.state_used=false;
-	dyn_dh_fpu.cw=0x37f;
-	// FINIT
-	memset(&dyn_dh_fpu.state, 0, sizeof(dyn_dh_fpu.state));
-	dyn_dh_fpu.state.cw = 0x37F;
-	dyn_dh_fpu.state.tag = 0xFFFF;
-#endif
-
-	return;
+	dyn_dh_fpu = {};
+#	endif
 }
 
 void CPU_Core_Dyn_X86_Cache_Init(bool enable_cache) {

@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2019-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -29,71 +30,125 @@
 
 #include "programs.h"
 #include "setup.h"
+#include "std_filesystem.h"
 
 enum class Verbosity : int8_t {
-	//                  Splash | Welcome | Early Stdout |
-	Quiet = 0,      //   no    |   no    |    no        |
-	SplashOnly = 1, //   yes   |   no    |    no        |
-	Low = 2,        //   no    |   no    |    yes       |
-	Medium = 3,     //   no    |   yes   |    yes       |
-	High = 4,       //   yes   |   yes   |    yes       |
+	//                Welcome | Early Stdout |
+	Quiet,         //   no    |    no        |
+	InstantLaunch, //   no    |    yes       |
+	Low,           //   no    |    yes       |
+	High,          //   yes   |    yes       |
+};
+
+struct CommandLineArguments {
+	bool printconf;
+	bool noprimaryconf;
+	bool nolocalconf;
+	bool fullscreen;
+	bool list_glshaders;
+	bool version;
+	bool help;
+	bool eraseconf;
+	bool erasemapper;
+	bool noconsole;
+	bool startmapper;
+	bool exit;
+	bool securemode;
+	bool noautoexec;
+	std::string working_dir;
+	std::string lang;
+	std::string machine;
+	std::vector<std::string> conf;
+	std::vector<std::string> set;
+	std::optional<std::vector<std::string>> editconf;
+	std::optional<int> socket;
 };
 
 class Config {
 public:
-	CommandLine * cmdline;
-private:
-	std::deque<Section*> sectionlist;
-	void (* _start_function)(void);
-	bool secure_mode; //Sandbox mode
-public:
-	std::vector<std::string> startup_params;
-	std::vector<std::string> configfiles;
+	CommandLine* cmdline = nullptr;
 
-	Config(CommandLine *cmd)
-		: cmdline(cmd),
-		  sectionlist{},
-		  _start_function(nullptr),
-		  secure_mode(false),
-		  startup_params{},
-		  configfiles{}
+	CommandLineArguments arguments = {};
+
+private:
+	std::deque<Section*> sectionlist          = {};
+	Section_line overwritten_autoexec_section = {};
+	std::string overwritten_autoexec_conf     = {};
+
+	void (*_start_function)(void) = nullptr;
+
+	bool secure_mode = false;
+
+	void ParseArguments();
+
+public:
+	std::vector<std::string> startup_params        = {};
+	std::vector<std::string> configfiles           = {};
+	std::vector<std_fs::path> configFilesCanonical = {};
+
+	Config(CommandLine* cmd)
+	        : cmdline(cmd),
+	          overwritten_autoexec_section("overwritten-autoexec")
 	{
 		assert(cmdline);
 		startup_params.push_back(cmdline->GetFileName());
 		cmdline->FillVector(startup_params);
+		ParseArguments();
 	}
 
-	Config(const Config&) = delete; // prevent copying
-	Config& operator=(const Config&) = delete; // prevent assignment
+	Config() = default;
+	Config(Config&& source) noexcept;            // move constructor
+	Config(const Config&) = delete;              // block construct-by-value
+	Config& operator=(Config&& source) noexcept; // move assignment
+	Config& operator=(const Config&) = delete;   // block assign-by-value
 
 	~Config();
 
-	Section_prop *AddEarlySectionProp(const char *name,
-	                                  SectionFunction func,
+	Section_prop* AddEarlySectionProp(const char* name, SectionFunction func,
 	                                  bool changeable_at_runtime = false);
 
-	Section_line *AddSection_line(const char *section_name, SectionFunction func);
+	Section_line* AddSection_line(const char* section_name, SectionFunction func);
 
-	Section_prop *AddSection_prop(const char *section_name,
-	                              SectionFunction func,
+	Section_prop* AddSection_prop(const char* section_name, SectionFunction func,
 	                              bool changeable_at_runtime = false);
 
-	auto begin() { return sectionlist.begin(); }
-	auto end() { return sectionlist.end(); }
+	auto begin()
+	{
+		return sectionlist.begin();
+	}
+	auto end()
+	{
+		return sectionlist.end();
+	}
 
-	Section *GetSection(const std::string &section_name) const;
-	Section *GetSectionFromProperty(const char *prop) const;
+	Section* GetSection(const std::string& section_name) const;
+	Section* GetSectionFromProperty(const char* prop) const;
+
+	void OverwriteAutoexec(const std::string& conf, const std::string& line);
+	const Section_line& GetOverwrittenAutoexecSection() const;
+	const std::string& GetOverwrittenAutoexecConf() const;
 
 	void SetStartUp(void (*_function)(void));
 	void Init() const;
 	void ShutDown();
 	void StartUp();
-	bool PrintConfig(const std::string &filename) const;
-	bool ParseConfigFile(const std::string &type,
-	                     const std::string &configfilename);
+
+	bool WriteConfig(const std_fs::path& path) const;
+	bool ParseConfigFile(const std::string& type,
+	                     const std::string& config_file_name);
+
 	void ParseEnv();
-	bool SecureMode() const { return secure_mode; }
-	void SwitchToSecureMode() { secure_mode = true; }//can't be undone
+
+	bool SecureMode() const
+	{
+		return secure_mode;
+	}
+
+	void SwitchToSecureMode()
+	{
+		secure_mode = true;
+	}
+
 	Verbosity GetStartupVerbosity() const;
 };
 

@@ -1,8 +1,8 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
- *  Copyright (C) 2019-2021  Kevin R. Croft <krcroft@gmail.com>
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
+ *  Copyright (C) 2019-2021  kcgen <kcgen@users.noreply.github.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -21,20 +21,21 @@
 
 #include "envelope.h"
 
-#include "support.h"
+#include "math_utils.h"
+#include "mixer.h"
 
 Envelope::Envelope(const char *name) : channel_name(name)
 {}
 
 void Envelope::Reactivate()
 {
-	edge = 0u;
-	frames_done = 0u;
+	edge        = 0.0f;
+	frames_done = 0;
+
 	process = &Envelope::Apply;
 }
 
-void Envelope::Update(const uint32_t frame_rate,
-                      const uint32_t peak_amplitude,
+void Envelope::Update(const int frame_rate, const int peak_amplitude,
                       const uint8_t expansion_phase_ms,
                       const uint8_t expire_after_seconds)
 {
@@ -46,24 +47,29 @@ void Envelope::Update(const uint32_t frame_rate,
 	assert(expire_after_frames > 0);
 
 	// The furtherest allowed edge is the peak sample amplitude.
-	edge_limit = peak_amplitude;
+	edge_limit = static_cast<float>(peak_amplitude);
 
 	// Permit the envelop to achieve peak volume within the expansion_phase
 	// (in ms) if the samples happen to constantly press on the edges.
-	const uint32_t expansion_phase_frames = ceil_udivide(frame_rate * expansion_phase_ms,
-	                                                     1000u);
+	const auto expansion_phase_frames = ceil_sdivide(frame_rate * expansion_phase_ms,
+	                                                 1000);
 
 	// Calculate how much the envelope's edge will grow after a frame
 	// presses against it.
 	assert(expansion_phase_frames);
-	edge_increment = ceil_udivide(peak_amplitude, expansion_phase_frames);
-	
-	// DEBUG_LOG_MSG("ENVELOPE: %s grows by %-3u to %-5u across %-3u frames (%u ms)",
-	//               channel_name, edge_increment, edge_limit, expansion_phase_frames,
-	//               expansion_phase_ms);
+	edge_increment = static_cast<float>(ceil_sdivide(peak_amplitude, expansion_phase_frames));
+
+#if 0
+	LOG_DEBUG("ENVELOPE: %s grows by %-3f to %-5f across %-3u frames (%u ms)",
+	          channel_name.c_str(),
+	          edge_increment,
+	          edge_limit,
+	          expansion_phase_frames,
+	          expansion_phase_ms);
+#endif
 }
 
-bool Envelope::ClampSample(intptr_t &sample, const intptr_t lip)
+bool Envelope::ClampSample(float &sample, const float lip)
 {
 	if (std::abs(sample) > edge) {
 		sample = clamp(sample, -lip, lip);
@@ -72,29 +78,21 @@ bool Envelope::ClampSample(intptr_t &sample, const intptr_t lip)
 	return false;
 }
 
-void Envelope::Process(const bool is_stereo,
-                       const bool is_interpolated,
-                       intptr_t prev[],
-                       intptr_t next[])
+void Envelope::Process(const bool is_stereo, AudioFrame &frame)
 {
-	process(*this, is_stereo, is_interpolated, prev, next);
+	process(*this, is_stereo, frame);
 }
 
-void Envelope::Apply(const bool is_stereo,
-                     const bool is_interpolated,
-                     intptr_t prev[],
-                     intptr_t next[])
+void Envelope::Apply(const bool is_stereo, AudioFrame &frame)
 {
 	// Only start the envelope once our samples have actual values
-	if (prev[0] == 0 && frames_done == 0u)
+	if (frame.left == 0.0f && frames_done == 0u)
 		return;
 
 	// beyond the edge is the lip. Do any samples walk out onto the lip?
-	const intptr_t lip = edge + edge_increment;
-	const bool on_lip = (ClampSample(prev[0], lip)) || (is_stereo &&
-	                     ClampSample(prev[1], lip)) || (is_interpolated &&
-	                     (ClampSample(next[0], lip) || (is_stereo &&
-	                      ClampSample(next[1], lip))));
+	const float lip   = edge + edge_increment;
+	const bool on_lip = ClampSample(frame.left, lip) ||
+	                    (is_stereo && ClampSample(frame.right, lip));
 
 	// If any of the samples are out on the lip, then march the edge forward
 	if (on_lip)
@@ -103,8 +101,11 @@ void Envelope::Apply(const bool is_stereo,
 	// Should we deactivate the envelope?
 	if (++frames_done > expire_after_frames || edge >= edge_limit) {
 		process = &Envelope::Skip;
-		(void)channel_name; // MAYBE_UNUSED in release builds
-		DEBUG_LOG_MSG("ENVELOPE: %s done after %u frames, peak sample was %u",
-		              channel_name, frames_done, edge);
+		(void)channel_name; // [[maybe_unused]] in release builds
+		LOG_DEBUG("ENVELOPE: %s done after %u frames, peak sample was %.4f",
+		          channel_name.c_str(),
+		          frames_done,
+		          edge);
 	}
 }
+

@@ -48,17 +48,17 @@ struct PIC_Controller {
 	bool rotate_on_auto_eoi;
 	bool single;
 	bool request_issr;
-	Bit8u vector_base;
+	uint8_t vector_base;
 
-	Bit8u irr;        // request register
-	Bit8u imr;        // mask register
-	Bit8u imrr;       // mask register reversed (makes bit tests simpler)
-	Bit8u isr;        // in service register
-	Bit8u isrr;       // in service register reversed (makes bit tests simpler)
-	Bit8u active_irq; //currently active irq
+	uint8_t irr;        // request register
+	uint8_t imr;        // mask register
+	uint8_t imrr;       // mask register reversed (makes bit tests simpler)
+	uint8_t isr;        // in service register
+	uint8_t isrr;       // in service register reversed (makes bit tests simpler)
+	uint8_t active_irq; //currently active irq
 
 
-	void set_imr(Bit8u val);
+	void set_imr(uint8_t val);
 
 	void check_after_EOI() {
 		//Update the active_irq as an EOI is likely to change that.
@@ -68,7 +68,7 @@ struct PIC_Controller {
 
 	void update_active_irq() {
 		if (isr == 0) {active_irq = 8; return;}
-		for(Bit8u i = 0, s = 1; i < 8;i++, s<<=1){
+		for(uint8_t i = 0, s = 1; i < 8;i++, s<<=1){
 			if( isr & s){
 				active_irq = i;
 				return;
@@ -77,10 +77,10 @@ struct PIC_Controller {
 	}
 
 	void check_for_irq() {
-		const Bit8u possible_irq = (irr&imrr)&isrr;
+		const uint8_t possible_irq = (irr&imrr)&isrr;
 		if (possible_irq) {
-			const Bit8u a_irq = special?8:active_irq;
-			for(Bit8u i = 0, s = 1; i < a_irq;i++, s<<=1){
+			const uint8_t a_irq = special?8:active_irq;
+			for(uint8_t i = 0, s = 1; i < a_irq;i++, s<<=1){
 				if ( possible_irq & s ) {
 					// There is an IRQ ready to be served,
 					// so signal the primary controller
@@ -100,7 +100,7 @@ struct PIC_Controller {
 	// Removes the IRQ-ready signal from the primary controller and/or CPU.
 	void deactivate();
 
-	void raise_irq(Bit8u val) {
+	void raise_irq(uint8_t val) {
 		const auto bit = static_cast<uint8_t>(1 << val);
 		if ((irr & bit) == 0) { //value changed (as it is currently not active)
 			irr |= bit;
@@ -110,7 +110,7 @@ struct PIC_Controller {
 		}
 	}
 
-	void lower_irq(Bit8u val) {
+	void lower_irq(uint8_t val) {
 		const auto bit = static_cast<uint8_t>(1 << val);
 		if (irr & bit) { //value will change (as it is currently active)
 			irr &= ~bit;
@@ -128,7 +128,7 @@ struct PIC_Controller {
 	}
 
 	//handles all bits and logic related to starting this IRQ, it does NOT start the interrupt on the CPU.
-	void start_irq(Bit8u val);
+	void start_irq(uint8_t val);
 };
 
 static PIC_Controller pics[2];
@@ -137,13 +137,13 @@ static PIC_Controller &secondary_controller = pics[1];
 uint32_t PIC_Ticks = 0;
 uint32_t PIC_IRQCheck = 0; // x86 dynamic core expects a 32 bit variable size
 
-void PIC_Controller::set_imr(Bit8u val) {
+void PIC_Controller::set_imr(uint8_t val) {
 	if (GCC_UNLIKELY(machine == MCH_PCJR)) {
 		//irq 6 is a NMI on the PCJR
 		if (this == &primary_controller)
 			val &= ~(1 << (6));
 	}
-	Bit8u change = (imr) ^ (val); //Bits that have changed become 1.
+	uint8_t change = (imr) ^ (val); //Bits that have changed become 1.
 	imr  =  val;
 	imrr = ~val;
 
@@ -178,7 +178,7 @@ void PIC_Controller::deactivate() {
 	}
 }
 
-void PIC_Controller::start_irq(Bit8u val) {
+void PIC_Controller::start_irq(uint8_t val) {
 	irr &= ~(1<<(val));
 	if (!auto_eoi) {
 		active_irq = val;
@@ -203,9 +203,11 @@ static struct {
 	PICEntry * next_entry;
 } pic_queue;
 
-static void write_command(io_port_t port, uint8_t val, io_width_t)
+static void write_command(io_port_t port, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	PIC_Controller *pic = &pics[port == 0x20 ? 0 : 1];
+
 
 	if (GCC_UNLIKELY(val&0x10)) {		// ICW1 issued
 		if (val&0x04) E_Exit("PIC: 4 byte interval not handled");
@@ -256,8 +258,9 @@ static void write_command(io_port_t port, uint8_t val, io_width_t)
 	}	// end OCW2
 }
 
-static void write_data(io_port_t port, uint8_t val, io_width_t)
+static void write_data(io_port_t port, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	PIC_Controller *pic = &pics[port == 0x21 ? 0 : 1];
 	switch (pic->icw_index) {
 	case 0: /* mask register */ pic->set_imr(val); break;
@@ -320,7 +323,7 @@ void PIC_ActivateIRQ(const uint8_t irq)
 	const uint8_t t = irq > 7 ? (irq - 8) : irq;
 	PIC_Controller *pic = &pics[irq > 7 ? 1 : 0];
 
-	Bit32s OldCycles = CPU_Cycles;
+	int32_t OldCycles = CPU_Cycles;
 	pic->raise_irq(t); //Will set the CPU_Cycles to zero if this IRQ will be handled directly
 
 	if (GCC_UNLIKELY(OldCycles != CPU_Cycles)) {
@@ -407,7 +410,7 @@ void PIC_SetIRQMask(uint32_t irq, bool masked)
 	PIC_Controller *pic = &pics[irq > 7 ? 1 : 0];
 	// clear bit
 	const auto bit = static_cast<uint8_t>(1 << t);
-	Bit8u newmask = pic->imr;
+	uint8_t newmask = pic->imr;
 	newmask &= ~bit;
 	if (masked) newmask |= bit;
 	pic->set_imr(newmask);
@@ -415,8 +418,8 @@ void PIC_SetIRQMask(uint32_t irq, bool masked)
 
 static void AddEntry(PICEntry * entry) {
 	PICEntry * find_entry=pic_queue.next_entry;
-	if (GCC_UNLIKELY(find_entry ==0)) {
-		entry->next=0;
+	if (GCC_UNLIKELY(find_entry ==nullptr)) {
+		entry->next=nullptr;
 		pic_queue.next_entry=entry;
 	} else if (find_entry->index>entry->index) {
 		pic_queue.next_entry=entry;
@@ -466,7 +469,7 @@ void PIC_RemoveSpecificEvents(PIC_EventHandler handler, uint32_t val)
 {
 	PICEntry *entry = pic_queue.next_entry;
 	PICEntry *prev_entry;
-	prev_entry = 0;
+	prev_entry = nullptr;
 	while (entry) {
 		if (GCC_UNLIKELY((entry->pic_event == handler)) && (entry->value == val)) {
 			if (prev_entry) {
@@ -491,7 +494,7 @@ void PIC_RemoveSpecificEvents(PIC_EventHandler handler, uint32_t val)
 void PIC_RemoveEvents(PIC_EventHandler handler) {
 	PICEntry * entry=pic_queue.next_entry;
 	PICEntry * prev_entry;
-	prev_entry=0;
+	prev_entry=nullptr;
 	while (entry) {
 		if (GCC_UNLIKELY(entry->pic_event==handler)) {
 			if (prev_entry) {
@@ -564,7 +567,7 @@ struct TickerBlock {
 	TickerBlock * next;
 };
 
-static TickerBlock * firstticker=0;
+static TickerBlock * firstticker=nullptr;
 
 
 void TIMER_DelTickHandler(TIMER_TickHandler handler) {
@@ -639,7 +642,16 @@ public:
 		PIC_SetIRQMask(2,false);					/* Enable second pic */
 		PIC_SetIRQMask(8,false);					/* Enable RTC IRQ */
 
-		if (machine==MCH_PCJR) {
+		// On AT systems, Both IRQ 2 and 9 were available.
+		// Ref: https://dosdays.co.uk/topics/io_addresses_irq_dma.php
+		// If present, the MPU-401 activates and uses IRQ 9.
+		//
+		if (IS_EGAVGA_ARCH) {
+			PIC_SetIRQMask(9, false);
+			PIC_DeActivateIRQ(9);
+		}
+
+		if (machine == MCH_PCJR) {
 			/* Enable IRQ6 (replacement for the NMI for PCJr) */
 			PIC_SetIRQMask(6,false);
 		}
@@ -655,9 +667,9 @@ public:
 		for (i=0;i<PIC_QUEUESIZE-1;i++) {
 			pic_queue.entries[i].next=&pic_queue.entries[i+1];
 		}
-		pic_queue.entries[PIC_QUEUESIZE-1].next=0;
+		pic_queue.entries[PIC_QUEUESIZE-1].next=nullptr;
 		pic_queue.free_entry=&pic_queue.entries[0];
-		pic_queue.next_entry=0;
+		pic_queue.next_entry=nullptr;
 	}
 
 	~PIC_8259A(){

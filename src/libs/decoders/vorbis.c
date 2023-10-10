@@ -1,8 +1,8 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
- *  Copyright (C) 2018-2021  Kevin R. Croft <krcroft@gmail.com>
+ *  Copyright (C) 2020-2022  The DOSBox Staging Team
+ *  Copyright (C) 2018-2021  kcgen <kcgen@users.noreply.github.com>
  *  Copyright (C) 2001-2017  Ryan C. Gordon <icculus@icculus.org>
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -170,10 +170,10 @@ static Uint32 VORBIS_read(Sound_Sample *sample, void* buffer, Uint32 desired_fra
     const int err = stb_vorbis_get_error(stb);
 
     if (decoded_frames == 0) {
-        sample->flags |= (err ? SOUND_SAMPLEFLAG_ERROR : SOUND_SAMPLEFLAG_EOF);
+        sample->flags |= (err ? (Uint32)SOUND_SAMPLEFLAG_ERROR : (Uint32)SOUND_SAMPLEFLAG_EOF);
     }
     else if (decoded_frames < (int) desired_frames) {
-        sample->flags |= SOUND_SAMPLEFLAG_EAGAIN;
+        sample->flags |= (Uint32)SOUND_SAMPLEFLAG_EAGAIN;
     }
     return decoded_frames;
 } /* VORBIS_read */

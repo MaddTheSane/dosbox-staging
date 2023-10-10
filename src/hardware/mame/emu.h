@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2022  The DOSBox Staging Team
  *  Copyright (C) 2017-2020  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -39,10 +39,10 @@
 #include <stdarg.h>
 #endif
 
-typedef Bit16s stream_sample_t;
+typedef int16_t stream_sample_t;
 
-typedef Bit8u u8;
-typedef Bit32u u32;
+typedef uint8_t u8;
+typedef uint32_t u32;
 
 class device_t;
 struct machine_config;
@@ -54,7 +54,7 @@ struct machine_config;
 #define DECLARE_READ8_MEMBER(name)      u8     name( int, int)
 #define DECLARE_WRITE8_MEMBER(name)     void   name( int, int, u8 data)
 #define READ8_MEMBER(name)              u8     name( int, int)
-#define WRITE8_MEMBER(name)				void   name(MAYBE_UNUSED int offset, MAYBE_UNUSED int space, MAYBE_UNUSED u8 data)
+#define WRITE8_MEMBER(name)				void   name([[maybe_unused]] int offset, [[maybe_unused]] int space, [[maybe_unused]] u8 data)
 
 #define DECLARE_DEVICE_TYPE(Type, Class) \
 		extern const device_type Type; \
@@ -71,13 +71,13 @@ public:
 
 	sound_stream temp;
 
-	device_sound_interface(const machine_config & /* mconfig */, MAYBE_UNUSED device_t &_device)
+	device_sound_interface(const machine_config & /* mconfig */, [[maybe_unused]] device_t &_device)
 	        : temp()
 	{}
 
 	virtual ~device_sound_interface() = default;
 
-	sound_stream *stream_alloc(MAYBE_UNUSED int whatever, MAYBE_UNUSED int channels, MAYBE_UNUSED int size)
+	sound_stream *stream_alloc([[maybe_unused]] int whatever, [[maybe_unused]] int channels, [[maybe_unused]] int size)
 	{
 		return &temp;
 	}
@@ -91,7 +91,7 @@ public:
 struct attotime {
 	int whatever;
 
-	static attotime from_hz(MAYBE_UNUSED int hz) {
+	static attotime from_hz([[maybe_unused]] int hz) {
 		return attotime();
 	}
 };
@@ -102,8 +102,9 @@ struct machine_config {
 typedef int device_type;
 
 class device_t {
-	u32 clockRate;
+	u32 clockRate = 0;
 public:
+	const char *shortName = nullptr;
 	struct machine_t {
 		int describe_context() const {
 			return 0;
@@ -120,7 +121,7 @@ public:
 		return clockRate;
 	}
 
-	void logerror(MAYBE_UNUSED const char* format, ...) {
+	void logerror([[maybe_unused]] const char* format, ...) {
 #if C_DEBUG
 		char buf[512*2];
 		va_list msg;
@@ -138,14 +139,23 @@ public:
 	virtual void device_start() {
 	}
 
-	void save_item(int, MAYBE_UNUSED int blah= 0) {
+	void save_item(int, [[maybe_unused]] int blah= 0) {
 	}
 
-	device_t(const machine_config & /* mconfig */, MAYBE_UNUSED device_type type, MAYBE_UNUSED const char *tag, MAYBE_UNUSED device_t *owner, u32 _clock) : clockRate( _clock ) {
-	}
+	device_t(const machine_config & /* mconfig */,
+	         [[maybe_unused]] device_type type,
+	         const char *short_name,
+	         [[maybe_unused]] device_t *owner,
+	         u32 _clock)
+	        : clockRate(_clock),
+	          shortName(short_name)
+	{}
 
 	virtual ~device_t() {
 	}
+	// prevent copying and assignment
+	device_t(const device_t &) = delete;
+	device_t &operator=(const device_t &) = delete;
 };
 
 #define auto_alloc_array_clear(m, t, c) calloc(c, sizeof(t) )

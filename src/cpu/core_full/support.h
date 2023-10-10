@@ -16,6 +16,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "../string_ops.h"
+
 enum {
 	L_N=0,
 	L_SKIP,
@@ -141,16 +143,6 @@ enum {
 };
 
 enum {
-	R_OUTSB,R_OUTSW,R_OUTSD,
-	R_INSB,R_INSW,R_INSD,
-	R_MOVSB,R_MOVSW,R_MOVSD,
-	R_LODSB,R_LODSW,R_LODSD,
-	R_STOSB,R_STOSW,R_STOSD,
-	R_SCASB,R_SCASW,R_SCASD,
-	R_CMPSB,R_CMPSW,R_CMPSD
-};
-
-enum {
 	M_None=0,
 	M_Ebx,M_Eb,M_Gb,M_EbGb,M_GbEb,
 	M_Ewx,M_Ew,M_Gw,M_EwGw,M_GwEw,M_EwxGwx,M_EwGwt,
@@ -174,7 +166,7 @@ enum {
 };
 
 struct OpCode {
-	Bit8u load,op,save,extra;
+	uint8_t load,op,save,extra;
 };
 
 struct FullData {
@@ -189,18 +181,18 @@ struct FullData {
 	EAPoint cseip;
 #ifdef WORDS_BIGENDIAN
 	union {
-		Bit32u dword[1];
-		Bit32s dwords[1];
-		Bit16u word[2];
-		Bit16s words[2];
-		Bit8u byte[4];
-		Bit8s bytes[4];
+		uint32_t dword[1];
+		int32_t dwords[1];
+		uint16_t word[2];
+		int16_t words[2];
+		uint8_t byte[4];
+		int8_t bytes[4];
 		} blah1,blah2,blah_imm;
 #else
 	union {	
-		Bit8u b;Bit8s bs;
-		Bit16u w;Bit16s ws;
-		Bit32u d;Bit32s ds;
+		uint8_t b;int8_t bs;
+		uint16_t w;int16_t ws;
+		uint32_t d;int32_t ds;
 	} op1,op2,imm;
 #endif
 	Bitu new_flags;

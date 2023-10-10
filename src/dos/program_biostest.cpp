@@ -1,6 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
+ *  Copyright (C) 2021-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -31,56 +32,58 @@
 #include "regs.h"
 
 void BIOSTEST::Run(void) {
-    if (!(cmd->FindCommand(1, temp_line))) {
-        WriteOut("Must specify BIOS file to load.\n");
-        return;
-    }
+	if (!(cmd->FindCommand(1, temp_line))) {
+		WriteOut("Must specify BIOS file to load.\n");
+		return;
+	}
 
-    Bit8u drive;
-    char fullname[DOS_PATHLENGTH];
-    localDrive* ldp = 0;
-    if (!DOS_MakeName((char *)temp_line.c_str(), fullname, &drive)) return;
+	uint8_t drive;
+	char fullname[DOS_PATHLENGTH];
+	localDrive *ldp = nullptr;
+	if (!DOS_MakeName((char *)temp_line.c_str(), fullname, &drive))
+		return;
 
-    try {
-        /* try to read ROM file into buffer */
-        ldp = dynamic_cast<localDrive*>(Drives[drive]);
-        if (!ldp) return;
+	try {
+		// try to read ROM file into buffer
+		ldp = dynamic_cast<localDrive*>(Drives.at(drive));
+		if (!ldp)
+			return;
 
-        FILE *tmpfile = ldp->GetSystemFilePtr(fullname, "rb");
-        if (tmpfile == NULL) {
-            WriteOut("Can't open a file");
-            return;
-        }
-        fseek(tmpfile, 0L, SEEK_END);
-        if (ftell(tmpfile) > 64 * 1024) {
-            WriteOut("BIOS File too large");
-            fclose(tmpfile);
-            return;
-        }
-        fseek(tmpfile, 0L, SEEK_SET);
-        Bit8u buffer[64*1024];
-        Bitu data_read = fread(buffer, 1, sizeof( buffer), tmpfile);
-        fclose(tmpfile);
+		FILE *tmpfile = ldp->GetSystemFilePtr(fullname, "rb");
+		if (tmpfile == nullptr) {
+			WriteOut("Can't open a file");
+			return;
+		}
+		fseek(tmpfile, 0L, SEEK_END);
+		if (ftell(tmpfile) > 64 * 1024) {
+			WriteOut("BIOS File too large");
+			fclose(tmpfile);
+			return;
+		}
+		fseek(tmpfile, 0L, SEEK_SET);
+		uint8_t buffer[64 * 1024];
+		const auto bytes_read = fread(buffer, 1, sizeof(buffer), tmpfile);
+		assert(bytes_read <= sizeof(buffer));
 
-        Bit32u rom_base = PhysMake(0xf000, 0); // override regular dosbox bios
-        /* write buffer into ROM */
-        for (Bitu i = 0; i < data_read; i++) phys_writeb(rom_base + i, buffer[i]);
+		fclose(tmpfile);
 
-        //Start executing this bios
-        memset(&cpu_regs, 0, sizeof(cpu_regs));
-        memset(&Segs, 0, sizeof(Segs));
+		// Override regular DOSBox BIOS
+		const auto rom_base = PhysicalMake(0xf000, 0);
 
+		// write buffer into ROM
+		for (PhysPt i = 0; i < check_cast<PhysPt>(bytes_read); ++i)
+			phys_writeb(rom_base + i, buffer[i]);
 
-        SegSet16(cs, 0xf000);
-        reg_eip = 0xfff0;
-    }
-    catch (...) {
-        return;
-    }
-}
+		// Reset the CPU registers and memory segments
+		cpu_regs = {};
+		Segs = {};
 
-void BIOSTEST_ProgramStart(Program **make) {
-	*make = new BIOSTEST;
+		// Start executing this bios
+		SegSet16(cs, 0xf000);
+		reg_eip = 0xfff0;
+	} catch (...) {
+		return;
+	}
 }
 
 #endif // C_DEBUG

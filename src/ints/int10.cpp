@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2022-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -27,7 +28,7 @@
 #include "setup.h"
 
 Int10Data int10;
-static Bitu call_10;
+static callback_number_t call_10 = 0;
 static bool warned_ff=false;
 
 static Bitu INT10_Handler(void) {
@@ -52,9 +53,9 @@ static Bitu INT10_Handler(void) {
 
 	switch (reg_ah) {
 	case 0x00:								/* Set VideoMode */
-		Mouse_BeforeNewVideoMode();
+		MOUSEDOS_BeforeNewVideoMode();
 		INT10_SetVideoMode(reg_al);
-		Mouse_AfterNewVideoMode(true);
+		MOUSEDOS_AfterNewVideoMode(true);
 		break;
 	case 0x01:								/* Set TextMode Cursor Shape */
 		INT10_SetCursorShape(reg_ch,reg_cl);
@@ -74,7 +75,7 @@ static Bitu INT10_Handler(void) {
 		break;
 	case 0x05:								/* Set Active Page */
 		if ((reg_al & 0x80) && IS_TANDY_ARCH) {
-			Bit8u crtcpu=real_readb(BIOSMEM_SEG, BIOSMEM_CRTCPU_PAGE);		
+			uint8_t crtcpu=real_readb(BIOSMEM_SEG, BIOSMEM_CRTCPU_PAGE);		
 			switch (reg_al) {
 			case 0x80:
 				reg_bh=crtcpu & 7;
@@ -139,8 +140,9 @@ static Bitu INT10_Handler(void) {
 		break;
 	case 0x0F:								/* Get videomode */
 		reg_bh=real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_PAGE);
-		reg_al=real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_MODE)|(real_readb(BIOSMEM_SEG,BIOSMEM_VIDEO_CTL)&0x80);
-		reg_ah=(Bit8u)real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS);
+		reg_al=real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_MODE);
+		if (IS_EGAVGA_ARCH) reg_al|=real_readb(BIOSMEM_SEG,BIOSMEM_VIDEO_CTL)&0x80;
+		reg_ah=(uint8_t)real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS);
 		break;					
 	case 0x10:								/* Palette functions */
 		if (!IS_EGAVGA_ARCH && (reg_al>0x02)) break;
@@ -207,7 +209,7 @@ static Bitu INT10_Handler(void) {
 		if (!IS_EGAVGA_ARCH) 
 			break;
 		if ((reg_al & 0xf0) == 0x10)
-			Mouse_BeforeNewVideoMode();
+			MOUSEDOS_BeforeNewVideoMode();
 		switch (reg_al) {
 /* Textmode calls */
 		case 0x00:			/* Load user font */
@@ -216,11 +218,11 @@ static Bitu INT10_Handler(void) {
 			break;
 		case 0x01:			/* Load 8x14 font */
 		case 0x11:
-			INT10_LoadFont(Real2Phys(int10.rom.font_14),reg_al==0x11,256,0,reg_bl&0x7f,14);
+			INT10_LoadFont(RealToPhysical(int10.rom.font_14),reg_al==0x11,256,0,reg_bl&0x7f,14);
 			break;
 		case 0x02:			/* Load 8x8 font */
 		case 0x12:
-			INT10_LoadFont(Real2Phys(int10.rom.font_8_first),reg_al==0x12,256,0,reg_bl&0x7f,8);
+			INT10_LoadFont(RealToPhysical(int10.rom.font_8_first),reg_al==0x12,256,0,reg_bl&0x7f,8);
 			break;
 		case 0x03:			/* Set Block Specifier */
 			IO_Write(0x3c4,0x3);IO_Write(0x3c5,reg_bl);
@@ -228,7 +230,7 @@ static Bitu INT10_Handler(void) {
 		case 0x04:			/* Load 8x16 font */
 		case 0x14:
 			if (!IS_VGA_ARCH) break;
-			INT10_LoadFont(Real2Phys(int10.rom.font_16),reg_al==0x14,256,0,reg_bl&0x7f,16);
+			INT10_LoadFont(RealToPhysical(int10.rom.font_16),reg_al==0x14,256,0,reg_bl&0x7f,16);
 			break;
 /* Graphics mode calls */
 		case 0x20:			/* Set User 8x8 Graphics characters */
@@ -266,42 +268,42 @@ graphics_chars:
 			case 0x00:	/* interupt 0x1f vector */
 				{
 					RealPt int_1f=RealGetVec(0x1f);
-					SegSet16(es,RealSeg(int_1f));
-					reg_bp=RealOff(int_1f);
+					SegSet16(es,RealSegment(int_1f));
+					reg_bp=RealOffset(int_1f);
 				}
 				break;
 			case 0x01:	/* interupt 0x43 vector */
 				{
 					RealPt int_43=RealGetVec(0x43);
-					SegSet16(es,RealSeg(int_43));
-					reg_bp=RealOff(int_43);
+					SegSet16(es,RealSegment(int_43));
+					reg_bp=RealOffset(int_43);
 				}
 				break;
 			case 0x02:	/* font 8x14 */
-				SegSet16(es,RealSeg(int10.rom.font_14));
-				reg_bp=RealOff(int10.rom.font_14);
+				SegSet16(es,RealSegment(int10.rom.font_14));
+				reg_bp=RealOffset(int10.rom.font_14);
 				break;
 			case 0x03:	/* font 8x8 first 128 */
-				SegSet16(es,RealSeg(int10.rom.font_8_first));
-				reg_bp=RealOff(int10.rom.font_8_first);
+				SegSet16(es,RealSegment(int10.rom.font_8_first));
+				reg_bp=RealOffset(int10.rom.font_8_first);
 				break;
 			case 0x04:	/* font 8x8 second 128 */
-				SegSet16(es,RealSeg(int10.rom.font_8_second));
-				reg_bp=RealOff(int10.rom.font_8_second);
+				SegSet16(es,RealSegment(int10.rom.font_8_second));
+				reg_bp=RealOffset(int10.rom.font_8_second);
 				break;
 			case 0x05:	/* alpha alternate 9x14 */
-				SegSet16(es,RealSeg(int10.rom.font_14_alternate));
-				reg_bp=RealOff(int10.rom.font_14_alternate);
+				SegSet16(es,RealSegment(int10.rom.font_14_alternate));
+				reg_bp=RealOffset(int10.rom.font_14_alternate);
 				break;
 			case 0x06:	/* font 8x16 */
 				if (!IS_VGA_ARCH) break;
-				SegSet16(es,RealSeg(int10.rom.font_16));
-				reg_bp=RealOff(int10.rom.font_16);
+				SegSet16(es,RealSegment(int10.rom.font_16));
+				reg_bp=RealOffset(int10.rom.font_16);
 				break;
 			case 0x07:	/* alpha alternate 9x16 */
 				if (!IS_VGA_ARCH) break;
-				SegSet16(es,RealSeg(int10.rom.font_16_alternate));
-				reg_bp=RealOff(int10.rom.font_16_alternate);
+				SegSet16(es,RealSegment(int10.rom.font_16_alternate));
+				reg_bp=RealOffset(int10.rom.font_16_alternate);
 				break;
 			default:
 				LOG(LOG_INT10,LOG_ERROR)("Function 11:30 Request for font %2X",reg_bh);	
@@ -316,7 +318,8 @@ graphics_chars:
 			LOG(LOG_INT10,LOG_ERROR)("Function 11:Unsupported character generator call %2X",reg_al);
 			break;
 		}
-		if ((reg_al&0xf0)==0x10) Mouse_AfterNewVideoMode(false);
+		if ((reg_al & 0xf0) == 0x10)
+			MOUSEDOS_AfterNewVideoMode(false);
 		break;
 	case 0x12:								/* alternate function select */
 		if (!IS_EGAVGA_ARCH) 
@@ -334,14 +337,12 @@ graphics_chars:
 			{   
 				if (!IS_VGA_ARCH) break;
 				LOG(LOG_INT10,LOG_WARN)("Function 12:Call %2X (select vertical resolution)",reg_bl);
-				if (svgaCard != SVGA_None) {
-					if (reg_al > 2) {
-						reg_al=0;		// invalid subfunction
-						break;
-					}
+				if (reg_al > 2) {
+					reg_al = 0;	// invalid VGA subfunction
+					break;
 				}
-				Bit8u modeset_ctl = real_readb(BIOSMEM_SEG,BIOSMEM_MODESET_CTL);
-				Bit8u video_switches = real_readb(BIOSMEM_SEG,BIOSMEM_SWITCHES)&0xf0;
+				uint8_t modeset_ctl = real_readb(BIOSMEM_SEG,BIOSMEM_MODESET_CTL);
+				uint8_t video_switches = real_readb(BIOSMEM_SEG,BIOSMEM_SWITCHES)&0xf0;
 				switch(reg_al) {
 				case 0: // 200
 					modeset_ctl &= 0xef;
@@ -375,7 +376,7 @@ graphics_chars:
 					reg_al=0;		//invalid subfunction
 					break;
 				}
-				Bit8u temp = real_readb(BIOSMEM_SEG,BIOSMEM_MODESET_CTL) & 0xf7;
+				uint8_t temp = real_readb(BIOSMEM_SEG,BIOSMEM_MODESET_CTL) & 0xf7;
 				if (reg_al&1) temp|=8;		// enable if al=0
 				real_writeb(BIOSMEM_SEG,BIOSMEM_MODESET_CTL,temp);
 				reg_al=0x12;
@@ -396,7 +397,7 @@ graphics_chars:
 					reg_al=0;
 					break;
 				}
-				Bit8u temp = real_readb(BIOSMEM_SEG,BIOSMEM_MODESET_CTL) & 0xfd;
+				uint8_t temp = real_readb(BIOSMEM_SEG,BIOSMEM_MODESET_CTL) & 0xfd;
 				if (!(reg_al&1)) temp|=2;		// enable if al=0
 				real_writeb(BIOSMEM_SEG,BIOSMEM_MODESET_CTL,temp);
 				reg_al=0x12;
@@ -411,7 +412,7 @@ graphics_chars:
 					reg_al=0;
 					break;
 				}
-				Bit8u temp = real_readb(BIOSMEM_SEG,BIOSMEM_VIDEO_CTL) & 0xfe;
+				uint8_t temp = real_readb(BIOSMEM_SEG,BIOSMEM_VIDEO_CTL) & 0xfe;
 				real_writeb(BIOSMEM_SEG,BIOSMEM_VIDEO_CTL,temp|reg_al);
 				reg_al=0x12;
 				break;	
@@ -428,7 +429,7 @@ graphics_chars:
 				break;
 			}
 			IO_Write(0x3c4,0x1);
-			Bit8u clocking = IO_Read(0x3c5);
+			uint8_t clocking = IO_Read(0x3c5);
 			
 			if (reg_al==0) clocking &= ~0x20;
 			else clocking |= 0x20;
@@ -475,7 +476,7 @@ graphics_chars:
 				Bitu ret=INT10_VideoState_GetSize(reg_cx);
 				if (ret) {
 					reg_al=0x1c;
-					reg_bx=(Bit16u)ret;
+					reg_bx=(uint16_t)ret;
 				} else reg_al=0;
 				}
 				break;
@@ -505,10 +506,10 @@ graphics_chars:
 			reg_ah=VESA_GetSVGAModeInformation(reg_cx,SegValue(es),reg_di);
 			break;
 		case 0x02:							/* Set videomode */
-			Mouse_BeforeNewVideoMode();
+			MOUSEDOS_BeforeNewVideoMode();
 			reg_al=0x4f;
 			reg_ah=VESA_SetSVGAMode(reg_bx);
-			Mouse_AfterNewVideoMode(true);
+			MOUSEDOS_AfterNewVideoMode(true);
 			break;
 		case 0x03:							/* Get videomode */
 			reg_al=0x4f;
@@ -521,7 +522,7 @@ graphics_chars:
 					Bitu ret=INT10_VideoState_GetSize(reg_cx);
 					if (ret) {
 						reg_ah=0;
-						reg_bx=(Bit16u)ret;
+						reg_bx=(uint16_t)ret;
 					} else reg_ah=1;
 					}
 					break;
@@ -596,26 +597,26 @@ graphics_chars:
 			}
 			switch (reg_bl) {
 			case 0x00:
-				SegSet16(es,RealSeg(int10.rom.pmode_interface));
-				reg_di=RealOff(int10.rom.pmode_interface);
+				SegSet16(es,RealSegment(int10.rom.pmode_interface));
+				reg_di=RealOffset(int10.rom.pmode_interface);
 				reg_cx=int10.rom.pmode_interface_size;
 				reg_ax=0x004f;
 				break;
 			case 0x01:						/* Get code for "set window" */
-				SegSet16(es,RealSeg(int10.rom.pmode_interface));
-				reg_di=RealOff(int10.rom.pmode_interface)+int10.rom.pmode_interface_window;
+				SegSet16(es,RealSegment(int10.rom.pmode_interface));
+				reg_di=RealOffset(int10.rom.pmode_interface)+int10.rom.pmode_interface_window;
 				reg_cx=int10.rom.pmode_interface_start-int10.rom.pmode_interface_window;
 				reg_ax=0x004f;
 				break;
 			case 0x02:						/* Get code for "set display start" */
-				SegSet16(es,RealSeg(int10.rom.pmode_interface));
-				reg_di=RealOff(int10.rom.pmode_interface)+int10.rom.pmode_interface_start;
+				SegSet16(es,RealSegment(int10.rom.pmode_interface));
+				reg_di=RealOffset(int10.rom.pmode_interface)+int10.rom.pmode_interface_start;
 				reg_cx=int10.rom.pmode_interface_palette-int10.rom.pmode_interface_start;
 				reg_ax=0x004f;
 				break;
 			case 0x03:						/* Get code for "set palette" */
-				SegSet16(es,RealSeg(int10.rom.pmode_interface));
-				reg_di=RealOff(int10.rom.pmode_interface)+int10.rom.pmode_interface_palette;
+				SegSet16(es,RealSegment(int10.rom.pmode_interface));
+				reg_di=RealOffset(int10.rom.pmode_interface)+int10.rom.pmode_interface_palette;
 				reg_cx=int10.rom.pmode_interface_size-int10.rom.pmode_interface_palette;
 				reg_ax=0x004f;
 				break;
@@ -651,8 +652,8 @@ graphics_chars:
 		break;
 	case 0xfa: {
 		RealPt pt=INT10_EGA_RIL_GetVersionPt();
-		SegSet16(es,RealSeg(pt));
-		reg_bx=RealOff(pt);
+		SegSet16(es,RealSegment(pt));
+		reg_bx=RealOffset(pt);
 		}
 		break;
 	case 0xff:
@@ -684,24 +685,33 @@ static void INT10_Seg40Init(void) {
 	}
 }
 
-
-static void INT10_InitVGA(void) {
+static void INT10_InitVGA(void)
+{
 	if (IS_EGAVGA_ARCH) {
-		/* switch to color mode and enable CPU access 480 lines */
-		IO_Write(0x3c2,0xc3);
-		/* More than 64k */
-		IO_Write(0x3c4,0x04);
-		IO_Write(0x3c5,0x02);
+		// Switch to color mode and enable CPU access 480 lines
+		IO_Write(0x3c2, 0xc3);
+
+		// More than 64k
+		IO_Write(0x3c4, 0x04);
+		IO_Write(0x3c5, 0x02);
+
 		if (IS_VGA_ARCH) {
-			/* Initialize DAC */
-			IO_Write(0x3c8,0);
-			for (Bitu i=0;i<3*256;i++) IO_Write(0x3c9,0);
+			// Initialize 256-colour VGA DAC palette to black
+			IO_Write(0x3c8, 0);
+
+			for (auto i = 0; i < NumVgaColors; ++i) {
+				constexpr Rgb666 black = {0, 0, 0};
+
+				IO_Write(0x3c9, black.red);
+				IO_Write(0x3c9, black.green);
+				IO_Write(0x3c9, black.blue);
+			}
 		}
 	}
 }
 
 static void SetupTandyBios(void) {
-	static Bit8u TandyConfig[130]= {
+	static uint8_t TandyConfig[130]= {
 		0x21, 0x42, 0x49, 0x4f, 0x53, 0x20, 0x52, 0x4f, 0x4d, 0x20, 0x76, 0x65, 0x72,
 		0x73, 0x69, 0x6f, 0x6e, 0x20, 0x30, 0x32, 0x2e, 0x30, 0x30, 0x2e, 0x30, 0x30,
 		0x0d, 0x0a, 0x43, 0x6f, 0x6d, 0x70, 0x61, 0x74, 0x69, 0x62, 0x69, 0x6c, 0x69,
@@ -722,6 +732,7 @@ static void SetupTandyBios(void) {
 }
 
 void INT10_Init(Section* /*sec*/) {
+	INT10_SetupPalette();
 	INT10_InitVGA();
 	if (IS_TANDY_ARCH) SetupTandyBios();
 	/* Setup the INT 10 vector */

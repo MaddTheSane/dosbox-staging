@@ -1,4 +1,7 @@
 /*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2023  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -22,6 +25,7 @@
 #include "vga.h"
 #include "inout.h"
 #include "mem.h"
+#include "../ints/int10.h"
 
 struct SVGA_PVGA1A_DATA {
 	uint8_t PR0A = 0;
@@ -57,8 +61,9 @@ static void bank_setup_pvga1a() {
 	}
 }
 
-void write_p3cf_pvga1a(io_port_t reg, uint8_t val, io_width_t)
+void write_p3cf_pvga1a(io_port_t reg, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	if (pvga1a.locked() && reg >= 0x09 && reg <= 0x0e)
 		return;
 
@@ -149,7 +154,7 @@ void FinishSetMode_PVGA1A(io_port_t /*crtc_base*/, VGA_ModeExtraData *modeData)
 	IO_Write(0x3ce, 0x0a);
 	IO_Write(0x3cf, 0x00);
 	IO_Write(0x3ce, 0x0b);
-	Bit8u val = IO_Read(0x3cf);
+	uint8_t val = IO_Read(0x3cf);
 	IO_Write(0x3cf, val & ~0x08);
 	IO_Write(0x3ce, 0x0c);
 	IO_Write(0x3cf, 0x00);
@@ -178,7 +183,7 @@ void DetermineMode_PVGA1A() {
 	// Close replica from the base implementation. It will stay here
 	// until I figure a way to either distinguish M_VGA and M_LIN8 or
 	// merge them.
-	if (vga.attr.mode_control & 1) {
+	if (vga.attr.mode_control.is_graphics_enabled) {
 		if (vga.gfx.mode & 0x40) VGA_SetMode((pvga1a.biosMode<=0x13)?M_VGA:M_LIN8);
 		else if (vga.gfx.mode & 0x20) VGA_SetMode(M_CGA4);
 		else if ((vga.gfx.miscellaneous & 0x0c)==0x0c) VGA_SetMode(M_CGA2);
@@ -235,5 +240,7 @@ void SVGA_Setup_ParadisePVGA1A(void) {
 	}
 
 	IO_Write(0x3cf, 0x05); // Enable!
-	VGA_LogInitialization("Paradise VGA 1A", "DRAM");
+
+	const auto num_modes = ModeList_VGA_Paradise.size();
+	VGA_LogInitialization("Paradise VGA 1A", "DRAM", num_modes);
 }
