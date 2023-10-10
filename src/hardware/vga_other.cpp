@@ -1420,17 +1420,17 @@ void VGA_SetupOther()
 //--Added 2013-02-10 by Alun Bestor to give Boxer control over Hercules graphics options
 uint8_t boxer_herculesTintMode()
 {
-    return herc_pal;
+    return (uint8_t)hercules_palette;
 }
 
 void boxer_setHerculesTintMode(uint8_t mode)
 {
-    if (herc_pal != mode)
+    if ((uint8_t)hercules_palette != mode)
     {
-        herc_pal = mode % 3;
+		hercules_palette = MonochromePalette(mode % 3);
         if (machine == MCH_HERC)
         {
-            Herc_Palette();
+			VGA_SetHerculesPalette();
             VGA_DAC_CombineColor(1,7);
         }
     }

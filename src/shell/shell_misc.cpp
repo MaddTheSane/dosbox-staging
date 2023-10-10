@@ -501,7 +501,7 @@ bool DOS_Shell::ExecuteProgram(std::string_view name, std::string_view args)
 
 	//--Added 2010-01-21 by Alun Bestor to let Boxer track the executed program
 	char canonicalPath[DOS_PATHLENGTH+4];
-	DOS_Canonicalize(fullname, canonicalPath);
+	DOS_Canonicalize(fullname.c_str(), canonicalPath);
 	//--End of modifications
 	if (iequals(extension, ".BAT")) {
 		if (!batchfiles.empty() && !call) {

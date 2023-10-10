@@ -141,7 +141,7 @@
 #define C_FLUIDSYNTH 0
 
 // Define to 1 to enable libslirp Ethernet support
-#define C_SLIRP 1
+#define C_SLIRP 0
 
 // Define to 1 to enable Novell NE 2000 NIC emulation
 #define C_NE2000 1
