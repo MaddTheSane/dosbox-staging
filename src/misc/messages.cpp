@@ -199,12 +199,6 @@ static bool load_message_file(const std_fs::path &filename)
 	return true;
 }
 
-//--Modified 2009-02-23 by Alun Bestor: replaced this function to route all localizations off to our own translation files
-const char * MSG_Get(char const * msg)
-{
-	return boxer_localizedStringForKey(msg);
-}
-/*
 const char* MSG_Get(const char* requested_name)
 {
 	const auto it = messages.find(requested_name);
@@ -214,8 +208,6 @@ const char* MSG_Get(const char* requested_name)
 	LOG_WARNING("LANG: Message '%s' not found", requested_name);
 	return msg_not_found;
 }
-*/
-//--End of modifications
 
 const char* MSG_GetRaw(const char* requested_name)
 {
@@ -276,6 +268,20 @@ void MSG_Init([[maybe_unused]] Section_prop *section)
 		// If a short-hand name was provided then add the file extension
 		result = load_message_file(GetResourcePath(subdir, lang + extension));
 
+	//--Modified 2009-02-23 by C.W. Betts: load the Boxer localization to the DOSBox code.
+	{
+		std::unordered_map<std::string, std::string> values = {};
+		if (boxer_localizedStringsForKey(values, lang.c_str())) {
+			for (auto iter = values.cbegin(); iter != values.cend(); iter++) {
+				msg_replace(iter->first.c_str(), iter->second.c_str());
+			}
+		} else {
+			LOG_WARNING("LANG: The '%s' Boxer resource file could not be loaded, using DOSBox messages",
+						lang.c_str());
+
+		}
+	}
+	//--End of modifications
 	if (result)
 		return;
 
