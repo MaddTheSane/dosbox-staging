@@ -153,6 +153,12 @@ public:
 	[[nodiscard]] Bitu GetEnvCount() const;
 	bool SetEnv(const char* entry, const char* new_string);
 
+	//--Added 2013-09-22 by C.W. Betts to let Boxer know that there are no more batch files
+	bool hasNoBatchFiles() const {
+		return batchfiles.empty();
+	}
+	//--End of modifications
+
 	/* Commands */
 	void CMD_HELP(char* args);
 	void CMD_CLS(char* args);

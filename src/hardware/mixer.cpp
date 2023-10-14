@@ -52,10 +52,6 @@
 #include "mverb/MVerb.h"
 #include "tal-chorus/ChorusEngine.h"
 
-//--Added 2012-02-26 by Alun Bestor to give Boxer control over the mixer.
-#import "BXCoalfaceAudio.h"
-//--End of modifications
-
 CHECK_NARROWING();
 
 //#define DEBUG_MIXER
@@ -2781,16 +2777,3 @@ void MIXER_AddConfigSection(const config_ptr_t& conf)
 	assert(sec);
 	init_mixer_dosbox_settings(*sec);
 }
-
-
-//--Added 2012-02-26 by Alun Bestor to give Boxer an easy way to update channel volumes.
-void boxer_updateVolumes()
-{
-    MixerChannel *source=mixer.channels;
-    while (source)
-    {
-        source->UpdateVolume();
-        source=source->next;
-    }
-}
-//--End of modifications

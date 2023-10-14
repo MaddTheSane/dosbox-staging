@@ -165,7 +165,7 @@
 // uses the following define to definitively indicate if it should or shouldn't
 // use the X Input 2.0 protocol. If this is left undefined, then ManyMouse makes
 // an assumption about availability based on OS type.
-#define SUPPORT_XINPUT2 1
+#define SUPPORT_XINPUT2 0
 
 // Compiler supports Core Audio headers
 #define C_COREAUDIO 0
