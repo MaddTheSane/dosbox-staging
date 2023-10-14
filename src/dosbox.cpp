@@ -1122,8 +1122,8 @@ void DOSBOX_Init()
 	//--Added 2012-10-19 by Alun Bestor to allow parallel port emulation
 	// parallel ports
 	secprop=control->AddSection_prop("parallel",&PARALLEL_Init,true);
-	Pstring = secprop->Add_string("parallel1",Property::Changeable::WhenIdle,"disabled");
-	Pstring->Set_help(
+	pstring = secprop->Add_string("parallel1",Property::Changeable::WhenIdle,"disabled");
+	pstring->Set_help(
 					  "parallel1-3 -- set type of device connected to lpt port.\n"
 					  "Can be:\n"
 					  "\treallpt (direct parallel port passthrough using Porttalk),\n"
@@ -1148,10 +1148,10 @@ void DOSBOX_Init()
 					  "  for printer:\n"
 					  "    printer still has it's own configuration section above."
 					  );
-	Pstring = secprop->Add_string("parallel2",Property::Changeable::WhenIdle,"disabled");
-	Pstring->Set_help("see parallel1");
-	Pstring = secprop->Add_string("parallel3",Property::Changeable::WhenIdle,"disabled");
-	Pstring->Set_help("see parallel1");
+	pstring = secprop->Add_string("parallel2",Property::Changeable::WhenIdle,"disabled");
+	pstring->Set_help("see parallel1");
+	pstring = secprop->Add_string("parallel3",Property::Changeable::WhenIdle,"disabled");
+	pstring->Set_help("see parallel1");
 //--End of modifications
 
 	// All the general DOS Related stuff, on real machines mostly located in

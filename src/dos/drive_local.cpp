@@ -95,7 +95,7 @@ bool localDrive::FileCreate(DOS_File** file, char* name, FatAttributeFlags attri
 	(*file)->flags = OPEN_READWRITE;
 	
 	//--Added 2010-08-21 by Alun Bestor to let Boxer monitor DOSBox's file operations
-	boxer_didCreateLocalFile(temp_name, this);
+	boxer_didCreateLocalFile(name, this);
 	//--End of modifications
 
 	return true;

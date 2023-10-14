@@ -509,7 +509,7 @@ bool DOS_Shell::ExecuteProgram(std::string_view name, std::string_view args)
 		}
 
 		//--Added 2010-01-21 by Alun Bestor to let Boxer track the launched batch file
-		boxer_shellWillBeginBatchFile(this, canonicalPath, args);
+		boxer_shellWillBeginBatchFile(this, canonicalPath, std::string(args).c_str());
 		
 		auto reader = FileReader::GetFileReader(fullname);
 		if (reader) {
@@ -523,7 +523,7 @@ bool DOS_Shell::ExecuteProgram(std::string_view name, std::string_view args)
 
 	if (iequals(extension, ".COM") || iequals(extension, ".EXE")) {
 		//--Added 2010-01-21 by Alun Bestor to let Boxer track the executed program
-		boxer_shellWillExecuteFileAtDOSPath(this, canonicalPath, args);
+		boxer_shellWillExecuteFileAtDOSPath(this, canonicalPath, std::string(args).c_str());
 		//--End of modifications
 		run_binary_executable(fullname, args);
 		return true;
@@ -659,8 +659,8 @@ static void run_binary_executable(const std::string_view fullname,
 	
 	//--Added 2010-01-21 by Alun Bestor to let Boxer track the executed program
 	char canonicalPath[DOS_PATHLENGTH+4];
-	DOS_Canonicalize(fullname, canonicalPath);
-	boxer_shellWillExecuteFileAtDOSPath(this, canonicalPath, args);
+	DOS_Canonicalize(std::string(fullname).c_str(), canonicalPath);
+	boxer_shellWillExecuteFileAtDOSPath(NULL, canonicalPath, std::string(args).c_str());
 	//--End of modifications
 }
 

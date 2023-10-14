@@ -26,7 +26,7 @@
 #include "string_utils.h"
 #include "timer.h"
 
-#include "../src/dos/cdrom.h"
+#include "src/dos/cdrom.h"
 
 extern int bootdrive;
 extern bool bootguest, bootvm, use_quick_reboot;
