@@ -612,7 +612,7 @@ public:
 
 		//--Added 2011-09-25 by Alun Bestor to let Boxer pick up on the suggested MIDI device
 		std::string_view device_choice = section->Get_string("mididevice");
-		boxer_suggestMIDIHandler(device_choice, fullconf.c_str());
+		boxer_suggestMIDIHandler(std::string(device_choice), section->Get_string("midiconfig"));
 		//--End of modifications
 
 		midi = Midi{};
@@ -628,11 +628,14 @@ public:
 
 		std::string midiconfig_prefs = section->Get_string("midiconfig");
 
+		//Disabled 2011-09-30 by Alun Bestor: Boxer now handles sysex delays itself
+		/*
 		if (midiconfig_prefs.find("delaysysex") != std::string::npos) {
 			midi.sysex.start_ms = GetTicks();
 			midiconfig_prefs.erase(midiconfig_prefs.find("delaysysex"));
 			LOG_MSG("MIDI: Using delayed SysEx processing");
 		}
+		 */
 
 		trim(midiconfig_prefs);
 		const char* midiconfig = midiconfig_prefs.c_str();

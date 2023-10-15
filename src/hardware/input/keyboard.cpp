@@ -723,6 +723,13 @@ void KEYBOARD_ClrBuffer()
 	clear_buffer();
 }
 
+//TODO: more testing needed!
+Bitu boxer_keyboardBufferRemaining()
+{
+	if (buffer_num_used >= buffer_size) return 0;
+	else return buffer_size - buffer_num_used;
+}
+
 // ***************************************************************************
 // Initialization
 // ***************************************************************************

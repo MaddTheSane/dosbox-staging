@@ -134,6 +134,8 @@ std::string DOS_Shell::ReadCommand()
 
 		bool viewing_tab_completions = false;
 
+#warning This needs to be reimplemented!
+#if 0
 		//--Modified 2012-08-19 by Alun Bestor to let Boxer inject its own input
 		//and cancel keyboard input listening.
 		boxer_shellWillReadCommandInputFromHandle(this, input_handle);
@@ -172,6 +174,7 @@ std::string DOS_Shell::ReadCommand()
 			}
 		}
 		//--End of modifications
+#endif
 		
 		if (byte_count == 0) {
 			break;
