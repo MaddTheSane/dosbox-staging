@@ -297,7 +297,7 @@ public:
             //--End of modifications
                 
 			pname[8] = '1' + i;
-            CommandLine cmd(0,section->Get_string(pname));
+            CommandLine cmd("",section->Get_string(pname));
 
 			std::string str;
 			cmd.FindCommand(1,str);
