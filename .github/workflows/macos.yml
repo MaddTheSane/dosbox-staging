@@ -2,6 +2,10 @@ name: macOS builds
 
 on: [push, pull_request]
 
+concurrency: 
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CCACHE_DIR:      "${{ github.workspace }}/.ccache"
   CCACHE_MAXSIZE:  "64M"
@@ -17,11 +21,20 @@ jobs:
       fail-fast: false
       matrix:
         conf:
+          - name: Clang (macos-10.15)
+            host: macos-10.15
+            arch: x86_64
+            needs_deps: true
+            packages: meson
+            build_flags: -Dunit_tests=disabled
+            max_warnings: 0
+
           - name: Clang
             host: macos-latest
             arch: x86_64
             needs_deps: true
             packages: meson
+            build_flags: -Dunit_tests=disabled
             max_warnings: 0
 
           - name: GCC 11
@@ -29,7 +42,7 @@ jobs:
             arch: x86_64
             needs_deps: true
             packages: gcc@11
-            build_flags: --native-file=.github/meson/native-gcc-11.ini
+            build_flags: -Dunit_tests=disabled --native-file=.github/meson/native-gcc-11.ini
             max_warnings: 0
 
           - name: Clang, +tests
@@ -43,7 +56,7 @@ jobs:
             host: macos-latest
             arch: x86_64
             needs_deps: true
-            build_flags: -Denable_debugger=normal
+            build_flags: -Dunit_tests=disabled -Denable_debugger=normal
             max_warnings: 0
 
           - name: Clang
@@ -51,13 +64,12 @@ jobs:
             arch: arm64
             needs_deps: false
             packages: meson
+            build_flags: -Dunit_tests=disabled
             max_warnings: 0
 
     steps:
-      - name: Checkout repository and submodules
+      - name: Checkout repository
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
 
       - name:  Prepare brew and compiler caches
         if:    matrix.conf.needs_deps
@@ -128,23 +140,27 @@ jobs:
     name: Release build (${{ matrix.runner.arch }})
     runs-on: ${{ matrix.runner.host }}
     if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier,kklobe', github.actor) == false
+    env:
+      MIN_SUPPORTED_MACOSX_DEPLOYMENT_TARGET: ${{ matrix.runner.minimum_deployment }}
 
     strategy:
       matrix:
         runner:
-          - host: macos-latest
+          - host: macos-10.15
             arch: x86_64
+            build_flags: --native-file=.github/meson/macos-10.15-deployment-target.ini
+            minimum_deployment: '10.15'
             needs_deps: true
+            needs_libintl_workaround: true
 
           - host: [self-hosted, macOS, arm64, release-builds]
             arch: arm64
+            minimum_deployment: '11.0'
             needs_deps: false
 
     steps:
-      - name: Checkout repository and submodules
+      - name: Checkout repository
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
 
       - name:  Prepare brew and compiler caches
         if:    matrix.runner.needs_deps
@@ -170,9 +186,14 @@ jobs:
 
       - name: Install C++ compiler and libraries
         if:   matrix.runner.needs_deps
-        run: |
-          arch -arch=${{ matrix.runner.arch }} brew install librsvg tree \
-            $(cat ./.github/packages/macos-latest-brew.txt)
+        run: >-
+          arch -arch=${{ matrix.runner.arch }} brew install librsvg tree
+          ccache libpng meson opusfile sdl2 sdl2_net
+
+      # Workaround frequent HTTPS-based connectivity issues
+      # https://gitlab.freedesktop.org/freedesktop/freedesktop/-/issues/407
+      - name:  Fetch the libffi subproject for Glib
+        run: ./scripts/fetch-libffi-subproject.sh
 
       - uses:  actions/cache@v2
         if:    matrix.runner.needs_deps
@@ -194,26 +215,45 @@ jobs:
         run: |
           set -x
           git fetch --prune --unshallow
-          export VERSION=$(git describe --abbrev=5)
+          git fetch --tags --force
+          export VERSION=$(git describe --abbrev=0)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
+      # KLUDGE: Work-around for the scenario where glib's wrap links with libintl 
+      # dynamically, which adds a dependency into a brew dynlib package (in /usr/local/..), 
+      # which some users won't have. So we knockout libintl.dynlib (by removing gettext 
+      # removal), however this also breaks git: so we do a mock-meson setup to fetch all the 
+      # git wraps before knocking it. then we re-add gettext after the build, so git can work 
+      # for subsequent steps.
+      #
+      - name: Fetch subprojects then remove libintl.8.dylib
+        if:   matrix.runner.needs_libintl_workaround
+        run:  |
+          set -ex
+          meson setup -Ddefault_library=static --wrap-mode=forcefallback -Dfluidsynth:try-static-deps=true build
+          git clone --depth 1 --branch "0.2" https://github.com/frida/proxy-libintl.git subprojects/proxy-libintl
+          brew uninstall -f --ignore-dependencies gettext
+          rm -rf build
+
       - name: Setup release build
-        run: |
-          arch -arch=${{ matrix.runner.arch }} meson setup \
-            --wrap-mode=forcefallback \
-            -Ddebug=false \
-            -Db_ndebug=true \
-            -Ddefault_library=static \
-            -Db_asneeded=true \
-            -Doptimization=s \
-            -Db_lto=true \
-            -Dtry_static_libs=opusfile,png,sdl2,sdl2_net \
-            -Dfluidsynth:enable-floats=true \
-            -Dfluidsynth:try-static-deps=true \
-            build
+        run: >-
+          arch -arch=${{ matrix.runner.arch }} meson setup
+          ${{ matrix.conf.build_flags }}
+          --wrap-mode=forcefallback
+          -Dbuildtype=release
+          -Db_lto=true
+          -Db_asneeded=true
+          -Ddefault_library=static
+          -Dtry_static_libs=opusfile,sdl2,sdl2_net
+          -Dfluidsynth:try-static-deps=true
+          build
 
       - name: Build
         run:  arch -arch=${{ matrix.runner.arch }} ninja -C build
+
+      - name: Reinstate libintl.8.dylib
+        if:   matrix.runner.needs_libintl_workaround
+        run:  brew install gettext
 
       - name: Upload binary
         uses: actions/upload-artifact@v2
@@ -224,18 +264,17 @@ jobs:
   publish_universal_build:
     name: Publish universal build
     needs: build_macos_release
-    runs-on: macos-latest
+    runs-on: macos-10.15
     steps:
-      - name: Checkout repository and submodules
+      - name: Checkout repository
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
 
       - name: Inject version string
         run: |
           set -x
           git fetch --prune --unshallow
-          export VERSION=$(git describe --abbrev=5)
+          git fetch --tags --force
+          export VERSION=$(git describe --abbrev=0)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Install brew depedencies
@@ -243,62 +282,18 @@ jobs:
 
       - name: Download binaries
         uses: actions/download-artifact@v2
-          
+      
       - name: Package
         run: |
-          set -x
-
-          # Print shared object dependencies
-          otool -L dosbox-arm64/dosbox
-          python3 scripts/verify-macos-dylibs.py dosbox-arm64/dosbox
+          ./scripts/create-package.sh \
+            -p macos \
+            -v "${{ env.VERSION }}" \
+            -f \
+            "$(pwd)" \
+            "$(pwd)"
           
-          # Create universal binary from both architectures
-          mkdir dosbox-universal
-          lipo dosbox-x86_64/dosbox dosbox-arm64/dosbox -create -output dosbox-universal/dosbox
-
-          # Generate icon
-          make -C contrib/icons/ dosbox-staging.icns
-
-          dst=dist/dosbox-staging.app/Contents
-
-          # Prepare content
-          install -d "$dst/MacOS/"
-          install -d "$dst/Resources/"
-          install -d "$dst/SharedSupport/"
-                    
-          install        "dosbox-universal/dosbox"           "$dst/MacOS/"
-          install -m 644 "contrib/macos/Info.plist.template" "$dst/Info.plist"
-          install -m 644 "contrib/macos/PkgInfo"             "$dst/PkgInfo"
-          install -m 644 "contrib/icons/dosbox-staging.icns" "$dst/Resources/"
-          install -m 644 "docs/README.template"              "$dst/SharedSupport/README"
-          install -m 644 "COPYING"                           "$dst/SharedSupport/COPYING"
-          install -m 644 "README"                            "$dst/SharedSupport/manual.txt"
-          install -m 644 "docs/README.video"                 "$dst/SharedSupport/video.txt"
-
-          # Fill README template file
-          sed -i -e "s|%VERSION%|${{ env.VERSION }}|"           "$dst/Info.plist"
-          sed -i -e "s|%GIT_COMMIT%|$GITHUB_SHA|"               "$dst/SharedSupport/README"
-          sed -i -e "s|%GIT_BRANCH%|${GITHUB_REF#refs/heads/}|" "$dst/SharedSupport/README"
-          sed -i -e "s|%GITHUB_REPO%|$GITHUB_REPOSITORY|"       "$dst/SharedSupport/README"
-
-          # Prepare translation files
-          #
-          # Note:
-          #   We conciously drop the dialect postfix because no dialects are available.
-          #   (US was the default DOS dialect and therefore is the default for 'en').
-          #   There users get the generic translation and benefit from simpler filenames.
-          #   Dialect translations will be added if/when they're available.
-          #
-          dst_lng="$dst/Resources/translations/"
-          install -d "$dst_lng"
-          install -m 644 contrib/translations/de/de_DE.lng       "$dst_lng/de.lng"
-          install -m 644 contrib/translations/en/en_US.lng       "$dst_lng/en.lng"
-          install -m 644 contrib/translations/es/es_ES.lng       "$dst_lng/es.lng"
-          install -m 644 contrib/translations/fr/fr_FR.lng       "$dst_lng/fr.lng"
-          install -m 644 contrib/translations/it/it_IT.lng       "$dst_lng/it.lng"
-          install -m 644 contrib/translations/pl/pl_PL.CP437.lng "$dst_lng/pl.cp437.lng"
-          install -m 644 contrib/translations/pl/pl_PL.lng       "$dst_lng/pl.lng"
-          install -m 644 contrib/translations/ru/ru_RU.lng       "$dst_lng/ru.lng"
+      - name: Create dmg
+        run: |
           ln -s /Applications dist/
 
           codesign -s "-" dist/dosbox-staging.app --force --deep -v
@@ -324,20 +319,21 @@ jobs:
           path: dosbox-staging-macOS-${{ env.VERSION }}.dmg
     
   # This job exists only to publish an artifact with version info when building
-  # from master branch, so snapshot build version will be visible on:
+  # from main branch, so snapshot build version will be visible on:
   # https://dosbox-staging.github.io/downloads/devel/
   #
   publish_additional_artifacts:
     name: Publish additional artifacts
     needs: build_macos_release
     runs-on: macos-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v2
       - name: Generate changelog
         run: |
           set +x
           git fetch --unshallow
+          git fetch --tags --force
           VERSION=$(git describe --abbrev=4)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           NEWEST_TAG=$(git describe --abbrev=0)

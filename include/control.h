@@ -31,32 +31,31 @@
 #include "setup.h"
 
 enum class Verbosity : int8_t {
-	//                  Splash | Welcome | Early Stdout |
-	Quiet = 0,      //   no    |   no    |    no        |
-	SplashOnly = 1, //   yes   |   no    |    no        |
-	Low = 2,        //   no    |   no    |    yes       |
-	Medium = 3,     //   no    |   yes   |    yes       |
-	High = 4,       //   yes   |   yes   |    yes       |
+	//                     Splash | Welcome | Early Stdout |
+	Quiet = 0,         //   no    |   no    |    no        |
+	SplashOnly = 1,    //   yes   |   no    |    no        |
+	InstantLaunch = 2, //   no    |   no    |    yes       |
+	Low = 3,           //   no    |   no    |    yes       |
+	Medium = 4,        //   no    |   yes   |    yes       |
+	High = 5,          //   yes   |   yes   |    yes       |
 };
 
 class Config {
 public:
-	CommandLine * cmdline;
+	CommandLine * cmdline = nullptr;
 private:
-	std::deque<Section*> sectionlist;
-	void (* _start_function)(void);
-	bool secure_mode; //Sandbox mode
+	std::deque<Section*> sectionlist = {};
+	Section_line overwritten_autoexec_section;
+	std::string overwritten_autoexec_conf = {};
+	void (*_start_function)(void) = nullptr;
+	bool secure_mode = false; // Sandbox mode
 public:
-	std::vector<std::string> startup_params;
-	std::vector<std::string> configfiles;
+	std::vector<std::string> startup_params = {};
+	std::vector<std::string> configfiles = {};
 
 	Config(CommandLine *cmd)
-		: cmdline(cmd),
-		  sectionlist{},
-		  _start_function(nullptr),
-		  secure_mode(false),
-		  startup_params{},
-		  configfiles{}
+	        : cmdline(cmd),
+	          overwritten_autoexec_section("overwritten-autoexec")
 	{
 		assert(cmdline);
 		startup_params.push_back(cmdline->GetFileName());
@@ -83,6 +82,10 @@ public:
 
 	Section *GetSection(const std::string &section_name) const;
 	Section *GetSectionFromProperty(const char *prop) const;
+
+	void OverwriteAutoexec(const std::string &conf, const std::string &line);
+	const Section_line &GetOverwrittenAutoexecSection() const;
+	const std::string &GetOverwrittenAutoexecConf() const;
 
 	void SetStartUp(void (*_function)(void));
 	void Init() const;

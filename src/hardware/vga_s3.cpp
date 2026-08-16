@@ -30,8 +30,9 @@
 #include "support.h"
 #include "vga.h"
 
-void SVGA_S3_WriteCRTC(io_port_t reg, uint8_t val, io_width_t)
+void SVGA_S3_WriteCRTC(io_port_t reg, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	switch (reg) {
 	case 0x31:	/* CR31 Memory Configuration */
 //TODO Base address
@@ -450,31 +451,131 @@ uint8_t SVGA_S3_ReadCRTC(io_port_t reg, io_width_t)
 	}
 }
 
-void SVGA_S3_WriteSEQ(io_port_t reg, uint8_t val, io_width_t)
+void SVGA_S3_WriteSEQ(io_port_t reg, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	if (reg > 0x8 && vga.s3.pll.lock != 0x6)
 		return;
+
+	// The PLL M value can be programmed with any integer value from 1 to
+	// 127. The binary equivalent of this value is programmed in bits 6-0 of
+	// SR11 for the MCLK and in bits 6-0 of SR13 for the DCLK.
+	auto to_ppl_m = [](const uint8_t val) -> uint8_t {
+		return val & 0b0111'1111;
+	};
+
+	// The PLL N value can be programmed with any integer value from 1
+	// to 31. The binary equivalent of this value is programmed in bits
+	// 4-0 of SR10 for the MCLK and in bits 4-0 of SR12 for the DCLK.
+	auto to_ppl_n = [](const uint8_t val) -> uint8_t {
+		return val & 0b0001'1111;
+	};
+
+	// The PLL R value is a 2-bit range value that can be programmed with
+	// any integer value from 0 to 3. The R value is programmed in bits 6-5
+	// of SR 10 for MCLK and bits 6-5 of SR12 for DCLK.
+	auto to_ppl_r = [](const uint8_t val) -> uint8_t {
+		return (val & 0b0110'0000) >> 5;
+	};
+
 	switch (reg) {
-	case 0x08:
+	case 0x08: // Register lock / unlock
 		vga.s3.pll.lock=val;
 		break;
-	case 0x10:		/* Memory PLL Data Low */
-		vga.s3.mclk.n = (val & 0b000'11111);
-		vga.s3.mclk.r = (val & 0b111'00000) >> 5;
+	case 0x10: // Memory PLL Data Low
+		vga.s3.mclk.n = to_ppl_n(val);
+		vga.s3.mclk.r = to_ppl_r(val);
 		break;
-	case 0x11:		/* Memory PLL Data High */
-		vga.s3.mclk.m=val & 0x7f;
+	case 0x11: // Memory PLL Data High
+		vga.s3.mclk.m = to_ppl_m(val);
 		break;
-	case 0x12:		/* Video PLL Data Low */
-		vga.s3.clk[3].n = (val & 0b000'11111);
-		vga.s3.clk[3].r = (val & 0b111'00000) >> 5;
+	case 0x12: // Video PLL Data Low
+		vga.s3.clk[3].n = to_ppl_n(val);
+		vga.s3.clk[3].r = to_ppl_r(val);
 		break;
-	case 0x13:		/* Video PLL Data High */
-		vga.s3.clk[3].m=val & 0x7f;
+	case 0x13: // Video PLL Data High
+		vga.s3.clk[3].m = to_ppl_m(val);
 		break;
-	case 0x15:
-		vga.s3.pll.cmd=val;
-		VGA_StartResize();
+	case 0x15: // CLKSYN Control 2 Register
+		vga.s3.pll.control_2 = val;
+
+		/*
+		CLKSYN Control 2 (SR15), pp 130
+		~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		Bit 0 MFRQ EN - Enable new MCLK frequency load
+		0 = Register bit clear
+		1 = Load new MCLK frequency
+
+		When new MCLK PLL values are programmed, this bit can be set to
+		1 to load these values in the PLL. The loading may be delayed a
+		small but variable amount of time. This bit should be cleared to
+		0 after loading to prevent repeated loading. Alternately, use
+		bit 5 of this register to produce an immediate load.
+
+		Bit 1 DFRQ EN - Enable new DCLK frequency load
+		0 = Register bit clear
+		1 - Load new DCLK frequency
+
+		When new DCLK PLL values are programmed, this bit can be set to
+		1 to load these values in the PLL. Bits 3-2 of 3C2H must also be
+		set to 11b if they are not already at this value. The loading
+		may be delayed a small but variable amount of time. This bit
+		should be programmed to 1 at power-up to allow loading of the
+		VGA DCLK value and then left at this setting. Use bit 5 of this
+		register to produce an immediate load.
+
+		Bit 2 MCLK OUT - Output internally generated MCLK
+		0 = Pin 147 acts as the STWR strobe
+		1 = Pin 147 outputs the internally generated MCLK
+
+		This is used only for testing.
+
+		Bit 3 VCLK OUT - VCLK direction determined by EVCLK
+
+		0 = Pin 148 outputs the internally generated VCLK regardless of
+		the state of EVCLK
+
+		1 = VCLK direction is determined by the EVCLK signal
+
+		Bit 4 DCLK/2 - Divide DCLK by 2
+		0 = DCLK unchanged
+		1 = Divide DCLK by 2
+
+		Either this bit or bit 6 of this register must be set to 1 for
+		clock doubled RAMDAC op- eration (mode 0001).
+
+		Bit 5 CLK LOAD - MCLK, DCLK load
+		0 = Clock loading is controlled by bits 0 and 1 of this register
+		1 = Load MCLK and DCLK PLL values immediately
+
+		To produce an immediate MCLK and DCLK load, program this bit to
+		1 and then to 0. Bits 3-2 of 3C2H must also then be programmed
+		to 11b to load the DCLK values if they are not already
+		programmed to this value. This register must never be left set
+		to 1.
+
+		Bit 6 DCLK INV - Invert DCLK
+		0 = DCLK unchanged
+		1 = Invert DCLK
+
+		Either this bit or bit 4 of this register must be set to 1 for
+		clock doubled RAMDAC op- eration (mode 0001).
+
+		Bit 7 2 CYC MWR - Enable 2 cycle memory write
+		0 = 3 MCLK memory write
+		1 = 2 MCLK memory write
+
+		Setting this bit to 1 bypasses the VGA logic for linear
+		addressing when bit 7 of SRA is set to 1. This can allow 2 MCLK
+		operation for MCLK frequencies between 55 and 57 MHz.
+		*/
+
+		// Only initiate a mode change if bit 0, 1, or 5 are set
+		if (val & 0b0010'0011)
+			VGA_StartResize();
+		break;
+	case 0x18: // RADAC/CLKSYN Control Register (SR18)
+		vga.s3.pll.control = val;
 		break;
 	default:
 		LOG(LOG_VGAMISC,LOG_NORMAL)("VGA:S3:SEQ:Write to illegal index %2X", static_cast<uint32_t>(reg));
@@ -489,18 +590,20 @@ uint8_t SVGA_S3_ReadSEQ(io_port_t reg, io_width_t)
 		return (reg < 0x1b) ? 0 : static_cast<uint8_t>(reg);
 
 	switch (reg) {
-	case 0x08:		/* PLL Unlock */
+	case 0x08: // PLL Unlock
 		return vga.s3.pll.lock;
-	case 0x10:		/* Memory PLL Data Low */
+	case 0x10: // Memory PLL Data Low
 		return (vga.s3.mclk.r << 5) | vga.s3.mclk.n;
-	case 0x11:		/* Memory PLL Data High */
+	case 0x11: // Memory PLL Data High
 		return vga.s3.mclk.m;
-	case 0x12:		/* Video PLL Data Low */
+	case 0x12: // Video PLL Data Low
 		return (vga.s3.clk[3].r << 5) | vga.s3.clk[3].n;
-	case 0x13:		/* Video Data High */
+	case 0x13: // Video Data High
 		return vga.s3.clk[3].m;
-	case 0x15:
-		return vga.s3.pll.cmd;
+	case 0x15: // CLKSYN Control 2 Register
+		return vga.s3.pll.control_2;
+	case 0x18: // RADAC/CLKSYN Control Register (SR18)
+		return vga.s3.pll.control;
 	default:
 		LOG(LOG_VGAMISC,LOG_NORMAL)("VGA:S3:SEQ:Read from illegal index %2X", static_cast<uint32_t>(reg));
 		return 0;
@@ -517,7 +620,8 @@ uint32_t SVGA_S3_GetClock(void)
 	else
 		clock=1000*S3_CLOCK(vga.s3.clk[clock].m,vga.s3.clk[clock].n,vga.s3.clk[clock].r);
 	/* Check for dual transfer, clock/2 */
-	if (vga.s3.pll.cmd & 0x10) clock/=2;
+	if (vga.s3.pll.control_2 & 0x10)
+		clock /= 2;
 	return clock;
 }
 
@@ -568,6 +672,12 @@ void filter_s3_modes_to_oem_only()
 	        {hash(1152,  864, M_LIN24),                        mb_4 | mb_8},
 	        {hash(1152,  864, M_LIN32),                        mb_4 | mb_8},
 
+	        {hash(1280,  960,  M_LIN4),          mb_1 | mb_2 | mb_4 | mb_8},
+	        {hash(1280,  960,  M_LIN8),                 mb_2 | mb_4 | mb_8},
+	        {hash(1280,  960, M_LIN16),                        mb_4 | mb_8},
+	        {hash(1280,  960, M_LIN24),                        mb_4 | mb_8},
+	        {hash(1280,  960, M_LIN32),                               mb_8},
+
 	        {hash(1280, 1024,  M_LIN4),          mb_1 | mb_2 | mb_4 | mb_8},
 	        {hash(1280, 1024,  M_LIN8),                 mb_2 | mb_4 | mb_8},
 	        {hash(1280, 1024, M_LIN16),                        mb_4 | mb_8},
@@ -590,9 +700,14 @@ void filter_s3_modes_to_oem_only()
 	case 8192 * 1024: dram_size = mb_8; break;
 	}
 	auto mode_not_allowed = [&](const VideoModeBlock &m) -> bool {
-		// Allows all the standard VESA modes, which start prior to 0x120
-		if (m.mode < 0x120)
+		// Allow all the standard VESA modes, which start prior to 0x120...
+		if (m.mode < 0x120) {
+			// ...except for 320x200x15/16/24 which were rarely supported until late 90s.
+			if (m.mode == 0x10d || m.mode == 0x10e || m.mode == 0x10f)
+				return true;
+
 			return false;
+		}
 
 		// Allow all modes that aren't part of the VESA VGA set (CGA/EGA/Hercules/etc)
 		constexpr auto vesa_vga_modes = M_LIN4 | M_LIN8 | M_LIN15 | M_LIN16 | M_LIN24 | M_LIN32;
@@ -610,7 +725,9 @@ void filter_s3_modes_to_oem_only()
 		return !is_an_oem_mode;
 	};
 	// We don't need the return value
-	(void)std::remove_if(ModeList_VGA.begin(), ModeList_VGA.end(), mode_not_allowed);
+	ModeList_VGA.erase(std::remove_if(ModeList_VGA.begin(),
+	                                  ModeList_VGA.end(), mode_not_allowed),
+	                   ModeList_VGA.end());
 }
 
 void SVGA_Setup_S3Trio(void)
@@ -656,17 +773,15 @@ void SVGA_Setup_S3Trio(void)
 
 	std::string description = "S3 Trio64 ";
 
-	description += int10.vesa_oldvbe ? "(VESA 1.2)" : "(VESA 2.0)";
+	description += int10.vesa_oldvbe ? "VESA 1.2" : "VESA 2.0";
 
 	if (int10.vesa_mode_preference == VESA_MODE_PREF::COMPATIBLE) {
 		filter_s3_modes_to_oem_only();
-		description += " compatible modes";
-	} else {
-		description += " all modes";
+		description += " compatible";
 	}
-
 	if (int10.vesa_nolfb)
-		description += " and LFB disabled";
+		description += " without LFB";
 
-	VGA_LogInitialization(description.c_str(), ram_type.c_str());
+	const auto num_modes = ModeList_VGA.size();
+	VGA_LogInitialization(description.c_str(), ram_type.c_str(), num_modes);
 }

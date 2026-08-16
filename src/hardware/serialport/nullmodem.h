@@ -51,9 +51,11 @@ public:
 	void setDTR(bool val);
 	void handleUpperEvent(uint16_t type);
 
+	SocketTypesE socketType = SOCKET_TYPE_TCP;
+
 private:
-	TCPServerSocket *serversocket = nullptr;
-	TCPClientSocket *clientsocket = nullptr;
+	NETServerSocket *serversocket = nullptr;
+	NETClientSocket *clientsocket = nullptr;
 
 	uint16_t serverport = 0; // we are a server if this is nonzero
 	uint16_t clientport = 0;
@@ -68,7 +70,7 @@ private:
 #define N_RX_DISC		4
 
 	bool doReceive();
-	bool ClientConnect(TCPClientSocket* newsocket);
+	bool ClientConnect(NETClientSocket *newsocket);
 	bool ServerListen();
 	bool ServerConnect();
     void Disconnect();

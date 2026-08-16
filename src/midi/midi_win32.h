@@ -36,12 +36,15 @@
 
 class MidiHandler_win32 final : public MidiHandler {
 private:
-	HMIDIOUT m_out;
-	MIDIHDR m_hdr;
-	HANDLE m_event;
+	HMIDIOUT m_out = nullptr;
+	MIDIHDR m_hdr = {};
+	HANDLE m_event = nullptr;
 	bool isOpen;
 public:
 	MidiHandler_win32() : MidiHandler(), isOpen(false) {}
+	
+	MidiHandler_win32(const MidiHandler_win32&) = delete;
+	MidiHandler_win32& operator=(const MidiHandler_win32&) = delete;
 
 	const char *GetName() const override { return "win32"; }
 

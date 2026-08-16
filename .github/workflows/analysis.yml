@@ -2,6 +2,10 @@ name: Code analysis
 
 on: [push, pull_request]
 
+concurrency: 
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CCACHE_DIR:      "/dev/shm/.ccache"
   CCACHE_MAXSIZE:  "64M"
@@ -13,11 +17,8 @@ jobs:
     runs-on: ubuntu-20.04
     if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier', github.actor) == false
     steps:
-      - name: Checkout repository and submodules
+      - name: Checkout repository
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
-
       - run:  sudo apt-get update
       - name: Run shellcheck
         run:  ./scripts/verify-bash.sh
@@ -32,7 +33,6 @@ jobs:
           sudo apt-get install ruby-full
           ruby --version
           sudo gem install mdl
-          sudo chmod go-w /usr/share/rust/.cargo/bin
       - name: Run markdownlint
         run:  ./scripts/verify-markdown.sh
       - name: Install appstream-util
@@ -45,11 +45,8 @@ jobs:
     runs-on: ubuntu-20.04
     needs: run_linters
     steps:
-      - name: Checkout repository and submodules
+      - name: Checkout repository
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
-
       - run:  sudo apt-get update
 
       - name: Install dependencies
@@ -83,7 +80,7 @@ jobs:
       - name: Log environment
         run:  ./scripts/log-env.sh
 
-      - run:  meson setup build
+      - run:  meson setup -Dunit_tests=disabled build
 
       - name: Build and run scan-build
         run: |
@@ -138,21 +135,32 @@ jobs:
           # UndefinedBehaviorSanitizer at the same time.
           # See Clang manual to learn more.
           - name: Clang undefined+address sanitizer
-            build_flags: -Db_sanitize=address,undefined --native-file=.github/meson/native-clang.ini -Duse_mt32emu=false
+            build_flags: >-
+              --native-file=.github/meson/native-clang.ini
+              -Db_sanitize=address,undefined
+              -Dc_args=-fsanitize-recover=all
+              -Dcpp_args=-fsanitize-recover=all
+              -Db_asneeded=true
+              -Db_lundef=false
+              -Ddefault_library=static
+              --wrap-mode=forcefallback
+              -Dfluidsynth:try-static-deps=true 
             logs: clang-uasan-logs
             max_issues: 4
     steps:
-      - name: Checkout repository and submodules
+      - name: Checkout repository
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
-
       - run:  sudo apt-get update
 
       - name: Install dependencies
         run: |
           sudo apt-get install $(cat .github/packages/ubuntu-20.04-apt.txt)
           sudo pip3 install --upgrade meson ninja
+
+      # Workaround frequent HTTPS-based connectivity issues
+      # https://gitlab.freedesktop.org/freedesktop/freedesktop/-/issues/407
+      - name:  Fetch the libffi subproject for Glib
+        run: ./scripts/fetch-libffi-subproject.sh
 
       - name:  Prepare compiler cache
         id:    prep-ccache
@@ -179,7 +187,7 @@ jobs:
       - name: Log environment
         run:  ./scripts/log-env.sh
 
-      - run:  meson setup ${{ matrix.conf.build_flags }} build
+      - run:  meson setup -Dunit_tests=disabled ${{ matrix.conf.build_flags }} build
 
       - run:  ninja -C build
 

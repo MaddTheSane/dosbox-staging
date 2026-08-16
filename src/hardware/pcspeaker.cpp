@@ -27,9 +27,10 @@
 #include <limits>
 
 #include "dc_silencer.h"
-#include "timer.h"
-#include "setup.h"
 #include "pic.h"
+#include "setup.h"
+#include "support.h"
+#include "timer.h"
 
 #define SPKR_ENTRIES 1024
 
@@ -57,6 +58,8 @@ constexpr double AMPLITUDE_NEGATIVE = std::numeric_limits<int16_t>::min() *
 constexpr double AMPLITUDE_NEUTRAL = (AMPLITUDE_POSITIVE + AMPLITUDE_NEGATIVE) / 2.0;
 constexpr double AMPLITUDE_SQUARE_WAVE_REDUCER = AMPLITUDE_MINUS_5DB / 2.0;
 
+constexpr int IDLE_GRACE_TIME_MS = 100;
+
 #define DC_SILENCER_WAVES   5u
 #define DC_SILENCER_WAVE_HZ 30u
 
@@ -70,14 +73,14 @@ struct DelayEntry {
 static struct {
 	DelayEntry entries[SPKR_ENTRIES] = {};
 	DCSilencer dc_silencer = {};
-	MixerChannel *chan = nullptr;
+	mixer_channel_t chan = nullptr;
 	SPKR_MODES prev_mode = SPKR_OFF;
 	SPKR_MODES mode = SPKR_OFF;
-	uint32_t prev_pit_mode = 3;
-	uint32_t pit_mode = 3;
-	uint32_t rate = 0u;
-	uint32_t min_tr = 0u;
-	uint32_t used = 0u;
+	int prev_pit_mode = 3;
+	int pit_mode = 3;
+	int rate = 0;
+	int min_tr = 0;
+	int used = 0;
 	double pit_last = 0.0;
 	double pit_max = PERIOD_OF_1K_PIT_TICKS * 1320.0;
 	double pit_half = pit_max / 2.0;
@@ -89,7 +92,7 @@ static struct {
 	double last_index = 0.0;
 	int16_t last_played_sample = 0;
 	uint16_t prev_pos = 0u;
-	uint8_t idle_countdown = 0u;
+	int idle_countdown = IDLE_GRACE_TIME_MS;
 	bool neutralize_dc_offset = true;
 } spkr;
 
@@ -258,7 +261,7 @@ static void ForwardPIT(double newindex)
 }
 
 // PIT-mode activation
-void PCSPEAKER_SetCounter(uint32_t cntr, uint32_t mode)
+void PCSPEAKER_SetCounter(int cntr, int mode)
 {
 	if (!SpeakerExists())
 		return;
@@ -334,7 +337,7 @@ static double NeutralLastPitOr(double fallback)
 }
 
 // PWM-mode activation
-void PCSPEAKER_SetType(uint32_t mode)
+void PCSPEAKER_SetType(int mode)
 {
 	if (!SpeakerExists())
 		return;
@@ -373,14 +376,12 @@ static void PlayOrFadeout(const uint16_t speaker_movements,
                           size_t requested_samples,
                           int16_t *buffer)
 {
-	constexpr uint8_t grace_time_ms = 100u;
-	static_assert(grace_time_ms > 0,
-	              "Algorithm depends on a non-zero grace time");
-
 	if (speaker_movements && requested_samples) {
-		spkr.idle_countdown = grace_time_ms;
+		static_assert(IDLE_GRACE_TIME_MS > 0,
+		              "Algorithm depends on a non-zero grace time");
+		spkr.idle_countdown = IDLE_GRACE_TIME_MS;
 		spkr.dc_silencer.Reset();
-	} else if (spkr.idle_countdown) {
+	} else if (spkr.idle_countdown > 0) {
 		spkr.idle_countdown--;
 		spkr.last_played_sample = buffer[requested_samples - 1];
 	} else if (!spkr.dc_silencer.Generate(spkr.last_played_sample,
@@ -388,7 +389,7 @@ static void PlayOrFadeout(const uint16_t speaker_movements,
 		spkr.chan->Enable(false);
 	}
 
-	spkr.chan->AddSamples_m16(requested_samples, buffer);
+	spkr.chan->AddSamples_m16(check_cast<uint16_t>(requested_samples), buffer);
 }
 
 static void PCSPEAKER_CallBack(uint16_t len)
@@ -465,8 +466,6 @@ static void PCSPEAKER_CallBack(uint16_t len)
 		spkr.chan->AddSamples_m16(len, buffer);
 }
 class PCSPEAKER final : public Module_base {
-private:
-	MixerObject MixerChan = {};
 public:
 	PCSPEAKER(Section *configuration) : Module_base(configuration)
 	{
@@ -485,12 +484,12 @@ public:
 		else
 			spkr.neutralize_dc_offset = (dc_offset_pref == "true");
 
-		spkr.dc_silencer.Configure(spkr.rate, DC_SILENCER_WAVES,
-		                           DC_SILENCER_WAVE_HZ);
+		spkr.dc_silencer.Configure(static_cast<uint32_t>(spkr.rate),
+		                           DC_SILENCER_WAVES, DC_SILENCER_WAVE_HZ);
 
 		spkr.min_tr = (PIT_TICK_RATE + spkr.rate / 2 - 1) / (spkr.rate / 2);
 		/* Register the sound channel */
-		spkr.chan = MixerChan.Install(&PCSPEAKER_CallBack, spkr.rate, "SPKR");
+		spkr.chan = MIXER_AddChannel(&PCSPEAKER_CallBack, spkr.rate, "SPKR");
 		spkr.chan->SetPeakAmplitude(
 		        static_cast<uint32_t>(AMPLITUDE_POSITIVE));
 	}

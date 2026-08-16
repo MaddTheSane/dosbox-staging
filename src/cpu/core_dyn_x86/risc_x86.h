@@ -39,14 +39,12 @@ static struct {
 
 class GenReg {
 public:
-	GenReg(Bit8u _index) {
-		index=_index;
-		notusable=false;dynreg=0;
-	}
-	DynReg  * dynreg;
-	Bitu last_used;			//Keeps track of last assigned regs 
-    Bit8u index;
-	bool notusable;
+	Bit8u index = 0;
+	DynReg  * dynreg = nullptr;
+	Bitu last_used = 0;			//Keeps track of last assigned regs 
+	bool notusable = false;
+
+	GenReg(Bit8u _index) : index(_index) {}
 	void Load(DynReg * _dynreg,bool stale=false) {
 		if (!_dynreg) return;
 		if (GCC_UNLIKELY((Bitu)dynreg)) Clear();
@@ -72,14 +70,16 @@ public:
 			Save();
 		}
 		dynreg->flags&=~(DYNFLG_CHANGED|DYNFLG_ACTIVE);
-		dynreg->genreg=0;dynreg=0;
+		dynreg->genreg = nullptr;
+		dynreg = nullptr;
 	}
 	void Clear(void) {
 		if (!dynreg) return;
 		if (dynreg->flags&DYNFLG_CHANGED) {
 			Save();
 		}
-		dynreg->genreg=0;dynreg=0;
+		dynreg->genreg = nullptr;
+		dynreg = nullptr;
 	}
 };
 
@@ -213,7 +213,8 @@ static void gen_setupreg(DynReg * dnew,DynReg * dsetup) {
 	/* Not the same genreg must be wrong */
 	if (dnew->genreg) {
 		/* Check if the genreg i'm changing is actually linked to me */
-		if (dnew->genreg->dynreg==dnew) dnew->genreg->dynreg=0;
+		if (dnew->genreg->dynreg == dnew)
+			dnew->genreg->dynreg = nullptr;
 	}
 	dnew->genreg=dsetup->genreg;
 	if (dnew->genreg) dnew->genreg->dynreg=dnew;
@@ -294,7 +295,7 @@ static void gen_reinit(void) {
 	x86gen.last_used=0;
 	x86gen.flagsactive=false;
 	for (Bitu i=0;i<X86_REGS;i++) {
-		x86gen.regs[i]->dynreg=0;
+		x86gen.regs[i]->dynreg = nullptr;
 	}
 }
 
@@ -318,6 +319,7 @@ static void gen_mov_host(void * data,DynReg * dr1,Bitu size,Bitu di1=0) {
 	switch (size) {
 	case 1:cache_addb(0x8a);break;	//mov byte
 	case 2:cache_addb(0x66);		//mov word
+	[[fallthrough]];
 	case 4:cache_addb(0x8b);break;	//mov
 	default:
 		IllegalOption("gen_mov_host");

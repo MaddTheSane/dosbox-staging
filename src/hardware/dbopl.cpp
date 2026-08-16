@@ -383,7 +383,7 @@ void Operator::UpdateRates( const Chip* chip ) {
 	UpdateRelease( chip );
 }
 
-INLINE Bit32s Operator::RateForward( Bit32u add ) {
+inline Bit32s Operator::RateForward( Bit32u add ) {
 	rateIndex += add;
 	Bit32s ret = rateIndex >> RATE_SH;
 	rateIndex = rateIndex & RATE_MASK;
@@ -428,7 +428,7 @@ Bits Operator::TemplateVolume(  ) {
 			return vol;
 		}
 		// In sustain phase, but not sustaining, do regular release
-		FALLTHROUGH;
+		[[fallthrough]];
 	case RELEASE:
 		vol += RateForward( releaseAdd );;
 		if ( GCC_UNLIKELY(vol >= ENV_MAX) ) {
@@ -450,12 +450,12 @@ static const VolumeHandler VolumeHandlerTable[5] = {
 	&Operator::TemplateVolume< Operator::ATTACK >
 };
 
-INLINE Bitu Operator::ForwardVolume() {
+inline Bitu Operator::ForwardVolume() {
 	return currentLevel + (this->*volHandler)();
 }
 
 
-INLINE Bitu Operator::ForwardWave() {
+inline Bitu Operator::ForwardWave() {
 	waveIndex += waveCurrent;	
 	return waveIndex >> WAVE_SH;
 }
@@ -521,7 +521,7 @@ void Operator::WriteE0( const Chip* chip, Bit8u val ) {
 	if ( !(regE0 ^ val) ) 
 		return;
 	//in opl3 mode you can always selet 7 waveforms regardless of waveformselect
-	Bit8u waveForm = val & ( ( 0x3 & chip->waveFormMask ) | (0x7 & chip->opl3Active ) );
+	const Bit8u waveForm = val & ( ( 0x3 & chip->waveFormMask ) | (0x7 & chip->opl3Active ) );
 	regE0 = val;
 #if ( DBOPL_WAVE == WAVE_HANDLER )
 	waveHandler = WaveHandlerTable[ waveForm ];
@@ -532,12 +532,12 @@ void Operator::WriteE0( const Chip* chip, Bit8u val ) {
 #endif
 }
 
-INLINE void Operator::SetState( Bit8u s ) {
+inline void Operator::SetState( Bit8u s ) {
 	state = s;
 	volHandler = VolumeHandlerTable[ s ];
 }
 
-INLINE bool Operator::Silent() const {
+inline bool Operator::Silent() const {
 	if ( !ENV_SILENT( totalLevel + volume ) )
 		return false;
 	if ( !(rateZero & ( 1 << state ) ) )
@@ -545,7 +545,7 @@ INLINE bool Operator::Silent() const {
 	return true;
 }
 
-INLINE void Operator::Prepare( const Chip* chip )  {
+inline void Operator::Prepare( const Chip* chip )  {
 	currentLevel = totalLevel + (chip->tremoloValue & tremoloMask);
 	waveCurrent = waveAdd;
 	if ( vibStrength >> chip->vibratoShift ) {
@@ -581,7 +581,7 @@ void Operator::KeyOff( Bit8u mask ) {
 	}
 }
 
-INLINE Bits Operator::GetWave( Bitu index, Bitu vol ) {
+inline Bits Operator::GetWave( Bitu index, Bitu vol ) {
 #if ( DBOPL_WAVE == WAVE_HANDLER )
 	return waveHandler( index, vol << ( 3 - ENV_EXTRA ) );
 #elif ( DBOPL_WAVE == WAVE_TABLEMUL )
@@ -598,7 +598,7 @@ INLINE Bits Operator::GetWave( Bitu index, Bitu vol ) {
 #endif
 }
 
-Bits INLINE Operator::GetSample( Bits modulation ) {
+Bits inline Operator::GetSample( Bits modulation ) {
 	Bitu vol = ForwardVolume();
 	if ( ENV_SILENT( vol ) ) {
 		//Simply forward the wave
@@ -812,7 +812,7 @@ void Channel::UpdateSynth( const Chip* chip ) {
 }
 
 template< bool opl3Mode>
-INLINE void Channel::GeneratePercussion( Chip* chip, Bit32s* output ) {
+inline void Channel::GeneratePercussion( Chip* chip, Bit32s* output ) {
 	Channel* chan = this;
 
 	//BassDrum
@@ -1004,7 +1004,13 @@ Channel *Channel::BlockTemplate(Chip *chip, const uint16_t samples, Bit32s *outp
 	return 0;
 }
 
-INLINE Bit32u Chip::ForwardNoise() {
+/*
+        Chip
+*/
+Chip::Chip(bool _opl3Mode) : opl3Mode(_opl3Mode)
+{}
+
+inline Bit32u Chip::ForwardNoise() {
 	noiseCounter += noiseAdd;
 	Bitu count = noiseCounter >> LFO_SH;
 	noiseCounter &= ((1<<LFO_SH) - 1);
@@ -1016,11 +1022,13 @@ INLINE Bit32u Chip::ForwardNoise() {
 	return noiseValue;
 }
 
-INLINE Bit32u Chip::ForwardLFO(const uint16_t samples)
+inline Bit32u Chip::ForwardLFO(const uint16_t samples)
 {
 	// Current vibrato value, runs 4x slower than tremolo
-	vibratoSign = (VibratoTable[vibratoIndex >> 2]) >> 7;
-	vibratoShift = (VibratoTable[vibratoIndex >> 2] & 7) + vibratoStrength;
+	const auto vibrato = VibratoTable[vibratoIndex >> 2];
+
+	vibratoSign = (vibrato < 0) ? -1 : 0;
+	vibratoShift = (vibrato & 7) + vibratoStrength;
 	tremoloValue = TremoloTable[tremoloIndex] >> tremoloStrength;
 
 	//Check hom many samples there can be done before the value changes
@@ -1133,7 +1141,8 @@ void Chip::WriteReg( Bit32u reg, Bit8u val ) {
 	switch ( (reg & 0xf0) >> 4 ) {
 	case 0x00 >> 4:
 		if ( reg == 0x01 ) {
-			waveFormMask = ( val & 0x20 ) ? 0x7 : 0x0; 
+			//When the chip is running in opl3 compatible mode, you can't actually disable the waveforms
+			waveFormMask = ( (val & 0x20) || opl3Mode ) ? 0x7 : 0x0; 
 		} else if ( reg == 0x104 ) {
 			//Only detect changes in lowest 6 bits
 			if ( !((reg104 ^ val) & 0x3f) )
@@ -1538,7 +1547,7 @@ void Handler::WriteReg( Bit32u addr, Bit8u val ) {
 	chip.WriteReg( addr, val );
 }
 
-void Handler::Generate(MixerChannel *chan, uint16_t samples)
+void Handler::Generate(mixer_channel_t &chan, uint16_t samples)
 {
 	Bit32s buffer[512 * 2];
 	if (GCC_UNLIKELY(samples > 512))

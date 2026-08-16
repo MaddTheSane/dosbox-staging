@@ -30,12 +30,14 @@
 #include "dos_system.h"
 #include "mem.h"
 
+#define EXT_DEVICE_BIT 0x0200
+
 #ifdef _MSC_VER
 #pragma pack (1)
 #endif
 struct CommandTail{
-  Bit8u count;				/* number of bytes returned */
-  char buffer[127];			 /* the buffer itself */
+	uint8_t count = 0;     /* number of bytes returned */
+	char buffer[127] = {}; /* the buffer itself */
 } GCC_ATTRIBUTE(packed);
 #ifdef _MSC_VER
 #pragma pack ()
@@ -156,7 +158,8 @@ bool DOS_SetFileAttr(char const * const name,Bit16u attr);
 bool DOS_IOCTL(void);
 bool DOS_GetSTDINStatus();
 Bit8u DOS_FindDevice(char const * name);
-void DOS_SetupDevices(void);
+void DOS_SetupDevices();
+void DOS_ShutDownDevices();
 
 /* Execute and new process creation */
 bool DOS_NewPSP(Bit16u pspseg,Bit16u size);
@@ -218,7 +221,7 @@ enum {
 };
 
 
-static INLINE Bit16u long2para(Bit32u size) {
+static inline Bit16u long2para(Bit32u size) {
 	if (size>0xFFFF0) return 0xffff;
 	if (size&0xf) return (Bit16u)((size>>4)+1);
 	else return (Bit16u)(size>>4);
@@ -742,11 +745,12 @@ struct DOS_Block {
 		Bit16u dpb; //Fake Disk parameter system using only the first entry so the drive letter matches
 	} tables;
 	Bit16u loaded_codepage;
+	uint16_t dcp;
 };
 
 extern DOS_Block dos;
 
-static INLINE Bit8u RealHandle(Bit16u handle) {
+static inline Bit8u RealHandle(Bit16u handle) {
 	DOS_PSP psp(dos.psp());	
 	return psp.GetFileHandle(handle);
 }

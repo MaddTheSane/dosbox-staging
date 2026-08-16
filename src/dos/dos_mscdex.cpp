@@ -204,11 +204,11 @@ private:
 	} TDriveInfo;
 
 	Bit16u            defaultBufSeg;
-	TDriveInfo        dinfo[MSCDEX_MAX_DRIVES];
-	CDROM_Interface * cdrom[MSCDEX_MAX_DRIVES];
 	
 public:
 	Bit16u rootDriverHeaderSeg;
+	TDriveInfo        dinfo[MSCDEX_MAX_DRIVES];
+	CDROM_Interface * cdrom[MSCDEX_MAX_DRIVES];
 
 	bool ChannelControl(Bit8u subUnit, TCtrl ctrl);
 	bool GetChannelControl(Bit8u subUnit, TCtrl &ctrl);
@@ -217,8 +217,8 @@ public:
 CMscdex::CMscdex()
 	: numDrives(0),
 	  defaultBufSeg(0),
-	  cdrom{nullptr},
-	  rootDriverHeaderSeg(0)
+	  rootDriverHeaderSeg(0),
+	  cdrom{nullptr}
 {
 	memset(dinfo, 0, sizeof(dinfo));
 }
@@ -911,6 +911,25 @@ bool CMscdex::GetChannelControl(Bit8u subUnit, TCtrl& ctrl) {
 static CMscdex* mscdex = 0;
 static PhysPt curReqheaderPtr = 0;
 
+bool GetMSCDEXDrive(unsigned char drive_letter,CDROM_Interface **_cdrom) {
+	Bitu i;
+
+	if (mscdex == NULL) {
+		if (_cdrom) *_cdrom = NULL;
+		return false;
+	}
+
+	for (i=0;i < MSCDEX_MAX_DRIVES;i++) {
+		if (mscdex->cdrom[i] == NULL) continue;
+		if (mscdex->dinfo[i].drive == drive_letter) {
+			if (_cdrom) *_cdrom = mscdex->cdrom[i];
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static Bit16u MSCDEX_IOCTL_Input(PhysPt buffer,Bit8u drive_unit) {
 	Bit8u ioctl_fct = mem_readb(buffer);
 	MSCDEX_LOG("MSCDEX: IOCTL INPUT Subfunction %02X",ioctl_fct);
@@ -1167,12 +1186,8 @@ static bool MSCDEX_Handler(void) {
 			}
 			reg_al = 0xff;
 			return true;
-		} else {
-			LOG(LOG_MISC,LOG_ERROR)("NETWORK REDIRECTOR USED!!!");
-			reg_ax = 0x49;//NETWERK SOFTWARE NOT INSTALLED
-			CALLBACK_SCF(true);
-			return true;
-		}
+		} else
+			return false;
 	}
 
 	if (reg_ah!=0x15) return false;		// not handled here, continue chain

@@ -13,5 +13,8 @@ libdecoders = static_library('decoders', libdecoders_sources,
                              dependencies : [
                                sdl2_dep,
                                opus_dep,
+                               libghc_dep,
                                libloguru_dep,
                              ])
+
+libdecoders_dep = declare_dependency(link_with : libdecoders)

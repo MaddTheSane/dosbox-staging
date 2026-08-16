@@ -26,6 +26,7 @@
 #include "mixer.h"
 #include "pic.h"
 #include "setup.h"
+#include "support.h"
 
 // Disney Sound Source Constants
 constexpr uint16_t DISNEY_BASE = 0x0378;
@@ -43,8 +44,6 @@ struct dac_channel {
 	bool speedcheck_init = false;
 };
 
-using mixer_channel_ptr_t = std::unique_ptr<MixerChannel, decltype(&MIXER_DelChannel)>;
-
 struct Disney {
 	IO_ReadHandleObject read_handler{};
 	IO_WriteHandleObject write_handler{};
@@ -57,7 +56,7 @@ struct Disney {
 	dac_channel da[2] = {};
 
 	Bitu last_used = 0;
-	mixer_channel_ptr_t chan{nullptr, MIXER_DelChannel};
+	mixer_channel_t chan = nullptr;
 	bool stereo = false;
 
 	// For mono-output, the analysis step points the leader to the channel
@@ -159,11 +158,12 @@ static void DISNEY_analyze(Bitu channel){
 			cch->speedcheck_last = current;
 			break;
 		}
-		cch->speedcheck_sum += current - cch->speedcheck_last;
+		const auto speed_delta = current - cch->speedcheck_last;
+		cch->speedcheck_sum += speed_delta;
 		// LOG_MSG("t=%f",current - cch->speedcheck_last);
 
 		// sanity checks (printer...)
-		if ((current - cch->speedcheck_last) < 0.01f || (current - cch->speedcheck_last) > 2)
+		if (speed_delta < 0.01 || speed_delta > 2)
 			cch->speedcheck_failed = true;
 
 		// if both are failed we are back at start
@@ -181,8 +181,10 @@ static void DISNEY_analyze(Bitu channel){
 	}
 }
 
-static void disney_write(io_port_t port, uint8_t val, io_width_t)
+static void disney_write(io_port_t port, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
+
 	// LOG_MSG("write disney time %f addr%x val %x",PIC_FullIndex(),port,val);
 	disney.last_used = PIC_Ticks;
 	switch (port - DISNEY_BASE) {
@@ -303,7 +305,7 @@ static void DISNEY_CallBack(uint16_t len) {
 		return;
 
 	// get the smaller used
-	Bitu real_used;
+	uint16_t real_used;
 	if (disney.stereo) {
 		real_used = disney.da[0].used;
 		if(disney.da[1].used < real_used) real_used = disney.da[1].used;
@@ -367,7 +369,7 @@ static void DISNEY_CallBack(uint16_t len) {
 	}
 }
 
-static void DISNEY_ShutDown(MAYBE_UNUSED Section *sec)
+static void DISNEY_ShutDown([[maybe_unused]] Section *sec)
 {
 	DEBUG_LOG_MSG("DISNEY: Shutting down");
 
@@ -394,10 +396,7 @@ void DISNEY_Init(Section* sec) {
 		return;
 
 	// Setup the mixer callback
-	disney.chan = mixer_channel_ptr_t(MIXER_AddChannel(DISNEY_CallBack,
-	                                                   10000, "DISNEY"),
-	                                  MIXER_DelChannel);
-	assert(disney.chan);
+	disney.chan = MIXER_AddChannel(DISNEY_CallBack, 10000, "DISNEY");
 
 	// Register port handlers for 8-bit IO
 	disney.write_handler.Install(DISNEY_BASE, disney_write, io_width_t::byte, 3);

@@ -140,8 +140,9 @@ static uint8_t SERIAL_Read(io_port_t port, io_width_t)
 #endif
 	return retval;
 }
-static void SERIAL_Write(io_port_t port, uint8_t val, io_width_t)
+static void SERIAL_Write(io_port_t port, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	uint32_t i;
 	const uint8_t offset_type = static_cast<uint8_t>(port) & 0x7;
 	switch(port&0xff8) {
@@ -1307,10 +1308,14 @@ public:
 			// detect the type
 			if (type=="dummy") {
 				serialports[i] = new CSerialDummy (i, &cmd);
+				serialports[i]->serialType = SERIAL_PORT_TYPE::DUMMY;
+				cmd.GetStringRemain(serialports[i]->commandLineString);
 			}
-#ifdef DIRECTSERIAL_AVAILIBLE
+#ifdef C_DIRECTSERIAL
 			else if (type=="directserial") {
 				serialports[i] = new CDirectSerial (i, &cmd);
+				serialports[i]->serialType = SERIAL_PORT_TYPE::DIRECT_SERIAL;
+				cmd.GetStringRemain(serialports[i]->commandLineString);
 				if (!serialports[i]->InstallationSuccessful)  {
 					// serial port name was wrong or already in use
 					delete serialports[i];
@@ -1321,6 +1326,8 @@ public:
 #if C_MODEM
 			else if(type=="modem") {
 				serialports[i] = new CSerialModem (i, &cmd);
+				serialports[i]->serialType = SERIAL_PORT_TYPE::MODEM;
+				cmd.GetStringRemain(serialports[i]->commandLineString);
 				if (!serialports[i]->InstallationSuccessful)  {
 					delete serialports[i];
 					serialports[i] = NULL;
@@ -1328,6 +1335,8 @@ public:
 			}
 			else if(type=="nullmodem") {
 				serialports[i] = new CNullModem (i, &cmd);
+				serialports[i]->serialType = SERIAL_PORT_TYPE::NULL_MODEM;
+				cmd.GetStringRemain(serialports[i]->commandLineString);
 				if (!serialports[i]->InstallationSuccessful)  {
 					delete serialports[i];
 					serialports[i] = NULL;

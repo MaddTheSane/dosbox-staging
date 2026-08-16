@@ -39,6 +39,8 @@
 #include "fs_utils.h"
 #include "video.h"
 
+#include "../libs/whereami/whereami.h"
+
 char int_to_char(int val)
 {
 	// To handle inbound values cast from unsigned chars, permit a slightly
@@ -238,18 +240,24 @@ char * lowcase(char * str) {
 	return str;
 }
 
-bool ScanCMDBool(char * cmd, char const * const check)
+// Scans the provided command-line string for a '/'flag, removes it (if found),
+// and then returns a bool if it was indeed found and removed.
+bool ScanCMDBool(char *cmd, const char * flag)
 {
 	if (cmd == nullptr)
 		return false;
 	char *scan = cmd;
-	const size_t c_len = strlen(check);
+	const size_t flag_len = strlen(flag);
 	while ((scan = strchr(scan,'/'))) {
-		/* found a / now see behind it */
+		// Found a slash indicating the possible start of a flag.
+		// Now see if it's the flag we're looking for:
 		scan++;
-		if (strncasecmp(scan,check,c_len)==0 && (scan[c_len]==' ' || scan[c_len]=='\t' || scan[c_len]=='/' || scan[c_len]==0)) {
-		/* Found a math now remove it from the string */
-			memmove(scan-1,scan+c_len,strlen(scan+c_len)+1);
+		if (strncasecmp(scan, flag, flag_len) == 0 &&
+		    (scan[flag_len] == ' ' || scan[flag_len] == '\t' ||
+		     scan[flag_len] == '/' || scan[flag_len] == '\0')) {
+
+			// Found a match for the flag, now remove it
+			memmove(scan - 1, scan + flag_len, strlen(scan + flag_len) + 1);
 			trim(scan-1);
 			return true;
 		}
@@ -318,11 +326,11 @@ void E_Exit(const char *format, ...)
 
 /* Overloaded function to handle different return types of POSIX and GNU
  * strerror_r variants */
-MAYBE_UNUSED static const char *strerror_result(int retval, const char *err_str)
+[[maybe_unused]] static const char *strerror_result(int retval, const char *err_str)
 {
 	return retval == 0 ? err_str : nullptr;
 }
-MAYBE_UNUSED static const char *strerror_result(const char *err_str, MAYBE_UNUSED const char *buf)
+[[maybe_unused]] static const char *strerror_result(const char *err_str, [[maybe_unused]] const char *buf)
 {
 	return err_str;
 }
@@ -339,7 +347,7 @@ std::string safe_strerror(int err) noexcept
 #endif
 }
 
-void set_thread_name(MAYBE_UNUSED std::thread& thread, MAYBE_UNUSED const char *name)
+void set_thread_name([[maybe_unused]] std::thread& thread, [[maybe_unused]] const char *name)
 {
 #if defined(HAVE_PTHREAD_SETNAME_NP) && defined(_GNU_SOURCE)
 	assert(strlen(name) < 16);
@@ -364,4 +372,31 @@ bool find_in_case_insensitive(const std::string &needle, const std::string &hays
 		                                   std::toupper(ch2);
 	                            });
 	return (it != haystack.end());
+}
+
+void FILE_closer::operator()(FILE *f) noexcept
+{
+	if (f) {
+		fclose(f);
+	}
+}
+
+FILE_unique_ptr make_fopen(const char *fname, const char *mode)
+{
+	FILE *f = fopen(fname, mode);
+	return f ? FILE_unique_ptr(f) : nullptr;
+}
+
+const std_fs::path &GetExecutablePath()
+{
+	static std_fs::path exe_path;
+	if (exe_path.empty()) {
+		int length = wai_getExecutablePath(nullptr, 0, nullptr);
+		std::string s;
+		s.resize(check_cast<uint16_t>(length));
+		wai_getExecutablePath(&s[0], length, nullptr);
+		exe_path = std_fs::path(s).parent_path();
+		assert(!exe_path.empty());
+	}
+	return exe_path;
 }

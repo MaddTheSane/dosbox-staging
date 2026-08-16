@@ -81,7 +81,7 @@ bool DOS_MakeName(char const * const name,char * const fullname,Bit8u * drive) {
 		return false; 
 	}
 	r=0;w=0;
-	while (name_int[r]!=0 && (r<DOS_PATHLENGTH)) {
+	while (r < DOS_PATHLENGTH && name_int[r] != 0) {
 		c=name_int[r++];
 		if ((c>='a') && (c<='z')) c-=32;
 		else if (c==' ') continue; /* should be separator */
@@ -205,29 +205,17 @@ bool DOS_GetCurrentDir(Bit8u drive,char * const buffer) {
 	strcpy(buffer,Drives[drive]->curdir);
 	return true;
 }
+static bool PathExists(const char *name);
 
 bool DOS_ChangeDir(char const * const dir) {
-	Bit8u drive;char fulldir[DOS_PATHLENGTH];
-	const char * testdir=dir;
-	if (strlen(testdir) && testdir[1]==':') testdir+=2;
-	size_t len=strlen(testdir);
-	if (!len) {
+	uint8_t drive;
+	char fulldir[DOS_PATHLENGTH];
+	const auto exists_and_set = DOS_MakeName(dir, fulldir, &drive) &&
+	                            Drives[drive]->TestDir(fulldir) &&
+	                            safe_strcpy(Drives[drive]->curdir, fulldir);
+	if (!exists_and_set)
 		DOS_SetError(DOSERR_PATH_NOT_FOUND);
-		return false;
-	}
-	if (!DOS_MakeName(dir,fulldir,&drive)) return false;
-	if (safe_strlen(fulldir) && testdir[len-1]=='\\') {
-		DOS_SetError(DOSERR_PATH_NOT_FOUND);
-		return false;
-	}
-	
-	if (Drives[drive]->TestDir(fulldir)) {
-		safe_strcpy(Drives[drive]->curdir, fulldir);
-		return true;
-	} else {
-		DOS_SetError(DOSERR_PATH_NOT_FOUND);
-	}
-	return false;
+	return exists_and_set;
 }
 
 bool DOS_MakeDir(char const * const dir) {
@@ -332,8 +320,13 @@ bool DOS_FindFirst(const char *search, uint16_t attr, bool fcb_findfirst)
 	Bit8u drive;char fullsearch[DOS_PATHLENGTH];
 	char dir[DOS_PATHLENGTH];char pattern[DOS_PATHLENGTH];
 	size_t len = strlen(search);
-	if(len && search[len - 1] == '\\' && !( (len > 2) && (search[len - 2] == ':') && (attr == DOS_ATTR_VOLUME) )) { 
-		//Dark Forces installer, but c:\ is allright for volume labels(exclusively set)
+
+	const bool is_root = (len > 2) && (search[len - 2] == ':') &&
+	                     (attr == DOS_ATTR_VOLUME);
+	const bool is_directory = len && search[len - 1] == '\\';
+	if (!is_root && is_directory) {
+		// Dark Forces installer, but c:\ is allright for volume
+		// labels(exclusively set)
 		DOS_SetError(DOSERR_NO_MORE_FILES);
 		return false;
 	}
@@ -1133,6 +1126,8 @@ Bit8u DOS_FCBWrite(Bit16u seg,Bit16u offset,Bit16u recno) {
 	Bit16u min = (Bit16u)((seconds % 3600)/60);
 	Bit16u sec = (Bit16u)(seconds % 60);
 	time = DOS_PackTime(hour,min,sec);
+
+	assert(fhandle < DOS_FILES);
 	Files[fhandle]->time = time;
 	Files[fhandle]->date = date;
 	fcb.SetSizeDateTime(size,date,time);

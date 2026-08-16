@@ -170,8 +170,10 @@ public:
 		                               // as soon as possible
 
 		Bit32u ip_point=SegPhys(cs)+reg_eip;
-		ip_point=(PAGING_GetPhysicalPage(ip_point)-(phys_page<<12))+(ip_point&0xfff);
-		while (index>=0) {
+		ip_point = (PAGING_GetPhysicalPage(ip_point) -
+		            check_cast<uint32_t>(phys_page << 12)) +
+		           (ip_point & 0xfff);
+		while (index >= 0) {
 			Bitu map=0;
 			// see if there is still some code in the range
 			for (Bitu count=start;count<=end;count++) map+=write_map[count];
@@ -208,15 +210,16 @@ public:
 	// the following functions will clean all cache blocks that are invalid
 	// now due to the write
 
-	void writeb(PhysPt addr, Bitu val) override
+	void writeb(PhysPt addr, const uint8_t val) override
 	{
 		if (GCC_UNLIKELY(old_pagehandler->flags&PFLAG_HASROM)) return;
 		if (GCC_UNLIKELY((old_pagehandler->flags&PFLAG_READABLE)!=PFLAG_READABLE)) {
 			E_Exit("wb:non-readable code page found that is no ROM page");
 		}
 		addr&=4095;
-		if (host_readb(hostmem+addr)==(Bit8u)val) return;
-		host_writeb(hostmem+addr,val);
+		if (host_readb(hostmem + addr) == val)
+			return;
+		host_writeb(hostmem + addr, val);
 		// see if there's code where we are writing to
 		if (!write_map[addr]) {
 			if (active_blocks)
@@ -233,15 +236,16 @@ public:
 		InvalidateRange(addr,addr);
 	}
 
-	void writew(PhysPt addr, Bitu val) override
+	void writew(PhysPt addr, const uint16_t val) override
 	{
 		if (GCC_UNLIKELY(old_pagehandler->flags&PFLAG_HASROM)) return;
 		if (GCC_UNLIKELY((old_pagehandler->flags&PFLAG_READABLE)!=PFLAG_READABLE)) {
 			E_Exit("ww:non-readable code page found that is no ROM page");
 		}
 		addr&=4095;
-		if (host_readw(hostmem+addr)==(Bit16u)val) return;
-		host_writew(hostmem+addr,val);
+		if (host_readw(hostmem + addr) == val)
+			return;
+		host_writew(hostmem + addr, val);
 		// see if there's code where we are writing to
 		if (!read_unaligned_uint16(&write_map[addr])) {
 			if (active_blocks)
@@ -258,15 +262,16 @@ public:
 		InvalidateRange(addr,addr+1);
 	}
 
-	void writed(PhysPt addr, Bitu val) override
+	void writed(PhysPt addr, const uint32_t val) override
 	{
 		if (GCC_UNLIKELY(old_pagehandler->flags&PFLAG_HASROM)) return;
 		if (GCC_UNLIKELY((old_pagehandler->flags&PFLAG_READABLE)!=PFLAG_READABLE)) {
 			E_Exit("wd:non-readable code page found that is no ROM page");
 		}
 		addr&=4095;
-		if (host_readd(hostmem+addr)==(Bit32u)val) return;
-		host_writed(hostmem+addr,val);
+		if (host_readd(hostmem + addr) == val)
+			return;
+		host_writed(hostmem + addr, val);
 		// see if there's code where we are writing to
 		if (!read_unaligned_uint32(&write_map[addr])) {
 			if (active_blocks)
@@ -283,14 +288,15 @@ public:
 		InvalidateRange(addr,addr+3);
 	}
 
-	bool writeb_checked(PhysPt addr, Bitu val) override
+	bool writeb_checked(PhysPt addr, const uint8_t val) override
 	{
 		if (GCC_UNLIKELY(old_pagehandler->flags&PFLAG_HASROM)) return false;
 		if (GCC_UNLIKELY((old_pagehandler->flags&PFLAG_READABLE)!=PFLAG_READABLE)) {
 			E_Exit("cb:non-readable code page found that is no ROM page");
 		}
 		addr&=4095;
-		if (host_readb(hostmem+addr)==(Bit8u)val) return false;
+		if (host_readb(hostmem + addr) == val)
+			return false;
 		// see if there's code where we are writing to
 		if (!write_map[addr]) {
 			if (!active_blocks) {
@@ -313,14 +319,15 @@ public:
 		return false;
 	}
 
-	bool writew_checked(PhysPt addr, Bitu val) override
+	bool writew_checked(PhysPt addr, const uint16_t val) override
 	{
 		if (GCC_UNLIKELY(old_pagehandler->flags&PFLAG_HASROM)) return false;
 		if (GCC_UNLIKELY((old_pagehandler->flags&PFLAG_READABLE)!=PFLAG_READABLE)) {
 			E_Exit("cw:non-readable code page found that is no ROM page");
 		}
 		addr&=4095;
-		if (host_readw(hostmem+addr)==(Bit16u)val) return false;
+		if (host_readw(hostmem + addr) == val)
+			return false;
 		// see if there's code where we are writing to
 		if (!read_unaligned_uint16(&write_map[addr])) {
 			if (!active_blocks) {
@@ -343,14 +350,15 @@ public:
 		return false;
 	}
 
-	bool writed_checked(PhysPt addr, Bitu val) override
+	bool writed_checked(PhysPt addr, const uint32_t val) override
 	{
 		if (GCC_UNLIKELY(old_pagehandler->flags&PFLAG_HASROM)) return false;
 		if (GCC_UNLIKELY((old_pagehandler->flags&PFLAG_READABLE)!=PFLAG_READABLE)) {
 			E_Exit("cd:non-readable code page found that is no ROM page");
 		}
 		addr&=4095;
-		if (host_readd(hostmem+addr)==(Bit32u)val) return false;
+		if (host_readd(hostmem + addr) == val)
+			return false;
 		// see if there's code where we are writing to
 		if (!read_unaligned_uint32(&write_map[addr])) {
 			if (!active_blocks) {
@@ -668,7 +676,7 @@ static void cache_closeblock()
 
 // place an 8bit value into the cache
 
-static INLINE void cache_addb(uint8_t val, const uint8_t *pos)
+static inline void cache_addb(uint8_t val, const uint8_t *pos)
 {
 	*const_cast<uint8_t *>(pos) = val;
 }
@@ -681,7 +689,7 @@ static inline void cache_addb(uint8_t val)
 
 // place a 16bit value into the cache
 
-static INLINE void cache_addw(uint16_t val, const uint8_t *pos)
+static inline void cache_addw(uint16_t val, const uint8_t *pos)
 {
 	write_unaligned_uint16(const_cast<uint8_t *>(pos), val);
 }
@@ -694,7 +702,7 @@ static inline void cache_addw(uint16_t val)
 
 // place a 32bit value into the cache
 
-static INLINE void cache_addd(uint32_t val, const uint8_t *pos)
+static inline void cache_addd(uint32_t val, const uint8_t *pos)
 {
 	write_unaligned_uint32(const_cast<uint8_t *>(pos), val);
 }
@@ -707,7 +715,7 @@ static inline void cache_addd(uint32_t val)
 
 // place a 64bit value into the cache
 
-static INLINE void cache_addq(uint64_t val, const uint8_t *pos)
+static inline void cache_addq(uint64_t val, const uint8_t *pos)
 {
 	write_unaligned_uint64(const_cast<uint8_t *>(pos), val);
 }
@@ -736,6 +744,7 @@ static void cache_block_closing(const uint8_t *block_start, Bitu block_size);
 
 static constexpr size_t cache_code_size = CACHE_TOTAL + CACHE_MAXSIZE + PAGESIZE_TEMP - 1 + PAGESIZE_TEMP;
 static constexpr size_t cache_blocks_total_bytes = CACHE_BLOCKS * sizeof(CacheBlock);
+constexpr bool is_64bit_platform = sizeof(void *) == 8;
 
 static inline void dyn_mem_adjust(void *&ptr, size_t &size)
 {
@@ -748,27 +757,33 @@ static inline void dyn_mem_adjust(void *&ptr, size_t &size)
 	ptr = reinterpret_cast<void *>(p_aligned);
 }
 
-static inline void dyn_mem_set_access(void *ptr, size_t size, const bool execute)
+static inline void dyn_mem_set_access([[maybe_unused]] void *ptr,
+                                      [[maybe_unused]] size_t size,
+                                      [[maybe_unused]] const bool execute)
 {
-	dyn_mem_adjust(ptr, size);
 #if defined(HAVE_PTHREAD_WRITE_PROTECT_NP)
 #if defined(HAVE_BUILTIN_AVAILABLE)
 	if (__builtin_available(macOS 11.0, *))
 #endif
 		pthread_jit_write_protect_np(execute);
+
 #elif defined(HAVE_MPROTECT)
+	dyn_mem_adjust(ptr, size);
 	const int flags = (execute ? PROT_EXEC : PROT_WRITE) | PROT_READ;
-	MAYBE_UNUSED const int mp_res = mprotect(ptr, size, flags);
+	[[maybe_unused]] const int mp_res = mprotect(ptr, size, flags);
 	assert(mp_res == 0);
+
 #elif defined(WIN32)
+	if (CPU_AllowSpeedMods)
+		return; // the cache block is already marked RWX
+	dyn_mem_adjust(ptr, size);
 	DWORD old_protect = 0;
 	const DWORD flags = (execute ? PAGE_EXECUTE_READ : PAGE_READWRITE);
-	MAYBE_UNUSED const BOOL vp_res = VirtualProtect(ptr, size, flags,
-	                                                &old_protect);
+	[[maybe_unused]] const auto vp_res = VirtualProtect(ptr, size, flags,
+	                                                    &old_protect);
 	assert(vp_res != 0);
 #else
-	LOG_MSG("No method to set memory access %p, %zu, %d on this platform",
-	        ptr, size, execute);
+#error "no dynamic memory protection on this platform: please report this"
 #endif
 }
 
@@ -782,8 +797,8 @@ static inline void dyn_mem_write(void *ptr, size_t size)
 	dyn_mem_set_access(ptr, size, false);
 }
 
-static inline void dyn_cache_invalidate(MAYBE_UNUSED void *ptr,
-                                        MAYBE_UNUSED size_t size)
+static inline void dyn_cache_invalidate([[maybe_unused]] void *ptr,
+                                        [[maybe_unused]] size_t size)
 {
 #if defined(HAVE_BUILTIN_CLEAR_CACHE)
 	const auto start = static_cast<char *>(ptr);
@@ -794,12 +809,14 @@ static inline void dyn_cache_invalidate(MAYBE_UNUSED void *ptr,
 #elif defined(HAVE_SYS_ICACHE_INVALIDATE)
 #if defined(HAVE_BUILTIN_AVAILABLE)
 	if (__builtin_available(macOS 11.0, *))
-#endif	
+#endif
 		sys_icache_invalidate(ptr, size);
 #elif defined(WIN32)
+	if (CPU_AllowSpeedMods)
+		return;
 	FlushInstructionCache(GetCurrentProcess(), ptr, size);
 #else
-	#error "Don't know how to clear the cache on this platform"
+#error "Don't know how to clear the cache on this platform: please report this"
 #endif
 }
 
@@ -828,14 +845,18 @@ static void cache_init(bool enable) {
 		if (cache_code_start_ptr == nullptr) {
 			// allocate the code cache memory
 #if defined (WIN32)
-			cache_code_start_ptr = static_cast<uint8_t *>(
-			        VirtualAlloc(nullptr, cache_code_size,
-			                     MEM_RESERVE | MEM_COMMIT,
-			                     PAGE_READWRITE));
-			if (!cache_code_start_ptr) {
-				LOG_MSG("VirtualAlloc error, using malloc");
-				cache_code_start_ptr=static_cast<uint8_t *>(malloc(cache_code_size));
+			LPVOID lp_vmem = nullptr;
+			if (CPU_AllowSpeedMods) {
+				lp_vmem = VirtualAlloc(nullptr, cache_code_size,
+				                       MEM_COMMIT,
+				                       PAGE_EXECUTE_READWRITE); // all operations allowed
+			} else {
+				lp_vmem = VirtualAlloc(nullptr, cache_code_size,
+				                       MEM_COMMIT | MEM_RESERVE,
+				                       PAGE_READWRITE); // needs on-going management
 			}
+			assert(lp_vmem);
+			cache_code_start_ptr = static_cast<uint8_t *>(lp_vmem);
 #elif defined(HAVE_MMAP)
 			int map_flags = MAP_PRIVATE | MAP_ANON;
 			int prot_flags = PROT_READ | PROT_WRITE | PROT_EXEC;

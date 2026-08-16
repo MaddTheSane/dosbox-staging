@@ -46,7 +46,7 @@ struct Handler : public Adlib::Handler {
 	virtual void WriteReg(Bit32u reg, Bit8u val) { adlib_write(reg, val); }
 	virtual Bit32u WriteAddr(io_port_t, Bit8u val) { return val; }
 
-	virtual void Generate(MixerChannel *chan, const uint16_t samples)
+	virtual void Generate(mixer_channel_t &chan, const uint16_t samples)
 	{
 		Bit16s buf[1024];
 		int remaining = samples;
@@ -74,7 +74,7 @@ struct Handler : public Adlib::Handler {
 		adlib_write_index(port, val);
 		return opl_index;
 	}
-	virtual void Generate(MixerChannel *chan, const uint16_t samples)
+	virtual void Generate(mixer_channel_t &chan, const uint16_t samples)
 	{
 		Bit16s buf[1024 * 2];
 		int remaining = samples;
@@ -101,7 +101,7 @@ struct Handler : public Adlib::Handler {
 		ym3812_write(chip, 1, val);
 	}
 	virtual Bit32u WriteAddr(io_port_t, Bit8u val) { return val; }
-	virtual void Generate(MixerChannel *chan, const uint16_t samples)
+	virtual void Generate(mixer_channel_t &chan, const uint16_t samples)
 	{
 		Bit16s buf[1024 * 2];
 		int remaining = samples;
@@ -134,7 +134,7 @@ struct Handler : public Adlib::Handler {
 		ymf262_write(chip, 1, val);
 	}
 	virtual Bit32u WriteAddr(io_port_t, Bit8u val) { return val; }
-	virtual void Generate(MixerChannel *chan, const uint16_t samples)
+	virtual void Generate(mixer_channel_t &chan, const uint16_t samples)
 	{
 		// We generate data for 4 channels, but only the first 2 are
 		// connected on a pc
@@ -189,7 +189,7 @@ struct Handler : public Adlib::Handler {
 		return addr;
 	}
 
-	void Generate(MixerChannel *chan, uint16_t samples) override
+	void Generate(mixer_channel_t &chan, uint16_t samples) override
 	{
 		int16_t buf[1024 * 2];
 		while (samples > 0) {
@@ -598,8 +598,9 @@ uint8_t Module::CtrlRead(void)
 	return 0xff;
 }
 
-void Module::PortWrite(io_port_t port, uint8_t val, io_width_t)
+void Module::PortWrite(io_port_t port, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	// Keep track of last write time
 	lastUsed = PIC_Ticks;
 	//Maybe only enable with a keyon?
@@ -615,7 +616,7 @@ void Module::PortWrite(io_port_t port, uint8_t val, io_width_t)
 					break;
 				}
 			}
-			FALLTHROUGH;
+			[[fallthrough]];
 		case MODE_OPL2:
 		case MODE_OPL3:
 			if ( !chip[0].Write( reg.normal, val ) ) {
@@ -655,7 +656,7 @@ void Module::PortWrite(io_port_t port, uint8_t val, io_width_t)
 					break;
 				}
 			}
-			FALLTHROUGH;
+			[[fallthrough]];
 		case MODE_OPL3:
 			reg.normal = handler->WriteAddr( port, val ) & 0x1ff;
 			break;
@@ -700,7 +701,7 @@ uint8_t Module::PortRead(io_port_t port, io_width_t)
 				return CtrlRead();
 			}
 		}
-		FALLTHROUGH;
+		[[fallthrough]];
 	case MODE_OPL3:
 		//We allocated 4 ports, so just return -1 for the higher ones
 		if ( !(port & 3 ) ) {
@@ -816,7 +817,8 @@ namespace Adlib {
 static Handler * make_opl_handler(const std::string &oplemu, OPL_Mode mode)
 {
 	if (oplemu == "fast") {
-		return new DBOPL::Handler();
+		const bool is_opl3 = (mode >= OPL_opl3);
+		return new DBOPL::Handler(is_opl3);
 	}
 	if (oplemu == "compat") {
 		if (mode == OPL_opl2)
@@ -837,22 +839,21 @@ static Handler * make_opl_handler(const std::string &oplemu, OPL_Mode mode)
 }
 
 Module::Module(Section *configuration)
-	: Module_base(configuration),
-	  mixerObject(),
-	  mode(MODE_OPL2), // TODO this is set in Init and there's no good default
-	  reg{0}, // union
-	  ctrl{false, 0, 0xff, 0xff, false},
-	  mixerChan(nullptr),
-	  lastUsed(0),
-	  handler(nullptr),
-	  capture(nullptr)
+        : Module_base(configuration),
+          mode(MODE_OPL2), // TODO this is set in Init and there's no good default
+          reg{0},          // union
+          ctrl{false, 0, 0xff, 0xff, false},
+          mixerChan(nullptr),
+          lastUsed(0),
+          handler(nullptr),
+          capture(nullptr)
 {
 	Section_prop * section=static_cast<Section_prop *>(configuration);
 	const auto base = static_cast<uint16_t>(section->Get_hex("sbbase"));
 
 	ctrl.mixer = section->Get_bool("sbmixer");
 
-	mixerChan = mixerObject.Install(OPL_CallBack, 0, "FM");
+	mixerChan = MIXER_AddChannel(OPL_CallBack, 0, "FM");
 	//Used to be 2.0, which was measured to be too high. Exact value depends on card/clone.
 	mixerChan->SetScale( 1.5f );  
 
@@ -884,8 +885,9 @@ Module::Module(Section *configuration)
 	const auto write_to = std::bind(&Module::PortWrite, this, _1, _2, _3);
 
 	// 0x388 range
-	WriteHandler[0].Install(0x388, write_to, io_width_t::byte, 4);
-	ReadHandler[0].Install(0x388, read_from, io_width_t::byte, 4);
+	constexpr io_port_t port_0x388 = 0x388;
+	WriteHandler[0].Install(port_0x388, write_to, io_width_t::byte, 4);
+	ReadHandler[0].Install(port_0x388, read_from, io_width_t::byte, 4);
 	// 0x220 range
 	if (!single) {
 		WriteHandler[1].Install(base, write_to, io_width_t::byte, 4);

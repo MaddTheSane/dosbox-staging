@@ -291,7 +291,7 @@ void MOUNT::Run(void) {
 		}
 
 		if (temp_line[temp_line.size() - 1] != CROSS_FILESPLIT) temp_line += CROSS_FILESPLIT;
-		Bit8u bit8size=(Bit8u) sizes[1];
+		Bit8u bit8size = (Bit8u)sizes[1];
 
 		if (type == "cdrom") {
 			// Following options were relevant only for physical CD-ROM support:

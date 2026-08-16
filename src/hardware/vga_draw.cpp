@@ -338,32 +338,33 @@ static Bit8u * VGA_Draw_Linear_Line(Bitu vidstart, Bitu /*line*/) {
 	return ret;
 }
 
-static Bit8u * VGA_Draw_Xlat16_Linear_Line(Bitu vidstart, Bitu /*line*/) {
-	Bitu offset = vidstart & vga.draw.linear_mask;
-	Bit8u *ret = &vga.draw.linear_base[offset];
+static uint8_t *VGA_Draw_Xlat16_Linear_Line(Bitu vidstart, Bitu /*line*/)
+{
+	const auto offset = vidstart & vga.draw.linear_mask;
+	const uint8_t *ret = &vga.draw.linear_base[offset];
+	const uint16_t *xlat16 = vga.dac.xlat16;
 
 	// see VGA_Draw_Linear_Line
 	if (GCC_UNLIKELY((vga.draw.line_length + offset)& ~vga.draw.linear_mask)) {
-		Bitu end = (offset + vga.draw.line_length) & vga.draw.linear_mask;
-		
+		const auto end = (offset + vga.draw.line_length) &
+		                 vga.draw.linear_mask;
+
 		// assuming lines not longer than 4096 pixels
-		Bitu wrapped_len = end & 0xFFF;
-		Bitu unwrapped_len = vga.draw.line_length-wrapped_len;
-		
+		const auto wrapped_len = end & 0xFFF;
+		const auto unwrapped_len = vga.draw.line_length - wrapped_len;
+
 		// unwrapped chunk: to top of memory block
-		for (Bitu i = 0; i < unwrapped_len; ++i)
-			write_unaligned_uint16_at(TempLine, i,
-			                          vga.dac.xlat16[ret[i]]);
+		for (uintptr_t i = 0; i < unwrapped_len; ++i)
+			write_unaligned_uint16_at(TempLine, i, xlat16[ret[i]]);
 
 		// wrapped chunk: from base of memory block
-		for (Bitu i = 0; i < wrapped_len; ++i)
+		for (uintptr_t i = 0; i < wrapped_len; ++i)
 			write_unaligned_uint16_at(TempLine, i + unwrapped_len,
-			                          vga.dac.xlat16[vga.draw.linear_base[i]]);
+			                          xlat16[vga.draw.linear_base[i]]);
 
 	} else {
-		for (Bitu i = 0; i < vga.draw.line_length; ++i) {
-			write_unaligned_uint16_at(TempLine, i,
-			                          vga.dac.xlat16[ret[i]]);
+		for (uintptr_t i = 0; i < vga.draw.line_length; ++i) {
+			write_unaligned_uint16_at(TempLine, i, xlat16[ret[i]]);
 		}
 	}
 	return TempLine;
@@ -694,7 +695,7 @@ static uint8_t *VGA_TEXT_Xlat16_Draw_Line(Bitu vidstart, Bitu line)
 }
 
 #ifdef VGA_KEEP_CHANGES
-static INLINE void VGA_ChangesEnd(void ) {
+static inline void VGA_ChangesEnd(void ) {
 	if ( vga.changes.active ) {
 //		vga.changes.active = false;
 		Bitu end = vga.draw.address >> VGA_CHANGE_SHIFT;
@@ -882,7 +883,7 @@ void VGA_SetBlinking(const uint8_t enabled)
 }
 
 #ifdef VGA_KEEP_CHANGES
-static void INLINE VGA_ChangesStart( void ) {
+static void inline VGA_ChangesStart( void ) {
 	vga.changes.start = vga.draw.address >> VGA_CHANGE_SHIFT;
 	vga.changes.last = vga.changes.start;
 	if ( vga.changes.lastAddress != vga.draw.address ) {
@@ -971,7 +972,7 @@ static void VGA_VerticalTimer(uint32_t /*val*/)
 	//Check if we can actually render, else skip the rest (frameskip)
 	++vga.draw.cursor.count; // Do this here, else the cursor speed depends
 	                         // on the frameskip
-	if (vga.draw.vga_override || !RENDER_StartUpdate())
+	if (!RENDER_StartUpdate())
 		return;
 
 	vga.draw.address_line = vga.config.hlines_skip;
@@ -998,7 +999,7 @@ static void VGA_VerticalTimer(uint32_t /*val*/)
 	case M_EGA:
 		if (!(vga.crtc.mode_control&0x1)) vga.draw.linear_mask &= ~0x10000;
 		else vga.draw.linear_mask |= 0x10000;
-		FALLTHROUGH;
+		[[fallthrough]];
 	case M_LIN4:
 		vga.draw.byte_panning_shift = 8;
 		vga.draw.address += vga.draw.bytes_skip;
@@ -1016,7 +1017,7 @@ static void VGA_VerticalTimer(uint32_t /*val*/)
 			vga.draw.linear_base = vga.mem.linear;
 			vga.draw.linear_mask = vga.vmemwrap - 1;
 		}
-		FALLTHROUGH;
+		[[fallthrough]];
 	case M_LIN8:
 	case M_LIN15:
 	case M_LIN24:
@@ -1134,7 +1135,7 @@ void VGA_CheckScanLength(void) {
 			vga.draw.address_add = vga.draw.blocks / 4;
 			break;
 		}
-		FALLTHROUGH;
+		[[fallthrough]];
 	case M_CGA2_COMPOSITE: vga.draw.address_add = vga.draw.blocks; break;
 	case M_TANDY4:
 	case M_CGA4_COMPOSITE: vga.draw.address_add = vga.draw.blocks; break;
@@ -1459,13 +1460,13 @@ void VGA_SetupDrawing(uint32_t /*val*/)
 	//Base pixel width around 100 clocks horizontal
 	//For 9 pixel text modes this should be changed, but we don't support that anyway :)
 	//Seems regular vga only listens to the 9 char pixel mode with character mode enabled
-	const auto pwidth = (machine == MCH_EGA ? 114.0 : 100.0) / static_cast<double>(htotal);
+	const auto pwidth = 100.0 / static_cast<double>(htotal);
 	// Base pixel height around vertical totals of modes that have 100
 	// clocks horizontal Different sync values gives different scaling of
 	// the whole vertical range VGA monitor just seems to thighten or widen
 	// the whole vertical range
 	double pheight;
-	double target_total = (machine == MCH_EGA) ? 262.0 : 449.0;
+	double target_total = 449.0;
 	Bitu sync = vga.misc_output >> 6;
 	const auto f_vtotal = static_cast<double>(vtotal);
 	switch ( sync ) {
@@ -1490,7 +1491,11 @@ void VGA_SetupDrawing(uint32_t /*val*/)
 		break;
 	}
 
-	double aspect_ratio = pheight / pwidth;
+	double aspect_ratio;
+	if (machine == MCH_EGA)
+		aspect_ratio = (CurMode->swidth * 3.0) / (CurMode->sheight * 4.0);
+	else
+		aspect_ratio = pheight / pwidth;
 
 	vga.draw.delay.parts = vga.draw.delay.vdend / static_cast<double>(vga.draw.parts_total);
 	vga.draw.resizing = false;
@@ -1530,10 +1535,12 @@ void VGA_SetupDrawing(uint32_t /*val*/)
 	case M_VGA:
 		doublewidth=true;
 		width<<=2;
-		if ((IS_VGA_ARCH) && (svgaCard==SVGA_None)) {
+		if (IS_VGA_ARCH && (CurMode->type == M_VGA || svgaCard == SVGA_None)) {
 			bpp = 16;
 			VGA_DrawLine = VGA_Draw_Xlat16_Linear_Line;
-		} else VGA_DrawLine = VGA_Draw_Linear_Line;
+		} else {
+			VGA_DrawLine = VGA_Draw_Linear_Line;
+		}
 		break;
 	case M_LIN8:
 		if (vga.crtc.mode_control & 0x8) {
@@ -1568,13 +1575,10 @@ void VGA_SetupDrawing(uint32_t /*val*/)
 		width<<=2;
 		// tall VESA modes
 		maybe_aspect_correct_tall_modes(aspect_ratio);
-		if ((vga.crtc.mode_control & 0x8) ||
-		    (svgaCard == SVGA_S3Trio && (vga.s3.pll.cmd & 0x10)))
+		if ((vga.crtc.mode_control & 0x8))
 			doublewidth = true;
-		else {
-			// vesa modes 165/175
+		else
 			aspect_ratio /= 2.0;
-		}
 		/* Use HW mouse cursor drawer if enabled */
 		VGA_ActivateHardwareCursor();
 		break;
@@ -1780,9 +1784,10 @@ void VGA_SetupDrawing(uint32_t /*val*/)
 		doubleheight=true;
 	}
 	vga.draw.vblank_skip = vblank_skip;
-		
-	if (!(IS_VGA_ARCH && (svgaCard==SVGA_None) && (vga.mode==M_EGA || vga.mode==M_VGA))) {
-		//Only check for extra double height in vga modes
+
+	const bool has_extra_double_height = doublewidth && !doubleheight && height > width;
+	// Only check for extra double height in vga modes
+	if (IS_VGA_ARCH && has_extra_double_height) {
 		//(line multiplying by address_line_total)
 		if (!doubleheight && (vga.mode<M_TEXT) && !(vga.draw.address_line_total & 1)) {
 			vga.draw.address_line_total/=2;
@@ -1850,9 +1855,8 @@ void VGA_SetupDrawing(uint32_t /*val*/)
 		                         doublewidth ? "double" : "normal",
 		                         doubleheight ? "double" : "normal", aspect_ratio);
 #endif
-		if (!vga.draw.vga_override)
-			RENDER_SetSize(width, height, bpp, fps, aspect_ratio,
-			               doublewidth, doubleheight);
+		RENDER_SetSize(width, height, bpp, fps, aspect_ratio,
+		               doublewidth, doubleheight);
 	}
 }
 
@@ -1862,19 +1866,5 @@ void VGA_KillDrawing(void) {
 	PIC_RemoveEvents(VGA_DrawEGASingleLine);
 	vga.draw.parts_left = 0;
 	vga.draw.lines_done = ~0;
-	if (!vga.draw.vga_override) RENDER_EndUpdate(true);
-}
-
-void VGA_SetOverride(bool vga_override) {
-	if (vga.draw.vga_override!=vga_override) {
-		
-		if (vga_override) {
-			VGA_KillDrawing();
-			vga.draw.vga_override=true;
-		} else {
-			vga.draw.vga_override=false;
-			vga.draw.width=0; // change it so the output window gets updated
-			VGA_SetupDrawing(0);
-		}
-	}
+	RENDER_EndUpdate(true);
 }

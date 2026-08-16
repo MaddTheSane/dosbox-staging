@@ -21,6 +21,8 @@
 
 #include "dosbox.h"
 
+#include <utility>
+
 #include "inout.h"
 #include "control.h"
 
@@ -60,7 +62,6 @@ enum VGAModes {
 constexpr uint16_t EGA_HALF_CLOCK = 1 << 0;
 constexpr uint16_t EGA_LINE_DOUBLE = 1 << 1;
 constexpr uint16_t VGA_PIXEL_DOUBLE = 1 << 2;
-constexpr uint16_t VGA_DOUBLE_CLOCK = 1 << 3;
 
 #define CLK_25 25175
 #define CLK_28 28322
@@ -187,7 +188,6 @@ struct VGA_Draw {
 	} cursor;
 	Drawmode mode;
 	bool vret_triggered = false;
-	bool vga_override = false;
 };
 
 struct VGA_HWCURSOR {
@@ -205,38 +205,43 @@ struct VGA_HWCURSOR {
 };
 
 struct VGA_S3 {
-	Bit8u reg_lock1 = 0;
-	Bit8u reg_lock2 = 0;
-	Bit8u reg_31 = 0;
-	Bit8u reg_35 = 0;
-	Bit8u reg_36 = 0; // RAM size
-	Bit8u reg_3a = 0; // 4/8/doublepixel bit in there
-	Bit8u reg_40 = 0; // 8415/A functionality register
-	Bit8u reg_41 = 0; // BIOS flags
-	Bit8u reg_43 = 0;
-	Bit8u reg_45 = 0; // Hardware graphics cursor
-	Bit8u reg_50 = 0;
-	Bit8u reg_51 = 0;
-	Bit8u reg_52 = 0;
-	Bit8u reg_55 = 0;
-	Bit8u reg_58 = 0;
-	Bit8u reg_6b = 0; // LFB BIOS scratchpad
-	Bit8u ex_hor_overflow = 0;
-	Bit8u ex_ver_overflow = 0;
-	Bit16u la_window = 0;
-	Bit8u misc_control_2 = 0;
-	Bit8u ext_mem_ctrl = 0;
-	Bitu xga_screen_width = 0;
+	uint8_t reg_lock1 = 0;
+	uint8_t reg_lock2 = 0;
+	uint8_t reg_31 = 0;
+	uint8_t reg_35 = 0;
+	uint8_t reg_36 = 0; // RAM size
+	uint8_t reg_3a = 0; // 4/8/doublepixel bit in there
+	uint8_t reg_40 = 0; // 8415/A functionality register
+	uint8_t reg_41 = 0; // BIOS flags
+	uint8_t reg_42 = 0;
+	uint8_t reg_43 = 0;
+	uint8_t reg_45 = 0; // Hardware graphics cursor
+	uint8_t reg_50 = 0;
+	uint8_t reg_51 = 0;
+	uint8_t reg_52 = 0;
+	uint8_t reg_55 = 0;
+	uint8_t reg_58 = 0;
+	uint8_t reg_6b = 0; // LFB BIOS scratchpad
+	uint8_t ex_hor_overflow = 0;
+	uint8_t ex_ver_overflow = 0;
+	uint16_t la_window = 0;
+	uint8_t misc_control_2 = 0;
+	uint8_t ext_mem_ctrl = 0;
+	uint16_t xga_screen_width = 0; // from 640 to 1600
 	VGAModes xga_color_mode = {};
 	struct clk_t {
 		uint8_t r = 0;
 		uint8_t n = 1;
 		uint8_t m = 1;
-	} clk[4], mclk;
+	};
+	clk_t clk[4] = {};
+	clk_t mclk = {};
 	struct pll_t {
-		Bit8u lock = 0;
-		Bit8u cmd = 0;
-	} pll;
+		uint8_t lock = 0; // Extended Sequencer Access Rgister SR8 (pp. 124)
+		uint8_t control_2 = 0; // CLKSYN Control 2 Register SR15 (pp. 130)
+		uint8_t control = 0; // RAMDAC/CLKSYN Control Register SRI8 (pp. 132)
+	};
+	pll_t pll = {};
 	VGA_HWCURSOR hgc = {};
 };
 
@@ -482,6 +487,7 @@ void VGA_SetupXGA(void);
 void VGA_AddCompositeSettings(Config &conf);
 
 /* Some Support Functions */
+std::pair<const char *, const char *> VGA_DescribeType(VGAModes type);
 void VGA_SetClock(Bitu which, uint32_t target);
 void VGA_DACSetEntirePalette(void);
 void VGA_StartRetrace(void);
@@ -492,8 +498,9 @@ void VGA_SetCGA4Table(Bit8u val0,Bit8u val1,Bit8u val2,Bit8u val3);
 void VGA_ActivateHardwareCursor(void);
 void VGA_KillDrawing(void);
 
-void VGA_SetOverride(bool vga_override);
-void VGA_LogInitialization(const char* adapter_name, const char* ram_type);
+void VGA_LogInitialization(const char *adapter_name,
+                           const char *ram_type,
+                           const size_t num_modes);
 
 extern VGA_Type vga;
 
@@ -518,7 +525,7 @@ struct VGA_ModeExtraData {
 };
 
 // Vector function prototypes
-typedef void (*tWritePort)(io_port_t reg, uint8_t val, io_width_t width);
+typedef void (*tWritePort)(io_port_t reg, io_val_t value, io_width_t width);
 typedef uint8_t (*tReadPort)(io_port_t reg, io_width_t width);
 typedef void (*tFinishSetMode)(io_port_t crtc_base, VGA_ModeExtraData *modeData);
 typedef void (*tDetermineMode)();

@@ -27,7 +27,9 @@
 #include "setup.h"
 #include "support.h"
 
-static INLINE void BIN2BCD(Bit16u& val) {
+const std::chrono::steady_clock::time_point system_start_time = std::chrono::steady_clock::now();
+
+static inline void BIN2BCD(Bit16u& val) {
 	const auto b = ((val / 10) % 10) << 4;
 	const auto c = ((val / 100) % 10) << 8;
 	const auto d = ((val / 1000) % 10) << 12;
@@ -37,7 +39,7 @@ static INLINE void BIN2BCD(Bit16u& val) {
 	val = temp;
 }
 
-static INLINE void BCD2BIN(Bit16u& val) {
+static inline void BCD2BIN(Bit16u& val) {
 	Bit16u temp= (val&0x0f) +((val>>4)&0x0f) *10 +((val>>8)&0x0f) *100 +((val>>12)&0x0f) *1000;
 	val=temp;
 }
@@ -221,8 +223,9 @@ static void counter_latch(uint32_t counter)
 	}
 }
 
-static void write_latch(io_port_t port, uint8_t val, io_width_t)
+static void write_latch(io_port_t port, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	// LOG(LOG_PIT,LOG_ERROR)("port %X write:%X
 	// state:%X",port,val,pit[port-0x40].write_state);
 	const uint16_t counter = port - 0x40;
@@ -345,8 +348,9 @@ static uint8_t read_latch(io_port_t port, io_width_t)
 	return ret;
 }
 
-static void write_p43(io_port_t, uint8_t val, io_width_t)
+static void write_p43(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	// LOG(LOG_PIT,LOG_ERROR)("port 43 %X",val);
 	const uint8_t latch = (val >> 6) & 0x03;
 	switch (latch) {

@@ -55,10 +55,13 @@ differences between OPL2 and OPL3 shown in datasheets:
 
 
 */
-#include "support.h"
-
 #include "emu.h"
 #include "ymf262.h"
+
+#include <cassert>
+#include <cstdint>
+
+#include "support.h"
 
 /* output final shift */
 #if (OPL3_SAMPLE_BITS==16)
@@ -1393,7 +1396,8 @@ static void OPL3_initalize(OPL3 *chip)
 	/* Noise generator: a step takes 1 sample */
 	chip->noise_f = static_cast<uint32_t>((1.0 / 1.0) * (1<<FREQ_SH) * chip->freqbase);
 
-	chip->eg_timer_add  = (1<<EG_SH)  * chip->freqbase;
+        assert(chip->freqbase >= 0 && chip->freqbase <= UINT32_MAX);
+	chip->eg_timer_add  = (1<<EG_SH)  * static_cast<uint32_t>(chip->freqbase);
 	chip->eg_timer_overflow = (1) * (1<<EG_SH);
 	/*logerror("YMF262init eg_timer_add=%8x eg_timer_overflow=%8x\n", chip->eg_timer_add, chip->eg_timer_overflow);*/
 
@@ -1633,7 +1637,7 @@ static inline void set_sl_rr(OPL3 *chip,int slot,int v)
 }
 
 
-static void update_channels(MAYBE_UNUSED OPL3 *chip, OPL3_CH *CH)
+static void update_channels([[maybe_unused]] OPL3 *chip, OPL3_CH *CH)
 {
 	/* update channel passed as a parameter and a channel at CH+=3; */
 	if (CH->extended)
@@ -2442,7 +2446,7 @@ static int OPL3TimerOver(OPL3 *chip,int c)
 	return chip->status>>7;
 }
 
-static void OPL3_save_state(MAYBE_UNUSED OPL3 *chip, MAYBE_UNUSED device_t *device) {
+static void OPL3_save_state([[maybe_unused]] OPL3 *chip, [[maybe_unused]] device_t *device) {
 #if 0 
 	for (int ch=0; ch<18; ch++) {
 		OPL3_CH *channel = &chip->P_CH[ch];

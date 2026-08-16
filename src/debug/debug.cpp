@@ -206,7 +206,7 @@ bool GetDescriptorInfo(char* selname, char* out1, char* out2)
 	if (cpu.gdt.GetDescriptor(sel,desc)) {
 		switch (desc.Type()) {
 			case DESC_TASK_GATE:
-				sprintf(out1,"%s: s:%08" sBitfs(X) " type:%02X p",selname,desc.GetSelector(),desc.saved.gate.type);
+				sprintf(out1,"%s: s:%08X type:%02X p",selname,desc.GetSelector(),desc.saved.gate.type);
 				sprintf(out2,"    TaskGate   dpl : %01X %1X",desc.saved.gate.dpl,desc.saved.gate.p);
 				return true;
 			case DESC_LDT:
@@ -215,23 +215,23 @@ bool GetDescriptorInfo(char* selname, char* out1, char* out2)
 			case DESC_386_TSS_A:
 			case DESC_386_TSS_B:
 				sprintf(out1,"%s: b:%08X type:%02X pag",selname,desc.GetBase(),desc.saved.seg.type);
-				sprintf(out2,"    l:%08" sBitfs(X) " dpl : %01X %1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.g);
+				sprintf(out2,"    l:%08X dpl : %01X %1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.g);
 				return true;
 			case DESC_286_CALL_GATE:
 			case DESC_386_CALL_GATE:
-				sprintf(out1,"%s: s:%08" sBitfs(X) " type:%02X p params: %02X",selname,desc.GetSelector(),desc.saved.gate.type,desc.saved.gate.paramcount);
-				sprintf(out2,"    o:%08" sBitfs(X) " dpl : %01X %1X",desc.GetOffset(),desc.saved.gate.dpl,desc.saved.gate.p);
+				sprintf(out1,"%s: s:%08X type:%02X p params: %02X",selname,desc.GetSelector(),desc.saved.gate.type,desc.saved.gate.paramcount);
+				sprintf(out2,"    o:%08X dpl : %01X %1X",desc.GetOffset(),desc.saved.gate.dpl,desc.saved.gate.p);
 				return true;
 			case DESC_286_INT_GATE:
 			case DESC_286_TRAP_GATE:
 			case DESC_386_INT_GATE:
 			case DESC_386_TRAP_GATE:
-				sprintf(out1,"%s: s:%08" sBitfs(X) " type:%02X p",selname,desc.GetSelector(),desc.saved.gate.type);
-				sprintf(out2,"    o:%08" sBitfs(X) " dpl : %01X %1X",desc.GetOffset(),desc.saved.gate.dpl,desc.saved.gate.p);
+				sprintf(out1,"%s: s:%08X type:%02X p",selname,desc.GetSelector(),desc.saved.gate.type);
+				sprintf(out2,"    o:%08X dpl : %01X %1X",desc.GetOffset(),desc.saved.gate.dpl,desc.saved.gate.p);
 				return true;
 		}
 		sprintf(out1,"%s: b:%08X type:%02X parbg",selname,desc.GetBase(),desc.saved.seg.type);
-		sprintf(out2,"    l:%08" sBitfs(X) " dpl : %01X %1X%1X%1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.r,desc.saved.seg.big,desc.saved.seg.g);
+		sprintf(out2,"    l:%08X dpl : %01X %1X%1X%1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.r,desc.saved.seg.big,desc.saved.seg.g);
 		return true;
 	} else {
 		strcpy(out1,"                                     ");
@@ -522,7 +522,7 @@ bool CBreakpoint::CheckBreakpoint(Bitu seg, Bitu off)
 	return false;
 }
 
-bool CBreakpoint::CheckIntBreakpoint(MAYBE_UNUSED PhysPt adr, Bit8u intNr, Bit16u ahValue, Bit16u alValue)
+bool CBreakpoint::CheckIntBreakpoint([[maybe_unused]] PhysPt adr, Bit8u intNr, Bit16u ahValue, Bit16u alValue)
 // Checks if interrupt breakpoint is valid and should stop execution
 {
 	if (BPoints.empty()) return false;
@@ -796,7 +796,7 @@ static void DrawRegisters(void) {
 
 
 	SetColor(cpu.cpl ^ oldcpucpl);
-	mvwprintw (dbg.win_reg,2,78,"%01X",cpu.cpl);
+	mvwprintw (dbg.win_reg,2,78,"%01" PRIXPTR ,cpu.cpl);
 	oldcpucpl=cpu.cpl;
 
 	if (cpu.pmode) {
@@ -815,7 +815,7 @@ static void DrawRegisters(void) {
 	}
 
 	wattrset(dbg.win_reg,0);
-	mvwprintw(dbg.win_reg,3,60,"%u       ",cycle_count);
+	mvwprintw(dbg.win_reg,3,60,"%" PRIuPTR "       ",cycle_count);
 	wrefresh(dbg.win_reg);
 }
 
@@ -1789,7 +1789,7 @@ Bit32u DEBUG_CheckKeys(void) {
 					break;
 				}
 				// If we aren't stepping over something, do a normal step.
-				/* FALLTHROUGH */
+				[[fallthrough]];
 		case KEY_F(11):	// trace into
 				exitLoop = false;
 				ret = DEBUG_Run(1,true);
@@ -1812,7 +1812,7 @@ Bit32u DEBUG_CheckKeys(void) {
 		case 0x08:	// delete 
 				if (codeViewData.inputPos == 0) break;
 				codeViewData.inputPos--;
-				// fallthrough
+				[[fallthrough]];
 		case KEY_DC: // delete character
 				if ((codeViewData.inputPos<0) || (codeViewData.inputPos>=MAXCMDLEN)) break;
 				if (codeViewData.inputStr[codeViewData.inputPos] != 0) {
@@ -1976,7 +1976,7 @@ static void LogGDT(void) {
 		desc.Load(address);
 		sprintf(out1,"%04" sBitfs(X) ": b:%08X type: %02X parbg",(i<<3),desc.GetBase(),desc.saved.seg.type);
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
-		sprintf(out1,"      l:%08" sBitfs(X) " dpl : %01X  %1X%1X%1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.r,desc.saved.seg.big,desc.saved.seg.g);
+		sprintf(out1,"      l:%08X dpl : %01X  %1X%1X%1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.r,desc.saved.seg.big,desc.saved.seg.g);
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 		address+=8; i++;
 	}
@@ -1996,7 +1996,7 @@ static void LogLDT(void) {
 		desc.Load(address);
 		sprintf(out1,"%04" sBitfs(X) ": b:%08X type: %02X parbg",(i<<3)|4,desc.GetBase(),desc.saved.seg.type);
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
-		sprintf(out1,"      l:%08" sBitfs(X) " dpl : %01X  %1X%1X%1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.r,desc.saved.seg.big,desc.saved.seg.g);
+		sprintf(out1,"      l:%08X dpl : %01X  %1X%1X%1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.r,desc.saved.seg.big,desc.saved.seg.g);
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 		address+=8; i++;
 	}
@@ -2005,10 +2005,10 @@ static void LogLDT(void) {
 static void LogIDT(void) {
 	char out1[512];
 	Descriptor desc;
-	Bitu address = 0;
+	uint32_t address = 0;
 	while (address<256*8) {
 		if (cpu.idt.GetDescriptor(address,desc)) {
-			sprintf(out1,"%04" sBitfs(X) ": sel:%04" sBitfs(X) " off:%02" sBitfs(X),address/8,desc.GetSelector(),desc.GetOffset());
+			sprintf(out1,"%04X: sel:%04X off:%02X",address/8,desc.GetSelector(),desc.GetOffset());
 			LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 		}
 		address+=8;
@@ -2058,7 +2058,8 @@ static void LogCPUInfo(void) {
 	char out1[512];
 	sprintf(out1,"cr0:%08" sBitfs(X) " cr2:%08" sBitfs(X) " cr3:%08" sBitfs(X) "  cpl=%" sBitfs(x),cpu.cr0,paging.cr2,paging.cr3,cpu.cpl);
 	LOG(LOG_MISC,LOG_ERROR)("%s",out1);
-	sprintf(out1,"eflags:%08" sBitfs(X) " [vm=%" sBitfs(x) " iopl=%" sBitfs(x) " nt=%" sBitfs(x) "]",reg_flags,GETFLAG(VM)>>17,GETFLAG(IOPL)>>12,GETFLAG(NT)>>14);
+	sprintf(out1, "eflags:%08x [vm=%x iopl=%x nt=%x]", reg_flags,
+	        GETFLAG(VM) >> 17, GETFLAG(IOPL) >> 12, GETFLAG(NT) >> 14);
 	LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 	sprintf(out1,"GDT base=%08X limit=%08" sBitfs(X),cpu.gdt.GetBase(),cpu.gdt.GetLimit());
 	LOG(LOG_MISC,LOG_ERROR)("%s",out1);
@@ -2068,12 +2069,12 @@ static void LogCPUInfo(void) {
 	Bitu sel=CPU_STR();
 	Descriptor desc;
 	if (cpu.gdt.GetDescriptor(sel,desc)) {
-		sprintf(out1,"TR selector=%04" sBitfs(X) ", base=%08X limit=%08" sBitfs(X) "*%X",sel,desc.GetBase(),desc.GetLimit(),desc.saved.seg.g?0x4000:1);
+		sprintf(out1,"TR selector=%04" sBitfs(X) ", base=%08X limit=%08X*%X",sel,desc.GetBase(),desc.GetLimit(),desc.saved.seg.g?0x4000:1);
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 	}
 	sel=CPU_SLDT();
 	if (cpu.gdt.GetDescriptor(sel,desc)) {
-		sprintf(out1,"LDT selector=%04" sBitfs(X) ", base=%08X limit=%08" sBitfs(X) "*%X",sel,desc.GetBase(),desc.GetLimit(),desc.saved.seg.g?0x4000:1);
+		sprintf(out1,"LDT selector=%04" sBitfs(X) ", base=%08X limit=%08X*%X",sel,desc.GetBase(),desc.GetLimit(),desc.saved.seg.g?0x4000:1);
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 	}
 }
@@ -2095,7 +2096,7 @@ static void LogInstruction(uint16_t segValue, uint32_t eipValue, ofstream &out)
 	if (showExtend && (cpuLogType > 0) ) {
 		res = AnalyzeInstruction(dline,false);
 		if (!res || !(*res)) res = empty;
-		Bitu reslen = safe_strlen(res);
+		Bitu reslen = strlen(res);
 		if (reslen < 22) memset(res + reslen, ' ',22 - reslen);
 		res[22] = 0;
 	}
@@ -2188,7 +2189,8 @@ public:
 
 		// Start shell
 		DOS_Shell shell;
-		shell.Execute(filename,args);
+		if (!shell.Execute(filename, args))
+			WriteOut(MSG_Get("PROGRAM_EXECUTABLE_MISSING"), filename);
 
 		// set old reg values
 		SegSet16(ss,oldss);
@@ -2266,6 +2268,7 @@ void DEBUG_Init(Section* sec) {
 	memset((void*)&codeViewData,0,sizeof(codeViewData));
 	/* setup debug.com */
 	PROGRAMS_MakeFile("DEBUG.COM",DEBUG_ProgramStart);
+	PROGRAMS_MakeFile("DBXDEBUG.COM",DEBUG_ProgramStart);
 	/* Setup callback */
 	debugCallback=CALLBACK_Allocate();
 	CALLBACK_Setup(debugCallback,DEBUG_EnableDebugger,CB_RETF,"debugger");
@@ -2518,7 +2521,7 @@ void DEBUG_HeavyLogInstruction()
 	if (showExtend) {
 		res = AnalyzeInstruction(dline,false);
 		if (!res || !(*res)) res = empty;
-		Bitu reslen = safe_strlen(res);
+		Bitu reslen = strlen(res);
 		if (reslen < 22) memset(res + reslen, ' ',22 - reslen);
 		res[22] = 0;
 	}

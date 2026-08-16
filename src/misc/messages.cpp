@@ -22,8 +22,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
-#include <unordered_map>
+#include <clocale>
+
+#include "../../include/std_filesystem.h"
 #include <string>
+#include <unordered_map>
 
 #include "control.h"
 #include "cross.h"
@@ -31,6 +34,25 @@
 #include "string_utils.h"
 #include "setup.h"
 #include "support.h"
+
+#if C_COREFOUNDATION
+#include <CoreFoundation/CoreFoundation.h>
+[[maybe_unused]] static std::string get_language_from_os()
+{
+	auto cflocale = CFLocaleCopyCurrent();
+	auto locale = CFLocaleGetValue(cflocale, kCFLocaleLanguageCode);
+	auto locale_str_ref = static_cast<CFStringRef>(locale);
+	const auto cstr = CFStringGetCStringPtr(locale_str_ref, kCFStringEncodingUTF8);
+	std::string locale_string(cstr ? cstr : "");
+	CFRelease(cflocale);
+	return locale_string;
+}
+#else
+[[maybe_unused]] static std::string get_language_from_os()
+{
+	return "";
+}
+#endif
 
 #define LINE_IN_MAXLEN 2048
 
@@ -57,25 +79,24 @@ void MSG_Replace(const char *name, const char *msg)
 		it->second = msg;
 }
 
-static bool LoadMessageFile(std::string filename)
+static bool LoadMessageFile(const std_fs::path &filename)
 {
 	if (filename.empty())
 		return false;
 
-	// Expand the filename and check if it exists -- returns empty if not found
-	filename = to_native_path(filename);
+	const auto filename_str = filename.string();
 
 	// Was the file not found?
-	if (filename.empty()) {
+	if (std_fs::status(filename).type() == std_fs::file_type::not_found) {
 		LOG_MSG("LANG: Language file %s not found, skipping",
-		        filename.c_str());
+		        filename_str.c_str());
 		return false;
 	}
 
-	FILE *mfile = fopen(filename.c_str(), "rt");
+	FILE *mfile = fopen(filename_str.c_str(), "rt");
 	if (!mfile) {
 		LOG_MSG("LANG: Failed opening language file: %s, skipping",
-		        filename.c_str());
+		        filename_str.c_str());
 		return false;
 	}
 
@@ -117,7 +138,7 @@ static bool LoadMessageFile(std::string filename)
 		}
 	}
 	fclose(mfile);
-	LOG_MSG("LANG: Loaded language file: %s", filename.c_str());
+	LOG_MSG("LANG: Loaded language file: %s", filename_str.c_str());
 	return true;
 }
 
@@ -152,6 +173,91 @@ bool MSG_Write(const char * location) {
 	return true;
 }
 
+static std::string get_language(const Section_prop *section)
+{
+	std::string lang = {};
+
+	// Did the user provide a language on the command line?
+	(void)control->cmdline->FindString("-lang", lang, true);
+
+	// Is a language provided in the conf file?
+	if (lang.empty()) {
+		assert(section);
+		lang = section->Get_string("language");
+	}
+
+	// Clear the language if it's set to the POSIX default
+	auto clear_if_default = [](std::string &l) {
+		lowcase(l);
+		if (l.size() < 2 || starts_with("c.", l) || l == "posix") {
+			l.clear();
+		}
+	};
+
+	// Check the LANG environment variable
+	if (lang.empty()) {
+		const char *envlang = getenv("LANG");
+		if (envlang) {
+			lang = envlang;
+			clear_if_default(lang);
+		}
+	}
+	// Avoid changing locales already established by the ncurses debugger
+	// frame. Test it by running "debug.com ls.com" in a debugger build,
+	// then Alt+TAB to the debugger window, and finally press F10. You
+	// should be able to use the up and down arrows keys to select an
+	// instruction from the middle pane.
+#if !(C_DEBUG)
+	// Check if the locale is set
+	if (lang.empty()) {
+		const auto envlang = setlocale(LC_ALL, "");
+		if (envlang) {
+			lang = envlang;
+			clear_if_default(lang);
+		}
+	}
+
+	// Query the OS using OS-specific calls
+	if (lang.empty()) {
+		lang = get_language_from_os();
+		clear_if_default(lang);
+	}
+#endif
+	// Drop the dialect part of the language
+	// (e.g. "en_GB.UTF8" -> "en")
+	if (lang.size() > 2) {
+		lang = lang.substr(0, 2);
+	}
+
+	// return it as lowercase
+	lowcase(lang);
+	return lang;
+}
+
+static std::deque<std_fs::path> get_paths()
+{
+	std::deque<std_fs::path> paths = {};
+
+	// Try finding bundled translations first
+	const auto exe_path = GetExecutablePath();
+#if defined(MACOSX)
+	paths.emplace_back(exe_path / "../Resources/translations");
+#else
+	paths.emplace_back(exe_path / "translations");
+#endif
+
+	// Try the user-installed and then repo-installed paths, which
+	// can exist on macOS, POSIX, and even MinGW/MSYS2/Cygwin.
+	paths.emplace_back("/usr/local/share/dosbox-staging/translations");
+	paths.emplace_back("/usr/share/dosbox-staging/translations");
+
+	// Worst-cast: fallback to the user's config directory
+	const std_fs::path config_path(CROSS_GetPlatformConfigDir());
+	paths.emplace_back(config_path / "translations");
+
+	return paths;
+}
+
 // MSG_Init loads the requested language provided on the command line or
 // from the language = conf setting.
 
@@ -160,56 +266,29 @@ bool MSG_Write(const char * location) {
 
 // 2. It also supports the more convenient syntax without needing to provide a
 //    filename or path: `-lang ru`. In this case, it constructs a path into the
-//    platform's config path/translations/<lang>.lng. 
+//    platform's config path/translations/<lang>.lng.
 
 void MSG_Init(Section_prop *section)
 {
-	std::string lang = {};
-	std::deque<std::string> langs = {};
+	const auto lang = get_language(section);
 
-	// Did the user provide a language on the command line?
-	if (control->cmdline->FindString("-lang", lang, true))
-		langs.emplace_back(std::move(lang));
-
-	// Is a language provided in the conf file?
-	const auto pathprop = section->Get_path("language");
-	if (pathprop) {
-		lang = pathprop->realpath;
-		if (lang.size()) {
-			langs.emplace_back(std::move(lang));
-		}
-	}
-
-	// No languages provided, so nothing more to do!
-	if (langs.empty())
+	// If the language is english, then use the internal message
+	if (lang.empty() || starts_with("en", lang)) {
+		LOG_MSG("LANG: Using internal English language messages");
 		return;
+	}
 
-	// Try load the user's language file(s)
-	for (const auto &l : langs) {
-		// If a short-hand name was provided then add the file extension
-		lang = l + (ends_with(l, ".lng") ? "" : ".lng");
+	// If a short-hand name was provided then add the file extension
+	const auto lng_file = lang + (ends_with(lang, ".lng") ? "" : ".lng");
 
-		// Can we load the filename from the current path?
-		if (path_exists(lang) && LoadMessageFile(lang)) {
-			return;
-		}
-		// If not, let's try getting it from the config/translations
-		// area. To do this we need to first get just the
-		// filename-portion from the possible /full/path/lang.lng
-		const auto path_elements = split(lang, CROSS_FILESPLIT);
-		if (path_elements.empty())
-			continue;
-
-		// the last element is the filename without the path
-		lang = path_elements.back();
-		LOG_MSG("LANG: Searching config path for: %s", lang.c_str());
-
-		// Construct a full path by prepending the config/translations path
-		lang = CROSS_GetPlatformConfigDir() + "translations" + CROSS_FILESPLIT + lang;
-
-		// Try loading it
-		if (LoadMessageFile(lang)) {
+	// Otherwise let's try prefixes the paths
+	for (const auto &p : get_paths()) {
+		const auto lng_path = p / lng_file;
+		if (LoadMessageFile(lng_path)) {
 			return;
 		}
 	}
+
+	// If we got here, then the language was not found
+	LOG_MSG("LANG: No language could be loaded, using English messages");
 }

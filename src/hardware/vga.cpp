@@ -20,6 +20,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <utility>
 
 #include "logging.h"
 #include "../ints/int10.h"
@@ -43,13 +44,44 @@ Bit32u Expand16Table[4][16];
 Bit32u FillTable[16];
 Bit32u ColorTable[16];
 
-void VGA_LogInitialization(const char* adapter_name, const char* ram_type) {
+std::pair<const char *, const char *> VGA_DescribeType(const VGAModes type)
+{
+	switch (type) {
+	case M_TEXT:
+	case M_HERC_TEXT:
+	case M_TANDY_TEXT:
+	case M_CGA_TEXT_COMPOSITE: return std::make_pair("Text", "");
+	case M_HERC_GFX:           return std::make_pair("Hercules", " monochrome");
+	case M_CGA2_COMPOSITE:
+	case M_CGA4_COMPOSITE:     return std::make_pair("CGA",   " composite");
+	case M_CGA2:               return std::make_pair("CGA",   " 2 color");
+	case M_CGA4:               return std::make_pair("CGA",   " 4 color");
+	case M_CGA16:              return std::make_pair("CGA",   " 16 color");
+	case M_TANDY2:             return std::make_pair("Tandy", " 2 color");
+	case M_TANDY4:             return std::make_pair("Tandy", " 4 color");
+	case M_TANDY16:            return std::make_pair("Tandy", " 16 color");
+	case M_EGA:                return std::make_pair("EGA",   " 16 color");
+	case M_VGA:                return std::make_pair("VGA",   " 8-bit");
+	case M_LIN4:               return std::make_pair("VESA",  " 16 color");
+	case M_LIN8:               return std::make_pair("VESA",  " 8-bit");
+	case M_LIN15:              return std::make_pair("VESA",  " 15-bit");
+	case M_LIN16:              return std::make_pair("VESA",  " 16-bit");
+	case M_LIN24:              return std::make_pair("VESA",  " 24-bit");
+	case M_LIN32:              return std::make_pair("VESA",  " 32-bit");
+	case M_ERROR:
+	default: return std::make_pair("Unknown", "");
+	};
+}
+
+void VGA_LogInitialization(const char *adapter_name,
+                           const char *ram_type,
+                           const size_t num_modes)
+{
 	const auto mem_in_kib = vga.vmemsize / 1024;
-	LOG_INFO("VIDEO: Initialized %s with %d %s of %s",
-	         adapter_name,
-	         mem_in_kib < 1024 ? mem_in_kib : mem_in_kib / 1024,
-	         mem_in_kib < 1024 ? "KiB" : "MiB",
-			ram_type);
+	LOG_INFO("VIDEO: Initialized %s with %d-%s of %s supporting %d modes",
+	         adapter_name, mem_in_kib < 1024 ? mem_in_kib : mem_in_kib / 1024,
+	         mem_in_kib < 1024 ? "KiB" : "MiB", ram_type,
+	         check_cast<int16_t>(num_modes));
 }
 
 void VGA_SetModeNow(VGAModes mode) {
@@ -118,14 +150,9 @@ void VGA_SetClock(const Bitu which, const uint32_t desired_clock)
 		return;
 	}
 
-	// Is this mode using a clock-doubling flag?
-	const auto mode_flags = CurMode ? CurMode->special : 0;
-	const auto has_doubler = mode_flags & (VGA_PIXEL_DOUBLE | VGA_DOUBLE_CLOCK);
-	const auto clock_scale = has_doubler ? 2 : 1;
-
 	// Ensure the target clock is within the S3's clock range
-	const auto clock = clamp(static_cast<int>(desired_clock * clock_scale),
-	                         S3_CLOCK_REF, S3_MAX_CLOCK);
+	const auto clock = clamp(static_cast<int>(desired_clock), S3_CLOCK_REF,
+	                         S3_MAX_CLOCK);
 
 	// The clk parameters (r, n, m) will be populated with those that find a
 	// clock closest to the desired_clock clock.

@@ -29,6 +29,7 @@
 #include "cross.h"
 #include "drives.h"
 #include "fs_utils.h"
+#include "../../include/ide.h"
 #include "mapper.h"
 #include "program_mount_common.h"
 #include "shell.h"
@@ -62,11 +63,14 @@ void IMGMOUNT::Run(void) {
         return;
     }
 
-
     std::string type   = "hdd";
     std::string fstype = "fat";
     cmd->FindString("-t",type,true);
     cmd->FindString("-fs",fstype,true);
+
+    bool roflag = false;
+    if (cmd->FindExist("-ro", true))
+	    roflag = true;
 
     // Types 'cdrom' and 'iso' are synonyms. Name 'cdrom' is easier
     // to remember and makes more sense, while name 'iso' is
@@ -87,12 +91,24 @@ void IMGMOUNT::Run(void) {
     std::string str_size = "";
     Bit8u mediaid = 0xF8;
 
+    // Possibly used to hold the IDE channel and drive slot for CDROM types
+    std::string ide_value = {};
+    int8_t ide_index = -1;
+    bool is_second_cable_slot = false;
+    const bool wants_ide = cmd->FindString("-ide", ide_value, true) || cmd->FindExist("-ide", true);
+
+
     if (type == "floppy") {
-        mediaid = 0xF0;
+	    mediaid = 0xF0;
     } else if (type == "iso") {
-        //str_size="2048,1,65535,0";	// ignored, see drive_iso.cpp (AllocationInfo)
-        mediaid = 0xF8;
-        fstype = "iso";
+	    // str_size="2048,1,65535,0";	// ignored, see drive_iso.cpp
+	    // (AllocationInfo)
+	    mediaid = 0xF8;
+	    fstype = "iso";
+
+        if (wants_ide) {
+            IDE_Get_Next_Cable_Slot(ide_index, is_second_cable_slot);
+        }
     }
 
     cmd->FindString("-size",str_size,true);
@@ -217,7 +233,7 @@ void IMGMOUNT::Run(void) {
 
     if (fstype=="fat") {
         if (imgsizedetect) {
-            FILE * diskfile = fopen_wrap(temp_line.c_str(), "rb+");
+            FILE * diskfile = fopen_wrap_ro_fallback(temp_line, roflag);
             if (!diskfile) {
                 WriteOut(MSG_Get("PROGRAM_IMGMOUNT_INVALID_IMAGE"));
                 return;
@@ -257,10 +273,12 @@ void IMGMOUNT::Run(void) {
 
         for (i = 0; i < paths.size(); i++) {
             std::unique_ptr<fatDrive> newDrive(
-                new fatDrive(paths[i].c_str(),sizes[0],sizes[1],sizes[2],sizes[3],0));
+                new fatDrive(paths[i].c_str(), sizes[0], sizes[1],
+                             sizes[2], sizes[3], 0, roflag));
 
             if (newDrive->created_successfully) {
-                imgDisks.push_back(static_cast<DOS_Drive*>(newDrive.release()));
+                imgDisks.push_back(
+                    static_cast<DOS_Drive *>(newDrive.release()));
             } else {
                 // Tear-down all prior drives when we hit a problem
                 WriteOut(MSG_Get("PROGRAM_IMGMOUNT_CANT_CREATE"));
@@ -354,6 +372,15 @@ void IMGMOUNT::Run(void) {
                             drive_index(drive) * 9,
                     mediaid);
 
+        // If instructed, attach to IDE controller as ATAPI CD-ROM device
+        if (wants_ide) {
+            if (ide_index >= 0) {
+                IDE_CDROM_Attach(ide_index, is_second_cable_slot, drive_index(drive));
+            } else {
+                WriteOut(MSG_Get("PROGRAM_IMGMOUNT_IDE_CONTROLLERS_UNAVAILABLE"));
+            }
+        }
+
         // Print status message (success)
         WriteOut(MSG_Get("MSCDEX_SUCCESS"));
         std::string tmp(paths[0]);
@@ -363,7 +390,7 @@ void IMGMOUNT::Run(void) {
         WriteOut(MSG_Get("PROGRAM_MOUNT_STATUS_2"), drive, tmp.c_str());
 
     } else if (fstype == "none") {
-        FILE *newDisk = fopen_wrap(temp_line.c_str(), "rb+");
+        FILE *newDisk = fopen_wrap_ro_fallback(temp_line, roflag);
         if (!newDisk) {
             WriteOut(MSG_Get("PROGRAM_IMGMOUNT_INVALID_IMAGE"));
             return;

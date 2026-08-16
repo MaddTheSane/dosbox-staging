@@ -34,7 +34,9 @@ libdos_sources = files([
   'program_mem.cpp',
   'program_mount_common.cpp',
   'program_mount.cpp',
+  'program_placeholder.cpp',
   'program_rescan.cpp',
+  'program_serial.cpp',
 ])
 
 libdos = static_library('dos', libdos_sources,
@@ -42,6 +44,7 @@ libdos = static_library('dos', libdos_sources,
                         dependencies : [
                           sdl2_dep,
                           libdecoders_dep,
+                          libghc_dep,
                           libloguru_dep,
                         ])
 

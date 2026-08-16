@@ -3,7 +3,7 @@
   - C/C++ compiler with support for C++17
   - SDL >= 2.0.5
   - Opusfile
-  - Meson >= 0.49.0 or Visual Studio Community Edition
+  - Meson >= 0.54.2, or Visual Studio Community Edition 2019 or 2022
   - OS that is mostly POSIX-compliant or up-to-date Windows system
 
 All other dependencies are optional and can be disabled while configuring the
@@ -33,7 +33,7 @@ meson setup -Dbuildtype=release -Denable_debugger=heavy build/debugger
 ninja -C build/debugger
 ```
 
-If using Visual Studio, install `libcurses` using vcpkg and change
+If using Visual Studio, install `pdcurses` using vcpkg and change
 the `C_DEBUG` and optionally the `C_HEAVY_DEBUG` lines inside
 `src/platform/visualc/config.h`.
 
@@ -79,6 +79,18 @@ for development or `plain` for packaging.
 ``` shell
 meson setup -Dbuildtype=release build
 ```
+
+For those interested in performing many different build types, separate
+build/ directories (or subdirectories) can be used. This allows builds to
+be organized by type as well as allows easy side-by-side comparison of
+builds.
+
+One thing to note: If you use the VSCode editor with the clangd plugin,
+this plugin assumes Meson setup's "compile_commands.json" output file
+always resides in the hardcoded build/ directory. To work-around this bug,
+feel free to symlink this file from your active build directory into
+the hardcoded build/ location.
+
 Detailed documentation: [Meson: Core options][meson-core]
 
 [meson-core]: https://mesonbuild.com/Builtin-options.html#core-options
@@ -119,7 +131,7 @@ Prerequisites:
 
 ``` shell
 # Fedora
-sudo dnf install gtest-devel
+sudo dnf install gmock-devel gtest-devel
 ```
 ``` shell
 # Debian, Ubuntu

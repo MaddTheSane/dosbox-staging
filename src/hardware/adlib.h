@@ -140,7 +140,7 @@ public:
 	//Write to a specific register in the chip
 	virtual void WriteReg( Bit32u addr, Bit8u val ) = 0;
 	//Generate a certain amount of samples
-	virtual void Generate(MixerChannel *chan, uint16_t samples) = 0;
+	virtual void Generate(mixer_channel_t &chan, uint16_t samples) = 0;
 	//Initialize at a specific sample rate and mode
 	virtual void Init(uint32_t rate) = 0;
 	virtual ~Handler() = default;
@@ -155,7 +155,6 @@ class Capture;
 class Module: public Module_base {
 	IO_ReadHandleObject ReadHandler[3];
 	IO_WriteHandleObject WriteHandler[3];
-	MixerObject mixerObject;
 
 	//Mode we're running in
 	Mode mode;
@@ -178,7 +177,7 @@ class Module: public Module_base {
 
 public:
 	static OPL_Mode oplmode;
-	MixerChannel* mixerChan;
+	mixer_channel_t mixerChan;
 	Bit32u lastUsed;				//Ticks when adlib was last used to turn of mixing after a few second
 
 	Handler* handler;				//Handler that will generate the sound
@@ -187,7 +186,7 @@ public:
 	Chip	chip[2];
 
 	//Handle port writes
-	void PortWrite(io_port_t port, uint8_t val, io_width_t width);
+	void PortWrite(io_port_t port, io_val_t value, io_width_t width);
 	uint8_t PortRead(io_port_t port, io_width_t width);
 	void Init(Mode m);
 

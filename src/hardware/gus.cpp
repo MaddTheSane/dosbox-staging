@@ -117,7 +117,6 @@ using ram_array_t = std::array<uint8_t, RAM_SIZE>;
 using read_io_array_t = std::array<IO_ReadHandleObject, READ_HANDLERS>;
 using vol_scalars_array_t = std::array<float, VOLUME_LEVELS>;
 using write_io_array_t = std::array<IO_WriteHandleObject, WRITE_HANDLERS>;
-using mixer_channel_ptr_t = std::unique_ptr<MixerChannel, decltype(&MIXER_DelChannel)>;
 
 // A Voice is used by the Gus class and instantiates 32 of these.
 // Each voice represents a single "mono" render_buffer of audio having its own
@@ -251,7 +250,7 @@ private:
 	void UpdateDmaAddress(uint8_t new_address);
 	void UpdateWaveMsw(int32_t &addr) const noexcept;
 	void UpdateWaveLsw(int32_t &addr) const noexcept;
-	void WriteToPort(io_port_t port, uint16_t val, io_width_t width);
+	void WriteToPort(io_port_t port, io_val_t value, io_width_t width);
 
 	void WriteToRegister();
 
@@ -275,11 +274,11 @@ private:
 	SoftLimiter soft_limiter;
 	Voice *target_voice = nullptr;
 	DmaChannel *dma_channel = nullptr;
-	mixer_channel_ptr_t audio_channel{nullptr, MIXER_DelChannel};
+	mixer_channel_t audio_channel = nullptr;
 	uint8_t &adlib_command_reg = adlib_commandreg;
 
 	// Port address
-	uint16_t port_base = 0u;
+	io_port_t port_base = 0u;
 
 	// Voice states
 	uint32_t active_voice_mask = 0u;
@@ -602,9 +601,8 @@ Gus::Gus(uint16_t port, uint8_t dma, uint8_t irq, const std::string &ultradir)
 	// Register the Audio and DMA channels
 	const auto mixer_callback = std::bind(&Gus::AudioCallback, this,
 	                                      std::placeholders::_1);
-	audio_channel = mixer_channel_ptr_t(MIXER_AddChannel(mixer_callback, 1, "GUS"),
-	                                    MIXER_DelChannel);
-	assert(audio_channel);
+	audio_channel = MIXER_AddChannel(mixer_callback, 1, "GUS");
+
 	// Let the mixer command adjust the GUS's internal amplitude level's
 	const auto set_level_callback = std::bind(&Gus::SetLevelCallback, this, _1);
 	audio_channel->RegisterLevelCallBack(set_level_callback);
@@ -1192,8 +1190,10 @@ void Gus::UpdateDmaAddress(const uint8_t new_address)
 #endif
 }
 
-void Gus::WriteToPort(io_port_t port, uint16_t val, io_width_t width)
+void Gus::WriteToPort(io_port_t port, io_val_t value, io_width_t width)
 {
+	const auto val = check_cast<uint16_t>(value);
+
 	//	LOG_MSG("GUS: Write to port %x val %x", port, val);
 	switch (port - port_base) {
 	case 0x200:
@@ -1452,7 +1452,7 @@ Gus::~Gus()
 		wh.Uninstall();
 }
 
-static void gus_destroy(MAYBE_UNUSED Section *sec)
+static void gus_destroy([[maybe_unused]] Section *sec)
 {
 	// GUS destroy is run when the user wants to deactivate the GUS:
 	// C:\> config -set gus=false
@@ -1519,7 +1519,7 @@ void init_gus_dosbox_settings(Section_prop &secprop)
 	                   "with Timidity should work fine.");
 }
 
-void GUS_AddConfigSection(Config *conf)
+void GUS_AddConfigSection(const config_ptr_t &conf)
 {
 	assert(conf);
 	Section_prop *sec = conf->AddSection_prop("gus", &gus_init, true);

@@ -30,8 +30,6 @@
 #include "callback.h"
 #include "string_utils.h"
 
-unsigned int result_errorcode = 0;
-
 DOS_Shell::~DOS_Shell() {
 	bf.reset();
 }
@@ -43,8 +41,9 @@ DOS_Shell::~DOS_Shell() {
 void DOS_Shell::ShowPrompt(void) {
 	Bit8u drive=DOS_GetDefaultDrive()+'A';
 	char dir[DOS_PATHLENGTH];
-	dir[0] = 0; //DOS_GetCurrentDir doesn't always return something. (if drive is messed up)
-	DOS_GetCurrentDir(0,dir);
+	reset_str(dir); // DOS_GetCurrentDir doesn't always return
+	                // something. (if drive is messed up)
+	DOS_GetCurrentDir(0, dir);
 	InjectMissingNewline();
 	WriteOut("%c:\\%s>", drive, dir);
 	ResetLastWrittenChar('\n'); // prevents excessive newline if cmd prints nothing
@@ -63,7 +62,7 @@ void DOS_Shell::InputCommand(char * line) {
 	Bit16u len=0;
 	bool current_hist=false; // current command stored in history?
 
-	line[0] = '\0';
+	reset_str(line);
 
 	std::list<std::string>::iterator it_history = l_history.begin(), it_completion = l_completion.begin();
 
@@ -129,7 +128,7 @@ void DOS_Shell::InputCommand(char * line) {
 						}
 						str_len = str_index = it_history->length();
 						size = CMD_MAXLINE - str_index - 2;
-						line[str_len] = 0;
+						terminate_str_at(line, str_len);
 					}
 					break;
 
@@ -177,36 +176,40 @@ void DOS_Shell::InputCommand(char * line) {
 					str_len = str_index = len;
 					size = CMD_MAXLINE - str_index - 2;
 					DOS_WriteFile(STDOUT, (Bit8u *)line, &len);
-					it_history ++;
+					++it_history;
 					break;
 
 				case 0x50: /* Down */
 					if (l_history.empty() || it_history == l_history.begin()) break;
 
 					// not very nice but works ..
-					it_history --;
+					--it_history;
 					if (it_history == l_history.begin()) {
 						// no previous commands in history
-						it_history ++;
+						++it_history;
 
 						// remove current command from history
 						if (current_hist) {
-							current_hist=false;
+							current_hist = false;
 							l_history.pop_front();
 						}
 						break;
-					} else it_history --;
+					} else {
+						--it_history;
+					}
 
-					for (;str_index>0; str_index--) {
+					for (; str_index > 0; str_index--) {
 						// removes all characters
-						outc(8); outc(' '); outc(8);
+						outc(8);
+						outc(' ');
+						outc(8);
 					}
 					strcpy(line, it_history->c_str());
 					len = (Bit16u)it_history->length();
 					str_len = str_index = len;
 					size = CMD_MAXLINE - str_index - 2;
 					DOS_WriteFile(STDOUT, (Bit8u *)line, &len);
-					it_history ++;
+					++it_history;
 
 					break;
 				case 0x53: /* Delete */
@@ -220,14 +223,16 @@ void DOS_Shell::InputCommand(char * line) {
 							line[i]=line[i+1];
 							outc(8);
 						}
-						line[--str_len]=0;
+						terminate_str_at(line, --str_len);
 						size++;
 					}
 					break;
 				case 15: /* Shift+Tab */
 					if (l_completion.size()) {
-						if (it_completion == l_completion.begin()) it_completion = l_completion.end (); 
-						it_completion--;
+						if (it_completion == l_completion.begin()) {
+							it_completion = l_completion.end ();
+						}
+						--it_completion;
 		
 						if (it_completion->length()) {
 							for (;str_index > completion_index; str_index--) {
@@ -242,8 +247,7 @@ void DOS_Shell::InputCommand(char * line) {
 							DOS_WriteFile(STDOUT, (Bit8u *)it_completion->c_str(), &len);
 						}
 					}
-				default:
-					break;
+				default: break;
 				}
 			};
 			break;
@@ -254,13 +258,13 @@ void DOS_Shell::InputCommand(char * line) {
 				size++;
 				if (str_remain) {
 					memmove(&line[str_index-1],&line[str_index],str_remain);
-					line[--str_len]=0;
+					terminate_str_at(line, --str_len);
 					str_index --;
 					/* Go back to redraw */
 					for (size_t i = str_index; i < str_len; i++)
 						outc(line[i]);
 				} else {
-					line[--str_index] = '\0';
+					terminate_str_at(line, --str_index);
 					str_len--;
 				}
 				outc(' ');	outc(8);
@@ -280,11 +284,13 @@ void DOS_Shell::InputCommand(char * line) {
 		case'\t':
 			{
 				if (l_completion.size()) {
-					it_completion ++;
-					if (it_completion == l_completion.end()) it_completion = l_completion.begin();
+					++it_completion;
+					if (it_completion == l_completion.end())
+						it_completion = l_completion.begin();
 				} else {
 					// build new completion list
-					// Lines starting with CD will only get directories in the list
+					// Lines starting with CD will only get
+					// directories in the list
 					bool dir_only = (strncasecmp(line,"CD ",3)==0);
 
 					// get completion mask
@@ -378,7 +384,7 @@ void DOS_Shell::InputCommand(char * line) {
 			outc('\\');
 			outc('\r');
 			outc('\n');
-			*line = 0;      // reset the line.
+			reset_str(line);
 			if (l_completion.size()) l_completion.clear(); //reset the completion list.
 			this->InputCommand(line);	//Get the NEW line.
 			size = 0;       // stop the next loop
@@ -396,14 +402,16 @@ void DOS_Shell::InputCommand(char * line) {
 					line[i]=line[i-1]; //move internal buffer
 					outc(8); //move cursor back (from write buffer to screen)
 				}
-				line[++str_len]=0;//new end (as the internal buffer moved one place to the right
+				// new end (as the internal buffer moved one
+				// place to the right
+				terminate_str_at(line, ++str_len);
 				size--;
 			};
 
 			line[str_index]=c;
 			str_index ++;
 			if (str_index > str_len){ 
-				line[str_index] = '\0';
+				terminate_str_at(line, str_index);
 				str_len++;
 				size--;
 			}
@@ -473,17 +481,19 @@ bool DOS_Shell::Execute(char * name,char * args) {
  * return false =>       check for hardware changes in do_command */
 	char fullname[DOS_PATHLENGTH+4]; //stores results from Which
 	char line[CMD_MAXLINE];
-	if(strlen(args)!= 0){
-		if(*args != ' '){ //put a space in front
-			line[0]=' ';line[1]=0;
-			strncat(line,args,CMD_MAXLINE-2);
-			line[CMD_MAXLINE-1]=0;
+	const bool have_args = args && args[0] != '\0';
+	if (have_args) {
+		if (*args != ' ') { // put a space in front
+			line[0] = ' ';
+			terminate_str_at(line, 1);
+			strncat(line, args, CMD_MAXLINE - 2);
+			terminate_str_at(line, CMD_MAXLINE - 1);
 		} else {
 			safe_strcpy(line, args);
 		}
-	}else{
-		line[0]=0;
-	};
+	} else {
+		reset_str(line);
+	}
 
 	/* check for a drive change */
 	if (((strcmp(name + 1, ":") == 0) || (strcmp(name + 1, ":\\") == 0)) && isalpha(*name))
@@ -508,13 +518,16 @@ bool DOS_Shell::Execute(char * name,char * args) {
 	const char *extension = strrchr(fullname, '.');
 	if (!extension) {
 		// Check if the result will fit in the parameters.
-		if (safe_strlen(fullname) > (DOS_PATHLENGTH - 1))
+		if (safe_strlen(fullname) > (DOS_PATHLENGTH - 1)) {
+			WriteOut(MSG_Get("PROGRAM_PATH_TOO_LONG"), fullname,
+			         DOS_PATHLENGTH);
 			return false;
+		}
 
 		// Try to add .COM, .EXE and .BAT extensions to the filename
 		char temp_name[DOS_PATHLENGTH + 4];
 		for (const char *ext : {".COM", ".EXE", ".BAT"}) {
-			snprintf(temp_name, sizeof(temp_name), "%s%s", fullname, ext);
+			safe_sprintf(temp_name, "%s%s", fullname, ext);
 			const char *temp_fullname = Which(temp_name);
 			if (temp_fullname) {
 				extension = ext;
@@ -571,14 +584,17 @@ bool DOS_Shell::Execute(char * name,char * args) {
 		full_arguments.assign(line);
 
 		/* Fill the command line */
-		CommandTail cmdtail;
-		cmdtail.count = 0;
-		memset(&cmdtail.buffer,0,127); //Else some part of the string is unitialized (valgrind)
-		if (safe_strlen(line) > 126)
-			line[126] = 0;
-		cmdtail.count=(Bit8u)strlen(line);
-		memcpy(cmdtail.buffer,line,strlen(line));
-		cmdtail.buffer[strlen(line)]=0xd;
+		CommandTail cmdtail = {};
+
+		// copy at-most 126 chracters plus the terminating zero
+		safe_strcpy(cmdtail.buffer, line);
+
+		cmdtail.count = check_cast<uint8_t>(safe_strlen(cmdtail.buffer));
+		terminate_str_at(line, cmdtail.count);
+
+		assert(cmdtail.count < sizeof(cmdtail.buffer));
+		cmdtail.buffer[cmdtail.count] = 0xd;
+
 		/* Copy command line in stack block too */
 		MEM_BlockWrite(SegPhys(ss)+reg_sp+0x100,&cmdtail,128);
 
@@ -589,22 +605,29 @@ bool DOS_Shell::Execute(char * name,char * args) {
 		//Prepare string first
 		char parseline[258] = { 0 };
 		for(char *pl = line,*q = parseline; *pl ;pl++,q++) {
-			if (*pl == '=' || *pl == ';' || *pl ==',' || *pl == '\t' || *pl == ' ') *q = 0; else *q = *pl; //Replace command seperators with 0.
+			if (*pl == '=' || *pl == ';' || *pl ==',' || *pl == '\t' || *pl == ' ') 
+				reset_str(q);
+			else
+				*q = *pl; //Replace command seperators with 0.
 		} //No end of string \0 needed as parseline is larger than line
 
 		for(char* p = parseline; (p-parseline) < 250 ;p++) { //Stay relaxed within boundaries as we have plenty of room
 			if (*p == '/') { //Transform /Hello into H\0ello
-				*p = 0;
+				reset_str(p);
 				p++;
 				while ( *p == 0 && (p-parseline) < 250) p++; //Skip empty fields
 				if ((p-parseline) < 250) { //Found something. Lets get the first letter and break it up
 					p++;
 					memmove(static_cast<void*>(p + 1),static_cast<void*>(p),(250-(p-parseline)));
-					if ((p-parseline) < 250) *p = 0;
+					if ((p - parseline) < 250)
+						reset_str(p);
 				}
 			}
 		}
-		parseline[255] = parseline[256] = parseline[257] = 0; //Just to be safe.
+		// Just to be safe
+		terminate_str_at(parseline, 255);
+		terminate_str_at(parseline, 256);
+		terminate_str_at(parseline, 257);
 
 		/* Parse FCB (first two parameters) and put them into the current DOS_PSP */
 		Bit8u add;
@@ -632,7 +655,6 @@ bool DOS_Shell::Execute(char * name,char * args) {
 		SegSet16(cs,RealSeg(newcsip));
 		reg_ip=RealOff(newcsip);
 #endif
-		result_errorcode = 0;
 		/* Start up a dos execute interrupt */
 		reg_ax=0x4b00;
 		//Filename pointer
@@ -645,8 +667,6 @@ bool DOS_Shell::Execute(char * name,char * args) {
 		CALLBACK_RunRealInt(0x21);
 		/* Restore CS:IP and the stack */
 		reg_sp+=0x200;
-		if (result_errorcode)
-			dos.return_code = result_errorcode;
 #if 0
 		reg_eip=oldeip;
 		SegSet16(cs,oldcs);
@@ -675,7 +695,7 @@ const char *DOS_Shell::Which(const char *name) const
 
 	/* try to find .com .exe .bat */
 	for (const char *ext_fmt : {"%s.COM", "%s.EXE", "%s.BAT"}) {
-		snprintf(which_ret, sizeof(which_ret), ext_fmt, name);
+		safe_sprintf(which_ret, ext_fmt, name);
 		if (DOS_FileExists(which_ret))
 			return which_ret;
 	}
@@ -684,7 +704,8 @@ const char *DOS_Shell::Which(const char *name) const
 	char path[DOS_PATHLENGTH];std::string temp;
 	if (!GetEnvStr("PATH",temp)) return 0;
 	const char * pathenv=temp.c_str();
-	if (!pathenv) return 0;
+
+	assert(pathenv);
 	pathenv = strchr(pathenv,'=');
 	if (!pathenv) return 0;
 	pathenv++;
@@ -703,9 +724,10 @@ const char *DOS_Shell::Which(const char *name) const
 			/* If max size. move till next ; and terminate path */
 			while(*pathenv && (*pathenv != ';')) 
 				pathenv++;
-			path[DOS_PATHLENGTH - 1] = 0;
-		} else path[i_path] = 0;
-
+			terminate_str_at(path, DOS_PATHLENGTH - 1);
+		} else {
+			terminate_str_at(path, i_path);
+		}
 
 		/* check entry */
 		if (size_t len = safe_strlen(path)) {
@@ -725,7 +747,7 @@ const char *DOS_Shell::Which(const char *name) const
 				return which_ret;
 
 			for (const char *ext_fmt : {"%s.COM", "%s.EXE", "%s.BAT"}) {
-				snprintf(which_ret, sizeof(which_ret), ext_fmt, path);
+				safe_sprintf(which_ret, ext_fmt, path);
 				if (DOS_FileExists(which_ret))
 					return which_ret;
 			}

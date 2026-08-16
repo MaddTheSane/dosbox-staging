@@ -28,6 +28,7 @@ support today's systems.
 | **Version control**            | Git                           | [SVN]
 | **Language**                   | C++17                         | C++03<sup>[1]</sup>
 | **SDL**                        | >= 2.0.5                      | 1.2<sup>＊</sup>
+| **Logging**                    | Loguru for C++<sup>[6]</sup>  | Yes, in-house class
 | **Buildsystem**                | Meson or Visual Studio 2019   | Autotools or Visual Studio 2003
 | **CI**                         | Yes                           | No
 | **Static analysis**            | Yes<sup>[2],[3],[4],[5]</sup> | No
@@ -44,6 +45,7 @@ support today's systems.
 [4]:https://scan.coverity.com/projects/dosbox-staging
 [5]:https://github.com/dosbox-staging/dosbox-staging/actions?query=workflow%3A%22PVS-Studio+analysis%22
 [6]:tests/README.md
+[7]: https://github.com/emilk/loguru
 [Development builds]:https://dosbox-staging.github.io/downloads/devel/
 
 ### Feature differences
@@ -77,20 +79,29 @@ Feature differences between release binaries (or unpatched sources):
 
 | *Feature*                   | *DOSBox Staging*                                     | *DOSBox SVN*
 |-                            |-                                                     |-
-| **Pixel-perfect mode**      | Yes (`output=openglpp` or `output=texturepp`)        | N/A
-| **Resizable window**        | Yes (for all `output=opengl` modes)                  | N/A
-| **Relative window size**    | Yes (`windowresolution=small`, `medium`, or `large`) | `windowresolution=X%`
+| **Pixel-perfect mode**      | Yes: `output=openglpp` or `output=texturepp`         | N/A
+| **Resizable window**        | Yes: for all `output=opengl` modes                   | N/A
+| **Relative window size**    | Yes: `windowresolution=small`, `medium`, or `large`  | `windowresolution=X%`
+| **Window placement**        | Yes: `windowposition = 0,0`, and more<sup>[16]</sup> | Manual placement
 | **[OPL] emulators**         | compat, fast, mame, nuked<sup>[8]</sup>              | compat, fast, mame
-| **[CGA]/mono support**      | Yes (`machine=cga_mono`)<sup>[9]</sup>               | Only CGA with colour
-| **CGA composite modes**     | Yes (`machine=pcjr/tandy/cga` with hotkeys)          | N/A
-| **[Wayland] support**       | Experimental (use `SDL_VIDEODRIVER=wayland`)         | N/A
-| **Modem phonebook file**    | Yes (`phonebookfile=<name>`)                         | N/A
+| **[CGA]/mono support**      | Yes: `machine=cga_mono`)<sup>[9]</sup>               | Only CGA with colour
+| **CGA composite modes**     | Yes: `machine=pcjr/tandy/cga` with hotkeys)          | N/A
+| **[Wayland] support**       | Experimental: use `SDL_VIDEODRIVER=wayland`          | N/A
+| **Modem phonebook file**    | Yes: `phonebookfile=<name>`                          | N/A
 | **Autotype command**        | Yes<sup>[10]</sup>                                   | N/A
 | **Startup verbosity**       | Yes<sup>[11]</sup>                                   | N/A
 | **[GUS] enhancements**      | Yes<sup>[12]</sup>                                   | N/A
-| **Raw mouse input**         | Yes (`raw_mouse_input=true`)                         | N/A
-| **[FluidSynth][FS] MIDI**   | Yes<sup>[13]</sup> (FluidSynth 2.x)                  | Only external synths
-| **[MT-32] emulator**        | Yes<sup>＊</sup> (libmt32emu 2.4.2)                  | N/A
+| **Raw mouse input**         | Yes: `raw_mouse_input=true`                          | N/A
+| **[FluidSynth][FS] MIDI**   | Yes<sup>[13]</sup>: FluidSynth 2.x                   | Only external synths
+| **[MT-32] emulator**        | Yes<sup>＊</sup>: libmt32emu 2.4.2                   | N/A
+| **Expanded S3 support**     | 4 and 8 MiB of RAM<sup>[14]</sup>                    | 2 MiB of RAM
+| **Portable & layered conf** | By default<sup>[15]</sup>                            | With`-userconf` and `-conf`
+| **Translations handling**   | Bundled, see section 14 in README                    | With path to .lng file
+| **[ENet] modem transport**  | Yes: serialport `sock:1` flag or `SERIAL.COM`<sup>[17]</sup> | N/A
+| **Ethernet via [slirp]**    | Yes: See `[ethernet]` section in conf file           | N/A
+| **IDE support for CDROMs**  | Yes: See `-ide` flag in `IMGMOUNT.COM /help`         | N/A
+| **Networking in Win3.11**   | Yes: Via local shell<sup>[18]</sup>                  | Yes: bootable HDD image
+
 
 <sup>＊- Requires original ROM files</sup>
 
@@ -100,12 +111,18 @@ Feature differences between release binaries (or unpatched sources):
 [GUS]:   https://en.wikipedia.org/wiki/Gravis_Ultrasound
 [MT-32]: https://en.wikipedia.org/wiki/Roland_MT-32
 [FS]:    http://www.fluidsynth.org/
+[ENet]:  https://github.com/zpl-c/enet
 [8]:     https://www.vogons.org/viewtopic.php?f=9&t=37782
 [9]:     https://github.com/dosbox-staging/dosbox-staging/commit/ffe3c5ab7fb5e28bae78f07ea987904f391a7cf8
 [10]:    https://github.com/dosbox-staging/dosbox-staging/commit/239396fec83dbba6a1eb1a0f4461f4a427d2be38
 [11]:    https://github.com/dosbox-staging/dosbox-staging/pull/477
 [12]:    https://github.com/dosbox-staging/dosbox-staging/wiki/Gravis-UltraSound-Enhancements
 [13]:    https://github.com/dosbox-staging/dosbox-staging/issues/262#issuecomment-734719260
+[14]:    https://github.com/dosbox-staging/dosbox-staging/pull/1244
+[15]:    https://github.com/dosbox-staging/dosbox-staging/blob/972ad1f7016648b4557113264022176770878726/README#L422
+[16]:    https://github.com/dosbox-staging/dosbox-staging/pull/1272
+[17]:    https://github.com/dosbox-staging/dosbox-staging/pull/1398
+[18]:    https://github.com/dosbox-staging/dosbox-staging/pull/1447
 
 ## Stable release builds
 
@@ -119,16 +136,10 @@ Feature differences between release binaries (or unpatched sources):
 
 ## Get the source
 
-  - First, ensure git always updates your submodules when you pull (one-time step):
-
-    ``` shell
-    git config --global submodule.recurse true
-    ```
-
   - Clone the repository (one-time step):
 
     ``` shell
-    git clone --recurse-submodules https://github.com/dosbox-staging/dosbox-staging.git
+    git clone https://github.com/dosbox-staging/dosbox-staging.git
     ```
 
 ## Build instructions
@@ -143,16 +154,17 @@ Install build dependencies appropriate for your OS:
 # Fedora
 sudo dnf install ccache gcc-c++ meson alsa-lib-devel libpng-devel \
                  SDL2-devel SDL2_net-devel opusfile-devel fluidsynth-devel \
-                 mt32emu-devel
+                 mt32emu-devel libslirp-devel
 ```
 
 ``` shell
 # Debian, Ubuntu
 sudo apt install ccache build-essential libasound2-dev libpng-dev \
-                 libsdl2-dev libsdl2-net-dev libopusfile-dev libfluidsynth-dev
+                 libsdl2-dev libsdl2-net-dev libopusfile-dev \
+                 libfluidsynth-dev libslirp-dev
 
 # Install Meson on Debian-10 "Buster" or Ubuntu-20.04 and older
-sudo apt install python3-setuptools
+sudo apt install python3-setuptools python3-pip
 sudo pip3 install --upgrade meson ninja
 
 # Install Meson on Debian-11 "Bullseye" or Ubuntu-21.04 and newer
@@ -162,43 +174,35 @@ sudo apt install meson
 ``` shell
 # Arch, Manjaro
 sudo pacman -S ccache gcc meson alsa-lib libpng sdl2 sdl2_net opusfile \
-               fluidsynth
+               fluidsynth libslirp
 ```
 
 ``` shell
 # openSUSE
 sudo zypper install ccache gcc gcc-c++ meson alsa-devel libpng-devel \
                     libSDL2-devel libSDL2_net-devel opusfile-devel \
-                    fluidsynth-devel libmt32emu-devel
+                    fluidsynth-devel libmt32emu-devel libslirp-devel
 ```
 
 ``` shell
 # macOS
 xcode-select --install
-brew install ccache meson libpng sdl2 sdl2_net opusfile fluid-synth
+brew install ccache meson libpng sdl2 sdl2_net opusfile fluid-synth libslirp
 ```
 
 ### Build and stay up-to-date with the latest sources
 
-  - Checkout the master branch, which will include the submodules:
+  - Checkout the main branch:
 
     ``` shell
     # commit or stash any personal code changes
-    git checkout master -f
+    git checkout main -f
     ```
 
   - Pull the latest updates. This is necessary every time you want a new build:
 
     ``` shell
     git pull
-    ```
-
-  - Optionally, you can clean your ccache and working directories. This is only
-    advised if you have unexpected build failures:
-
-    ``` shell
-    ccache -C
-    git clean -fdx
     ```
 
   - Setup the build. This is a one-time step either after cloning the repo or
@@ -212,7 +216,7 @@ brew install ccache meson libpng sdl2 sdl2_net opusfile fluid-synth
         -Dtry_static_libs=png \
         -Dfluidsynth:enable-floats=true \
         -Dfluidsynth:try-static-deps=true \
-      build/release
+      build
     ```
 
     The above enables all of DOSBox Staging's functional features. If you're
@@ -222,10 +226,10 @@ brew install ccache meson libpng sdl2 sdl2_net opusfile fluid-synth
   - Compile the sources. This is necessary every time you want a new build:
 
     ``` shell
-    meson compile -C build/release
+    meson compile -C build
     ```
 
-    Your binary is: `build/release/dosbox` -- have fun!
+    Your binary is: `build/dosbox` -- have fun!
 
 
 ### Windows - Visual Studio (2019 or newer)

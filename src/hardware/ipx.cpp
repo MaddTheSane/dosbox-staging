@@ -535,9 +535,10 @@ static void pingAck(IPaddress retAddr) {
 
 	const int result = SDLNet_UDP_Send(ipxClientSocket, regPacket.channel,
 	                                   &regPacket);
-	if (!result)
+	if (!result) {
 		DEBUG_LOG_MSG("IPX: Failed to acknowledge send: %s",
 		              SDLNet_GetError());
+	}
 }
 
 static void pingSend(void) {
@@ -1194,7 +1195,7 @@ public:
 
 static IPX* test;
 
-void IPX_ShutDown(MAYBE_UNUSED Section* sec) {
+void IPX_ShutDown([[maybe_unused]] Section* sec) {
 	delete test;    
 }
 

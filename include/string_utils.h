@@ -28,6 +28,20 @@
 #include <cstring>
 #include <string>
 
+template <size_t N>
+int safe_sprintf(char (&dst)[N], const char *fmt, ...)
+        GCC_ATTRIBUTE(format(printf, 2, 3));
+
+template <size_t N>
+int safe_sprintf(char (&dst)[N], const char *fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	const int ret = vsnprintf(dst, N, fmt, args);
+	va_end(args);
+	return ret;
+}
+
 /* Copy a string into C array
  *
  * This function copies string pointed by src to a fixed-size buffer dst.
@@ -56,8 +70,8 @@ char *safe_strcpy(char (&dst)[N], const char *src) noexcept
 {
 	assert(src != nullptr);
 	assert(src < &dst[0] || src > &dst[N - 1]);
-	snprintf(dst, N, "%s", src);
-	return &dst[0];
+	const auto rcode = safe_sprintf(dst, "%s", src);
+	return (rcode >= 0) ? &dst[0] : nullptr;
 }
 
 template <size_t N>
@@ -75,20 +89,6 @@ size_t safe_strlen(char (&str)[N]) noexcept
 }
 
 template <size_t N>
-int safe_sprintf(char (&dst)[N], const char *fmt, ...)
-        GCC_ATTRIBUTE(format(printf, 2, 3));
-
-template <size_t N>
-int safe_sprintf(char (&dst)[N], const char *fmt, ...)
-{
-	va_list args;
-	va_start(args, fmt);
-	const int ret = vsnprintf(dst, N, fmt, args);
-	va_end(args);
-	return ret;
-}
-
-template <size_t N>
 bool starts_with(const char (&pfx)[N], const char *str) noexcept
 {
 	return (strncmp(pfx, str, N - 1) == 0);
@@ -103,5 +103,38 @@ bool starts_with(const char (&pfx)[N], const std::string &str) noexcept
 bool ends_with(const std::string &str, const std::string &suffix) noexcept;
 
 bool find_in_case_insensitive(const std::string &needle, const std::string &haystack);
+
+// Safely terminate a C string at the given offset
+//
+// Convert code like: stuff[n] = 0;
+//  - "is stuff an integer array?"
+//  - "are we setting a counter back to 0?"
+//  - "is stuff a valid array?"
+//
+// To: terminate_str_at(stuff, n);
+// which is self-documenting about the type (stuff is a string),
+// intent (terminating), and where it's being applied (n);
+//
+template <typename T, typename INDEX_T>
+void terminate_str_at(T *str, INDEX_T i) noexcept
+{
+	// Check that we're only operating on bona-fide C strings
+	static_assert(std::is_same<T, char>::value || std::is_same<T, wchar_t>::value,
+	              "Can only reset a *char or *wchar_t with the string-terminator");
+
+	// Check that we don't underflow with a negative index
+	assert(std::is_unsigned<INDEX_T>::value || i >= 0);
+
+	// Check that we don't dereferrence a null pointer
+	assert(str != nullptr);
+	str[i] = '\0';
+}
+
+// reset a C string with the string-terminator character
+template <typename T>
+void reset_str(T *str) noexcept
+{
+	terminate_str_at(str, 0);
+}
 
 #endif

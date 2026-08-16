@@ -23,9 +23,6 @@
 #include "control.h"
 #include "logging.h"
 
-// This global variable should be setup/torn down per test.
-Config *control = nullptr;
-
 // During testing we never want to log to stdout/stderr, as it could
 // negatively affect test harness.
 void GFX_ShowMsg(const char *, ...) {}
@@ -39,7 +36,7 @@ const char *MSG_Get(char const *)
 }
 
 #if C_DEBUG
-void LOG::operator()(MAYBE_UNUSED char const *buf, ...)
+void LOG::operator()([[maybe_unused]] char const *buf, ...)
 {
 	(void)d_type;     // Deliberately unused.
 	(void)d_severity; // Deliberately unused.

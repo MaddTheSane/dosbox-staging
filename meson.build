@@ -1,28 +1,75 @@
 project('dosbox-staging', 'c', 'cpp',
-        version : '0.78.0',
-        license : 'GPL-2.0-or-later',
-        default_options : ['cpp_std=c++17', 'warning_level=3', 'b_ndebug=if-release', 'b_staticpic=false'],
-        meson_version : '>= 0.54.2')
+  version : '0.78.1',
+  license : 'GPL-2.0-or-later',
+  meson_version : '>= 0.54.2',
+  default_options : [
+    'cpp_std=c++17',
+    'warning_level=3',
+    'b_ndebug=if-release',
+    'b_staticpic=false',
+    'fluidsynth:enable-floats=true',
+    'fluidsynth:openmp=disabled',
+    'fluidsynth:enable-threads=false',
+    'fluidsynth:try-static-deps=false',
+    'fluidsynth:warning_level=0',
+    'glib:glib_assert=false',
+    'glib:glib_checks=false',
+    'glib:glib_debug=disabled',
+    'glib:libmount=disabled',
+    'glib:libelf=disabled',
+    'glib:nls=disabled',
+    'glib:tests=false',
+    'glib:warning_level=0',
+    'glib:xattr=false',
+    'gtest:warning_level=0',
+    'mt32emu:warning_level=0',
+    'slirp:warning_level=0',
+  ]
+)
 
 # After increasing the minimum-required meson version, make the following
 # improvements:
 #
-# - 0.53.0 - use summary() to communicate setup result
 # - 0.55.0 - subproject wraps are automatically promoted to fallbacks,
 #            stop using: "fallback : ['foo', 'foo_dep']" for dependencies
 # - 0.56.0 - use meson.current_source_dir() in unit tests
 
-
-# compiler flags
-#
 cc = meson.get_compiler('c')
 cxx = meson.get_compiler('cpp')
+prefers_static_libs = (get_option('default_library') == 'static')
 
-add_project_arguments('-Weffc++', language : 'cpp')
-if cxx.has_argument('-Wextra-semi')
-    add_project_arguments('-Wextra-semi', language : 'cpp')
+summary('Build type',     get_option('buildtype'), section : 'Build Summary')
+summary('Install prefix', get_option('prefix'),    section : 'Build Summary')
+
+# extra compiler flags
+extra_flags = []
+
+# If the compiler provides std::filesystem, then we consider it modern enough
+# that we can trust it's extra helpful warnings to let us improve the code quality.
+if cxx.has_header('filesystem')
+  extra_flags += ['-Wmaybe-uninitialized', '-Weffc++', '-Wextra-semi']
+else
+  # Otherwise, it's an old compiler and we're just trying to build, and don't
+  # care about fixing their warnings (some generate warnings from their own STL).
+  warning('Compiler lacks the C++17 std::filesystem - try to upgrade your compiler!')
 endif
 
+if host_machine.system() == 'windows'
+  extra_flags += '-Wno-pedantic-ms-format'
+endif
+if prefers_static_libs
+  extra_flags += ['-static-libstdc++', '-static-libgcc']
+else
+  extra_flags += ['-shared-libstdc++', '-shared-libgcc', '-fPIC']
+endif
+foreach flag : extra_flags
+  if cc.has_argument(flag)
+    add_project_arguments(flag, language : 'c')
+  endif
+  if cxx.has_argument(flag)
+    add_project_arguments(flag, language : 'cpp')
+  endif
+endforeach
 
 # gather data for config file
 #
@@ -31,12 +78,6 @@ endif
 #
 conf_data = configuration_data()
 conf_data.set('version', meson.project_version())
-
-if get_option('buildtype').startswith('debug')
-  conf_data.set('conf_suffix', '-staging-git')
-else
-  conf_data.set('conf_suffix', '-staging')
-endif
 
 os_family_name = {
   'linux'     : 'LINUX',
@@ -52,7 +93,8 @@ conf_data.set(os_family_name, 1)
 
 conf_data.set10('C_MODEM', get_option('use_sdl2_net'))
 conf_data.set10('C_IPX', get_option('use_sdl2_net'))
-conf_data.set10('C_NE2000', get_option('use_slirp') or get_option('use_pcap'))
+conf_data.set10('C_SLIRP', get_option('use_slirp'))
+conf_data.set10('C_NE2000', get_option('use_slirp'))
 conf_data.set10('C_OPENGL', get_option('use_opengl'))
 conf_data.set10('C_FLUIDSYNTH', get_option('use_fluidsynth'))
 conf_data.set10('C_MT32EMU', get_option('use_mt32emu'))
@@ -119,11 +161,20 @@ if cc.has_member('struct dirent', 'd_type', prefix : '#include <dirent.h>')
   conf_data.set10('HAVE_STRUCT_DIRENT_D_TYPE', true)
 endif
 
-foreach header : ['pwd.h', 'strings.h', 'netinet/in.h', 'sys/socket.h']
+foreach header : ['pwd.h', 'strings.h', 'netinet/in.h']
   if cc.has_header(header)
     conf_data.set('HAVE_' + header.underscorify().to_upper(), 1)
   endif
 endforeach
+
+# Check for the actual calls we need in socket.h, because some systems
+# have socket.h but are missing some calls.
+if cc.has_header('sys/socket.h')
+  if cc.has_function('getpeername', prefix : '#include <sys/socket.h>') and \
+     cc.has_function('getsockname', prefix : '#include <sys/socket.h>')
+    conf_data.set10('HAVE_SYS_SOCKET_H', true)
+  endif
+endif
 
 # Header windows.h defines old min/max macros, that conflict with C++11
 # std::min/std::max.  Defining NOMINMAX prevents these macros from appearing.
@@ -178,28 +229,29 @@ endif
 #
 static_libs_list = get_option('try_static_libs')
 msg = 'You can disable this dependency with: -D@0@=false'
-
-optional_dep  = dependency('', required : false)
-dl_dep        = cc.find_library('dl', required : false)
-atomic_dep    = cxx.find_library('atomic', required : false)
-opus_dep      = dependency('opusfile',
-                           static : ('opusfile' in static_libs_list))
-threads_dep   = dependency('threads')
-sdl2_dep      = dependency('sdl2', version : '>= 2.0.5',
-                           static : ('sdl2' in static_libs_list))
-sdl2_net_dep  = optional_dep
-opengl_dep    = optional_dep
-fluid_dep     = optional_dep
-mt32emu_dep   = optional_dep
-png_dep       = optional_dep
-pcap_dep      = optional_dep
-slirp_dep     = optional_dep
-curses_dep    = optional_dep # necessary for debugger builds
-alsa_dep      = optional_dep # Linux-only
-coreaudio_dep = optional_dep # macOS-only
-coremidi_dep  = optional_dep # macOS-only
-winsock2_dep  = optional_dep # Windows-only
-winmm_dep     = optional_dep # Windows-only
+optional_dep       = dependency('', required : false)
+dl_dep             = cc.find_library('dl', required : false)
+atomic_dep         = cxx.find_library('atomic', required : false)
+stdcppfs_dep       = cxx.find_library('stdc++fs', required : false)
+opus_dep           = dependency('opusfile',
+                                static : ('opusfile' in static_libs_list))
+threads_dep        = dependency('threads')
+sdl2_dep           = dependency('sdl2', version : '>= 2.0.5',
+                                static : ('sdl2' in static_libs_list))
+sdl2_net_dep       = optional_dep
+opengl_dep         = optional_dep
+fluid_dep          = optional_dep
+libslirp_dep       = optional_dep
+mt32emu_dep        = optional_dep
+png_dep            = optional_dep
+slirp_dep          = optional_dep
+curses_dep         = optional_dep # necessary for debugger builds
+alsa_dep           = optional_dep # Linux-only
+coreaudio_dep      = optional_dep # macOS-only
+corefoundation_dep = optional_dep # macOS-only
+coremidi_dep       = optional_dep # macOS-only
+winsock2_dep       = optional_dep # Windows-only
+winmm_dep          = optional_dep # Windows-only
 
 
 if get_option('use_sdl2_net')
@@ -212,56 +264,94 @@ if get_option('use_opengl')
   opengl_dep = dependency('gl', not_found_message : msg.format('use_opengl'))
 endif
 
+# Use a single static setting for the pool of libraries that use glib
+is_glib_realm_static = prefers_static_libs
+foreach l : ['fluidsynth', 'slirp']
+  if l in static_libs_list
+    is_glib_realm_static = true
+  endif
+endforeach
+
 if get_option('use_fluidsynth')
-  fluid_dep = dependency('fluidsynth', version : '>= 2.0.0',
-                         static : ('fluidsynth' in static_libs_list),
+  fluid_dep = dependency('fluidsynth', version : '>= 2.2.3',
+                         static : is_glib_realm_static,
                          fallback : ['fluidsynth', 'fluidsynth_dep'],
                          not_found_message : msg.format('use_fluidsynth'))
 endif
 
+if get_option('use_slirp')
+  libslirp_dep = dependency('slirp', version : '>= 4.6.1',
+                            static : is_glib_realm_static,
+                            fallback : ['slirp', 'libslirp_dep'],
+                            not_found_message : msg.format('use_slirp'))
+endif
+
 if get_option('use_mt32emu')
-  mt32emu_dep = dependency('mt32emu', version : '>= 2.5.0',
-                           static : ('mt32emu' in static_libs_list),
+  mt32emu_dep = dependency('mt32emu', version : '>= 2.5.3',
+                           static : prefers_static_libs or ('mt32emu' in static_libs_list),
                            fallback : ['mt32emu', 'mt32emu_dep'],
                            not_found_message : msg.format('use_mt32emu'))
 endif
 
 if get_option('use_png')
-  png_dep = dependency('libpng', static : ('png' in static_libs_list),
+  png_dep = dependency('libpng',
+                       static : prefers_static_libs or ('png' in static_libs_list),
                        not_found_message : msg.format('use_png'))
 endif
 
-if get_option('use_pcap') # disabled by default
-  pcap_dep = dependency('libpcap')
-endif
-
-if get_option('use_slirp') # disabled by default
-  slirp_dep = dependency('slirp')
-endif
-
 if get_option('enable_debugger') != 'none'
-  curses_dep = dependency('ncurses') # or pdcurses on Windows
+  curses_dep = dependency('curses') # use the new 'curses' for msys2 compatibility
 endif
 
 # macOS-only dependencies
 #
 if host_machine.system() == 'darwin'
+
+  # ObjectiveC parsing, if possible
+  if cxx.has_argument('-lobjc')
+    add_project_arguments('-lobjc', language : 'cpp')
+  endif
+
+  # Core Audio
   coreaudio_dep = dependency('appleframeworks',
                              modules : ['CoreAudio', 'AudioUnit', 'AudioToolbox'],
                              required : false)
   if coreaudio_dep.found()
-    conf_data.set('C_COREAUDIO', 1)
+    if cxx.check_header('AudioToolbox/AUGraph.h')
+      conf_data.set('C_COREAUDIO', 1)
+    else
+      warning('''Core Audio support disabled: header is unsable''')
+    endif
   else
     warning('''Core Audio support disabled: compiler can't detect/use Apple Frameworks''')
   endif
 
+  # Core MIDI
   coremidi_dep = dependency('appleframeworks',
                              modules : ['CoreMIDI', 'CoreFoundation'],
                              required : false)
   if coremidi_dep.found()
-    conf_data.set('C_COREMIDI', 1)
+    if cxx.check_header('CoreMIDI/MIDIServices.h')
+      conf_data.set('C_COREMIDI', 1)
+    else
+      warning('''Core Audio support disabled: header is unsable''')
+    endif
   else
     warning('''Core MIDI support disabled: compiler can't detect/use Apple Frameworks''')
+  endif
+
+  # Locale discovery
+  corefoundation_dep = dependency('appleframeworks',
+                                  modules : ['CoreFoundation'],
+                                  required : false)
+  if corefoundation_dep.found()
+    if cxx.check_header('CoreFoundation/CoreFoundation.h')
+      conf_data.set('C_COREFOUNDATION', 1)
+    else
+      warning('''Core Foundation support disabled: header is unsable''')
+    endif
+  else
+    warning('''Core Foundation support disabled: compiler can't detect/use Apple Frameworks''')
   endif
 
   # Apple Silicon has 16k pages
@@ -292,29 +382,22 @@ if host_machine.system() in ['windows', 'cygwin']
   winmm_dep = cxx.find_library('winmm', required : true)
 endif
 
+summary('OpenGL support', get_option('use_opengl'))
+
+
 # include directories
 #
-incdir = include_directories(
-           'include',
-           '.',
-           'submodules/loguru',
-         )
-
+incdir = include_directories('include', '.')
 
 # bundled dependencies, in dependency-order
 #
+subdir('src/libs/ghc')
 subdir('src/libs/loguru')
-libloguru_dep = declare_dependency(link_with : libloguru)
-
-subdir('src/libs/decoders') # depends on libloguru_dep
+subdir('src/libs/decoders')
 subdir('src/libs/nuked')
 subdir('src/libs/ppscale')
 subdir('src/libs/residfp')
-
-libdecoders_dep = declare_dependency(link_with : libdecoders)
-libnuked_dep    = declare_dependency(link_with : libnuked)
-libppscale_dep  = declare_dependency(link_with : libppscale)
-libresidfp_dep  = declare_dependency(link_with : libresidfp)
+subdir('src/libs/whereami')
 
 # internal libs
 #
@@ -337,6 +420,43 @@ configure_file(input : 'src/config.h.in', output : 'config.h',
                configuration : conf_data)
 
 
+# dosbox executable
+#
+version_file = vcs_tag(input : 'src/version.cpp.in', output : 'version.cpp')
+dosbox_sources = ['src/main.cpp', 'src/dosbox.cpp', version_file]
+
+# Add Windows resources file if building on Windows
+if host_machine.system() == 'windows'
+  winmod = import('windows')
+  res_file = winmod.compile_resources('src/winres.rc')
+  dosbox_sources += res_file
+endif
+
+executable('dosbox', dosbox_sources,
+           dependencies : [atomic_dep,
+                           stdcppfs_dep,
+                           sdl2_dep,
+                           threads_dep,
+                           libghc_dep,
+                           libloguru_dep,
+                           libwhereami_dep]
+                          + internal_deps,
+           include_directories : incdir,
+           install : true)
+# create a library so we can test things inside DOSBOX dep path
+libdosbox = static_library('dosbox', ['src/dosbox.cpp', version_file],
+                        include_directories : incdir,
+                        dependencies : [atomic_dep,
+                                        threads_dep,
+                                        sdl2_dep,
+                                        libghc_dep,
+                                        libloguru_dep]
+                                      + internal_deps)
+
+dosbox_dep = declare_dependency(link_with : libdosbox)
+
+
+
 # tests
 #
 # Some tests use relative paths; in meson 0.56.0 this can be replaced
@@ -344,14 +464,6 @@ configure_file(input : 'src/config.h.in', output : 'config.h',
 project_source_root = meson.current_source_dir()
 subdir('tests')
 
-
-# dosbox executable
-#
-version_file = vcs_tag(input : 'src/version.cpp.in', output : 'version.cpp')
-executable('dosbox', ['src/main.cpp', 'src/dosbox.cpp', version_file],
-           dependencies : [atomic_dep, threads_dep, sdl2_dep] + internal_deps,
-           include_directories : incdir,
-           install : true)
 
 
 # additional files for installation
@@ -366,3 +478,4 @@ install_data('AUTHORS', 'README', 'THANKS', install_dir : doc_dir)
 
 subdir('contrib/linux')
 subdir('contrib/icons')
+subdir('contrib/translations')

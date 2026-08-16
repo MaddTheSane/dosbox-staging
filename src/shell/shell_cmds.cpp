@@ -46,7 +46,6 @@
 
 // clang-format off
 static const std::map<std::string, SHELL_Cmd> shell_cmds = {
-	{ "ATTRIB",   {1, &DOS_Shell::CMD_ATTRIB,   "SHELL_CMD_ATTRIB_HELP",   nullptr } },
 	{ "CALL",     {1, &DOS_Shell::CMD_CALL,     "SHELL_CMD_CALL_HELP",     nullptr } },
 	{ "CD",       {0, &DOS_Shell::CMD_CHDIR,    "SHELL_CMD_CHDIR_HELP",    "SHELL_CMD_CHDIR_HELP_LONG" } },
 	{ "CHDIR",    {1, &DOS_Shell::CMD_CHDIR,    "SHELL_CMD_CHDIR_HELP",    "SHELL_CMD_CHDIR_HELP_LONG" } },
@@ -138,11 +137,17 @@ bool DOS_Shell::CheckConfig(char *cmd_in, char *line) {
 		return true;
 	}
 	char newcom[1024];
-	snprintf(newcom, sizeof(newcom), "z:\\config -set %s %s%s",
-	         test->GetName(),
-	         cmd_in,
-	         line ? line : "");
+	safe_sprintf(newcom, "z:\\config -set %s %s%s", test->GetName(), cmd_in,
+	             line ? line : "");
 	DoCommand(newcom);
+	return true;
+}
+
+bool DOS_Shell::execute_shell_cmd(char *name, char *arguments) {
+	SHELL_Cmd shell_cmd = {};
+	if (!lookup_shell_cmd(name, shell_cmd))
+		return false; // name isn't a shell command!
+	(this->*(shell_cmd.handler))(arguments);
 	return true;
 }
 
@@ -151,14 +156,6 @@ void DOS_Shell::DoCommand(char * line) {
 	line=trim(line);
 	char cmd_buffer[CMD_MAXLINE];
 	char * cmd_write=cmd_buffer;
-
-	auto execute_shell_cmd = [this](char *name, char *arguments) {
-		SHELL_Cmd shell_cmd = {};
-		if (!lookup_shell_cmd(name, shell_cmd))
-			return false; // name isn't a shell command!
-		(this->*(shell_cmd.handler))(arguments);
-		return true;
-	};
 
 	while (*line) {
 		if (*line == 32) break;
@@ -216,11 +213,18 @@ void DOS_Shell::DoCommand(char * line) {
 void DOS_Shell::CMD_CLS(char *args)
 {
 	HELP("CLS");
-	const auto rows = INT10_GetTextRows() - 1;
-	const auto cols = INT10_GetTextColumns();
 
-	INT10_ScrollWindow(0, 0, rows, static_cast<uint8_t>(cols), -rows, 0x7, 0xff);
-	INT10_SetCursorPos(0, 0, 0);
+	// Re-apply current video mode. This clears the console, resets the palette, etc.
+	if (CurMode->mode < 0x100) {
+		reg_ah = 0x00;
+		reg_al = static_cast<uint8_t>(CurMode->mode);
+		CALLBACK_RunRealInt(0x10);
+	} else {
+		reg_ah = 0x4f;
+		reg_al = 0x02;
+		reg_bx = CurMode->mode;
+		CALLBACK_RunRealInt(0x10);
+	}
 }
 
 void DOS_Shell::CMD_DELETE(char * args) {
@@ -300,7 +304,7 @@ void DOS_Shell::CMD_HELP(char * args){
 		WriteOut("%s\n", MSG_Get(shell_cmd.help));
 		WriteOut("%s\n", shell_cmd.long_help ? MSG_Get(shell_cmd.long_help)
 		                                     : args);
-	} else if (ScanCMDBool(args, "ALL")) {
+	} else if (ScanCMDBool(args, "A") || ScanCMDBool(args, "ALL")) {
 		// Print help for all the commands
 		PrintHelpForCommands(HELP_LIST::ALL);
 	} else {
@@ -386,12 +390,19 @@ int64_t ticks_at_program_launch = 0;
 void DOS_Shell::CMD_EXIT(char *args)
 {
 	HELP("EXIT");
-	if (GetTicksSince(ticks_at_program_launch) <= 2000) {
-		WriteOut(MSG_Get("SHELL_CMD_EXIT_TOO_SOON"));
-		LOG_WARNING("SHELL: Caught a very early 'exit' attempt, which means something might have failed.");
-	} else {
+
+	const bool wants_force_exit = control->cmdline->FindExist("-exit");
+	const bool is_normal_launch = control->GetStartupVerbosity() != Verbosity::InstantLaunch;
+	const auto seconds_since_launch = GetTicksSince(ticks_at_program_launch) / 1000.0;
+
+	if (wants_force_exit || is_normal_launch || seconds_since_launch > 1.5) {
 		exit_cmd_called = true;
+		return;
 	}
+
+	WriteOut(MSG_Get("SHELL_CMD_EXIT_TOO_SOON"));
+	LOG_WARNING("SHELL: Exit blocked because program quit after only %.1f seconds",
+	            seconds_since_launch);
 }
 
 void DOS_Shell::CMD_CHDIR(char * args) {
@@ -499,7 +510,7 @@ void DOS_Shell::CMD_RMDIR(char * args) {
 
 static std::string format_number(size_t num)
 {
-	MAYBE_UNUSED constexpr uint64_t petabyte_si = 1'000'000'000'000'000;
+	[[maybe_unused]] constexpr uint64_t petabyte_si = 1'000'000'000'000'000;
 	assert(num <= petabyte_si);
 	const auto b = static_cast<unsigned>(num % 1000);
 	num /= 1000;
@@ -664,7 +675,9 @@ void DOS_Shell::CMD_DIR(char * args) {
 	}
 
 	bool optW=ScanCMDBool(args,"W");
-	ScanCMDBool(args,"S");
+
+	(void)ScanCMDBool(args, "S");
+
 	bool optP=ScanCMDBool(args,"P");
 	if (ScanCMDBool(args,"WP") || ScanCMDBool(args,"PW")) {
 		optW=optP=true;
@@ -1023,9 +1036,10 @@ void DOS_Shell::CMD_COPY(char * args) {
 	while (ScanCMDBool(args,"B")) ;
 	while (ScanCMDBool(args,"T")) ; //Shouldn't this be A ?
 	while (ScanCMDBool(args,"A")) ;
-	ScanCMDBool(args,"Y");
-	ScanCMDBool(args,"-Y");
-	ScanCMDBool(args,"V");
+
+	(void)ScanCMDBool(args, "Y");
+	(void)ScanCMDBool(args, "-Y");
+	(void)ScanCMDBool(args, "V");
 
 	//--Disabled 2009-02-24 by Alun Bestor: bailing out upon encountering unrecognised switches was preventing the use of unix/style/paths
 	/*
@@ -1069,7 +1083,7 @@ void DOS_Shell::CMD_COPY(char * args) {
 						strcat(source_x,"\\*.*");
 				}
 			}
-			sources.push_back(copysource(source_x,(plus)?true:false));
+			sources.emplace_back(copysource(source_x,(plus)?true:false));
 			source_p = plus;
 		} while (source_p && *source_p);
 	}
@@ -1128,15 +1142,18 @@ void DOS_Shell::CMD_COPY(char * args) {
 
 		// add '\\' if target is a directory
 		bool target_is_file = true;
-		if (pathTarget[strlen(pathTarget) - 1]!='\\') {
-			if (DOS_FindFirst(pathTarget,0xffff & ~DOS_ATTR_VOLUME)) {
-				dta.GetResult(name,size,date,time,attr);
+		const auto target_path_length = strlen(pathTarget);
+		assert(target_path_length > 0);
+		if (pathTarget[target_path_length - 1] != '\\') {
+			if (DOS_FindFirst(pathTarget, 0xffff & ~DOS_ATTR_VOLUME)) {
+				dta.GetResult(name, size, date, time, attr);
 				if (attr & DOS_ATTR_DIRECTORY) {
 					strcat(pathTarget,"\\");
 					target_is_file = false;
 				}
 			}
-		} else target_is_file = false;
+		} else
+			target_is_file = false;
 
 		//Find first sourcefile
 		bool ret = DOS_FindFirst(const_cast<char*>(source.filename.c_str()),0xffff & ~DOS_ATTR_VOLUME);
@@ -1161,7 +1178,10 @@ void DOS_Shell::CMD_COPY(char * args) {
 				if (DOS_OpenFile(nameSource,0,&sourceHandle)) {
 					// Create Target or open it if in concat mode
 					safe_strcpy(nameTarget, pathTarget);
-					if (nameTarget[strlen(nameTarget) - 1] == '\\') strcat(nameTarget,name);
+					const auto name_length = strlen(nameTarget);
+					assert(name_length > 0);
+					if (nameTarget[name_length - 1] == '\\')
+						strcat(nameTarget, name);
 
 					//Special variable to ensure that copy * a_file, where a_file is not a directory concats.
 					bool special = second_file_of_current_source && target_is_file;
@@ -1459,15 +1479,17 @@ void DOS_Shell::CMD_DATE(char * args) {
 		return;
 	}
 	// check if a date was passed in command line
-	Bit32u newday,newmonth,newyear;
-	if (sscanf(args,"%u-%u-%u",&newmonth,&newday,&newyear) == 3) {
-		reg_cx = static_cast<Bit16u>(newyear);
-		reg_dh = static_cast<Bit8u>(newmonth);
-		reg_dl = static_cast<Bit8u>(newday);
+	uint32_t newday, newmonth, newyear;
+	if (sscanf(args, "%u-%u-%u", &newmonth, &newday, &newyear) == 3) {
+		reg_cx = static_cast<uint16_t>(newyear);
+		reg_dh = static_cast<uint8_t>(newmonth);
+		reg_dl = static_cast<uint8_t>(newday);
 
-		reg_ah=0x2b; // set system date
+		reg_ah = 0x2b; // set system date
 		CALLBACK_RunRealInt(0x21);
-		if (reg_al == 0xff) WriteOut(MSG_Get("SHELL_CMD_DATE_ERROR"));
+		if (reg_al == 0xff) {
+			WriteOut(MSG_Get("SHELL_CMD_DATE_ERROR"));
+		}
 		return;
 	}
 	// display the current date
@@ -1509,22 +1531,28 @@ void DOS_Shell::CMD_TIME(char * args) {
 		const time_t curtime = time(NULL);
 		struct tm datetime;
 		cross::localtime_r(&curtime, &datetime);
+		reg_ah = 0x2d; // set system time
+		reg_ch = static_cast<uint8_t>(datetime.tm_hour);
+		reg_cl = static_cast<uint8_t>(datetime.tm_min);
+		reg_dh = static_cast<uint8_t>(datetime.tm_sec);
+		CALLBACK_RunRealInt(0x21);
+		return;
+	}
+	uint32_t newhour, newminute, newsecond;
+	if (sscanf(args, "%u:%u:%u", &newhour, &newminute, &newsecond) == 3) {
+		if (newhour > 23 || newminute > 59 || newsecond > 59)
+			WriteOut(MSG_Get("SHELL_CMD_TIME_ERROR"));
+		else {
+			reg_ch = static_cast<uint8_t>(newhour);
+			reg_cl = static_cast<uint8_t>(newminute);
+			reg_dh = static_cast<uint8_t>(newsecond);
 
-		// Original IBM PC used ~1.19MHz crystal for timer, because at
-		// 1.19MHz, 2^16 ticks is ~1 hour, making it easy to count
-		// hours and days. More precisely:
-		//
-		// clock updates at 1193180/65536 ticks per second.
-		// ticks per second ≈ 18.2
-		// ticks per hour   ≈ 65543
-		// ticks per day    ≈ 1573040
-		//
-		constexpr uint64_t ticks_per_day = 1573040;
-		const auto seconds_now = (datetime.tm_hour * 3600 +
-		                          datetime.tm_min * 60 +
-		                          datetime.tm_sec);
-		const auto ticks_now = ticks_per_day * seconds_now / (24 * 3600);
-		mem_writed(BIOS_TIMER, static_cast<uint32_t>(ticks_now));
+			reg_ah = 0x2d; // set system time
+			CALLBACK_RunRealInt(0x21);
+			if (reg_al == 0xff) {
+				WriteOut(MSG_Get("SHELL_CMD_TIME_ERROR"));
+			}
+		}
 		return;
 	}
 	bool timeonly = ScanCMDBool(args,"T");
@@ -1542,6 +1570,7 @@ void DOS_Shell::CMD_TIME(char * args) {
 	} else {
 		WriteOut(MSG_Get("SHELL_CMD_TIME_NOW"));
 		WriteOut("%2u:%02u:%02u,%02u\n",reg_ch,reg_cl,reg_dh,reg_dl);
+		WriteOut(MSG_Get("SHELL_CMD_TIME_SETHLP"));
 	}
 }
 
@@ -1641,7 +1670,9 @@ void DOS_Shell::CMD_CHOICE(char * args){
 	if (args) {
 		optN = ScanCMDBool(args,"N");
 		optS = ScanCMDBool(args,"S"); //Case-sensitive matching
-		ScanCMDBool(args,"T"); //Default Choice after timeout
+
+		(void)ScanCMDBool(args, "T"); // Default Choice after timeout
+
 		char *last = strchr(args,0);
 		StripSpaces(args);
 		rem = ScanCMDRemain(args);
@@ -1700,18 +1731,15 @@ void DOS_Shell::CMD_CHOICE(char * args){
 	dos.return_code = (Bit8u)(ptr-rem+1);
 }
 
-void DOS_Shell::CMD_ATTRIB(char *args){
-	HELP("ATTRIB");
-	// No-Op for now.
-}
-
 void DOS_Shell::CMD_PATH(char *args){
 	HELP("PATH");
 	if (args && strlen(args)) {
 		char set_path[DOS_PATHLENGTH + CROSS_LEN + 20] = {0};
 		while (args && *args && (*args == '='|| *args == ' '))
 			args++;
-		snprintf(set_path, sizeof(set_path), "set PATH=%s", args);
+		if (strlen(args) == 1 && *args == ';')
+			*args = 0;
+		safe_sprintf(set_path, "set PATH=%s", args);
 		this->ParseLine(set_path);
 		return;
 	} else {

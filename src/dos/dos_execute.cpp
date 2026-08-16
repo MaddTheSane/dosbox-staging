@@ -415,7 +415,12 @@ bool DOS_Execute(char * name,PhysPt block_pt,Bit8u flags) {
 		SetupCMDLine(pspseg,block);
 	};
 	CALLBACK_SCF(false);		/* Carry flag cleared for caller if successfull */
-	if (flags==OVERLAY) return true;			/* Everything done for overlays */
+	if (flags==OVERLAY) {
+		/* Changed registers */
+		reg_ax=0;
+		reg_dx=0;
+		return true;			/* Everything done for overlays */
+	}
 	RealPt csip,sssp;
 	if (iscom) {
 		csip=RealMake(pspseg,0x100);
@@ -428,7 +433,7 @@ bool DOS_Execute(char * name,PhysPt block_pt,Bit8u flags) {
 		csip=RealMake(loadseg+head.initCS,head.initIP);
 		sssp=RealMake(loadseg+head.initSS,head.initSP);
 		if (head.initSP<4) LOG(LOG_EXEC,LOG_ERROR)("stack underflow/wrap at EXEC");
-		if ((pspseg+memsize)<(loadseg+head.initSS+(head.initSP>>4)))
+		if ((pspseg+memsize)<(RealSeg(sssp)+(RealOff(sssp)>>4)))
 			LOG(LOG_EXEC,LOG_ERROR)("stack outside memory block at EXEC");
 
 		Program::ResetLastWrittenChar('\0'); // triggers newline injection after DOS programs
@@ -517,7 +522,7 @@ bool DOS_Execute(char * name,PhysPt block_pt,Bit8u flags) {
 		reg_di=RealOff(sssp);
 		reg_bp=0x91c;	/* DOS internal stack begin relict */
 		SegSet16(ds,pspseg);SegSet16(es,pspseg);
-#if C_DEBUG		
+#if C_DEBUG
 		/* Started from debug.com, then set breakpoint at start */
 		DEBUG_CheckExecuteBreakpoint(RealSeg(csip),RealOff(csip));
 #endif

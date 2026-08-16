@@ -209,7 +209,7 @@ MidiHandlerFluidsynth::MidiHandlerFluidsynth()
           keep_rendering(false)
 {}
 
-bool MidiHandlerFluidsynth::Open(MAYBE_UNUSED const char *conf)
+bool MidiHandlerFluidsynth::Open([[maybe_unused]] const char *conf)
 {
 	Close();
 
@@ -223,8 +223,7 @@ bool MidiHandlerFluidsynth::Open(MAYBE_UNUSED const char *conf)
 	// Setup the mixer channel and level callback
 	const auto mixer_callback = std::bind(&MidiHandlerFluidsynth::MixerCallBack,
 	                                      this, std::placeholders::_1);
-	channel_t mixer_channel(MIXER_AddChannel(mixer_callback, 0, "FSYNTH"),
-	                        MIXER_DelChannel);
+	const auto mixer_channel = MIXER_AddChannel(mixer_callback, 0, "FSYNTH");
 
 	const auto set_mixer_level = std::bind(&MidiHandlerFluidsynth::SetMixerLevel,
 	                                       this, std::placeholders::_1);
@@ -633,10 +632,10 @@ MIDI_RC MidiHandlerFluidsynth::ListAll(Program *caller)
 	return MIDI_RC::OK;
 }
 
-static void fluid_init(MAYBE_UNUSED Section *sec)
+static void fluid_init([[maybe_unused]] Section *sec)
 {}
 
-void FLUID_AddConfigSection(Config *conf)
+void FLUID_AddConfigSection(const config_ptr_t &conf)
 {
 	assert(conf);
 	Section_prop *sec = conf->AddSection_prop("fluidsynth", &fluid_init);
