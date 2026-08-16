@@ -22,6 +22,7 @@
 #include "vga.h"
 #include "inout.h"
 #include "mem.h"
+#include "../ints/int10.h"
 
 struct SVGA_PVGA1A_DATA {
 	uint8_t PR0A = 0;
@@ -57,8 +58,9 @@ static void bank_setup_pvga1a() {
 	}
 }
 
-void write_p3cf_pvga1a(io_port_t reg, uint8_t val, io_width_t)
+void write_p3cf_pvga1a(io_port_t reg, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	if (pvga1a.locked() && reg >= 0x09 && reg <= 0x0e)
 		return;
 
@@ -235,5 +237,7 @@ void SVGA_Setup_ParadisePVGA1A(void) {
 	}
 
 	IO_Write(0x3cf, 0x05); // Enable!
-	VGA_LogInitialization("Paradise VGA 1A", "DRAM");
+
+	const auto num_modes = ModeList_VGA_Paradise.size();
+	VGA_LogInitialization("Paradise VGA 1A", "DRAM", num_modes);
 }

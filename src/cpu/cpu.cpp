@@ -31,7 +31,6 @@
 #include "lazyflags.h"
 #include "support.h"
 
-Bitu DEBUG_EnableDebugger(void);
 extern void GFX_SetTitle(Bit32s cycles ,int frameskip,bool paused);
 
 #if 1
@@ -44,9 +43,9 @@ extern void GFX_SetTitle(Bit32s cycles ,int frameskip,bool paused);
 #endif
 #endif
 
-CPU_Regs cpu_regs;
-CPUBlock cpu;
-Segments Segs;
+CPU_Regs cpu_regs = {};
+CPUBlock cpu = {};
+Segments Segs = {};
 
 Bit32s CPU_Cycles = 0;
 Bit32s CPU_CycleLeft = 3000;
@@ -60,6 +59,7 @@ Bit64s CPU_IODelayRemoved = 0;
 CPU_Decoder * cpudecoder;
 bool CPU_CycleAutoAdjust = false;
 bool CPU_SkipCycleAutoAdjust = false;
+bool CPU_AllowSpeedMods = false;
 Bitu CPU_AutoDetermineMode = 0;
 
 Bitu CPU_ArchitectureType = CPU_ARCHTYPE_MIXED;
@@ -168,15 +168,29 @@ PhysPt SelBase(Bitu sel) {
 	}
 }
 
-
-void CPU_SetFlags(Bitu word,Bitu mask) {
-	mask|=CPU_extflags_toggle;	// ID-flag and AC-flag can be toggled on CPUID-supporting CPUs
+void CPU_SetFlags(const uint32_t word, uint32_t mask)
+{
+	mask |= CPU_extflags_toggle; // ID-flag and AC-flag can be toggled on
+	                             // CPUID-supporting CPUs
 	reg_flags=(reg_flags & ~mask)|(word & mask)|2;
 	cpu.direction=1-((reg_flags & FLAG_DF) >> 9);
 }
 
-bool CPU_PrepareException(Bitu which,Bitu error) {
-	cpu.exception.which=which;
+void CPU_SetFlagsd(const uint32_t word)
+{
+	const auto mask = cpu.cpl ? FMASK_NORMAL : FMASK_ALL;
+	CPU_SetFlags(word, mask);
+}
+
+void CPU_SetFlagsw(const uint32_t word)
+{
+	const auto mask = (cpu.cpl ? FMASK_NORMAL : FMASK_ALL) & 0xffff;
+	CPU_SetFlags(word, mask);
+}
+
+bool CPU_PrepareException(Bitu which, Bitu error)
+{
+	cpu.exception.which = which;
 	cpu.exception.error=error;
 	return true;
 }
@@ -382,14 +396,18 @@ bool CPU_SwitchTask(Bitu new_tss_selector,TSwitchType tstype,Bitu old_eip) {
 		new_ldt=mem_readw(new_tss.base+offsetof(TSS_32,ldt));
 	} else {
 		E_Exit("286 task switch");
+		/*
+		Dead code after exit
+		--------------------
 		new_cr3=0;
 		new_eip=0;
 		new_eflags=0;
 		new_eax=0;	new_ecx=0;	new_edx=0;	new_ebx=0;
 		new_esp=0;	new_ebp=0;	new_edi=0;	new_esi=0;
 
-		new_es=0;	new_cs=0;	new_ss=0;	new_ds=0;	new_fs=0;	new_gs=0;
-		new_ldt=0;
+		new_es=0;	new_cs=0;	new_ss=0;	new_ds=0;
+		new_fs=0;	new_gs=0; new_ldt=0;
+		*/
 	}
 
 	/* Check if we need to clear busy bit of old TASK */
@@ -426,11 +444,9 @@ bool CPU_SwitchTask(Bitu new_tss_selector,TSwitchType tstype,Bitu old_eip) {
 
 	/* Setup a back link to the old TSS in new TSS */
 	if (tstype==TSwitch_CALL_INT) {
-		if (new_tss.is386) {
-			mem_writed(new_tss.base+offsetof(TSS_32,back),cpu_tss.selector);
-		} else {
-			mem_writew(new_tss.base+offsetof(TSS_16,back),cpu_tss.selector);
-		}
+		assert(new_tss.is386);
+		mem_writed(new_tss.base + offsetof(TSS_32, back), cpu_tss.selector);
+
 		/* And make the new task's eflag have the nested task bit */
 		new_eflags|=FLAG_NT;
 	}
@@ -455,22 +471,17 @@ bool CPU_SwitchTask(Bitu new_tss_selector,TSwitchType tstype,Bitu old_eip) {
 		PAGING_SetDirBase(new_cr3);
 
 		/* Load new context */
-		if (new_tss.is386) {
-			reg_eip=new_eip;
-			CPU_SetFlags(new_eflags,FMASK_ALL | FLAG_VM);
-			reg_eax=new_eax;
-			reg_ecx=new_ecx;
-			reg_edx=new_edx;
-			reg_ebx=new_ebx;
-			reg_esp=new_esp;
-			reg_ebp=new_ebp;
-			reg_edi=new_edi;
-			reg_esi=new_esi;
-
-//			new_cs=mem_readw(new_tss.base+offsetof(TSS_32,cs));
-		} else {
-			E_Exit("286 task switch");
-		}
+		assert(new_tss.is386);
+		reg_eip = new_eip;
+		CPU_SetFlags(new_eflags, FMASK_ALL | FLAG_VM);
+		reg_eax = new_eax;
+		reg_ecx = new_ecx;
+		reg_edx = new_edx;
+		reg_ebx = new_ebx;
+		reg_esp = new_esp;
+		reg_ebp = new_ebp;
+		reg_edi = new_edi;
+		reg_esi = new_esi;
 	}
 	/* Load the new selectors */
 	if (reg_flags & FLAG_VM) {
@@ -500,8 +511,7 @@ doconforming:
 			cpu.code.big=cs_desc.Big()>0;
 			Segs.val[cs]=new_cs;
 			break;
-		default:
-			E_Exit("Task switch CS Type %" sBitfs(u),cs_desc.Type());
+		default: E_Exit("Task switch CS Type 0x%x", cs_desc.Type());
 		}
 	}
 	CPU_SetSegGeneral(es,new_es);
@@ -708,7 +718,7 @@ void CPU_Interrupt(Bitu num,Bitu type,Bitu oldeip) {
 					} 
 					if (cs_dpl!=cpu.cpl)
 						E_Exit("Non-conforming intra privilege INT with DPL!=CPL");
-					FALLTHROUGH;
+					[[fallthrough]];
 				case DESC_CODE_N_C_A:	case DESC_CODE_N_C_NA:
 				case DESC_CODE_R_C_A:	case DESC_CODE_R_C_NA:
 					/* Prepare stack for gate to same priviledge */
@@ -733,8 +743,9 @@ do_interrupt:
 					}
 					break;		
 				default:
-					E_Exit("INT:Gate Selector points to illegal descriptor with type %" sBitfs(x),cs_desc.Type());
-				}
+				        E_Exit("INT:Gate Selector points to illegal descriptor with type 0x%x",
+				               cs_desc.Type());
+			        }
 
 				Segs.val[cs]=(gate_sel&0xfffc) | cpu.cpl;
 				Segs.phys[cs]=cs_desc.GetBase();
@@ -763,7 +774,8 @@ do_interrupt:
 			}
 			return;
 		default:
-			E_Exit("Illegal descriptor type %" sBitfs(X) " for int %" sBitfs(X),gate.Type(),num);
+			E_Exit("Illegal descriptor type 0x%x for int %" sBitfs(X),
+			       gate.Type(), num);
 		}
 	}
 	assert(1);
@@ -910,7 +922,8 @@ void CPU_IRET(bool use32,Bitu oldeip) {
 				EXCEPTION_GP,n_cs_sel & 0xfffc)
 			break;
 		default:
-			E_Exit("IRET:Illegal descriptor type %" sBitfs(X), n_cs_desc.Type());
+			E_Exit("IRET:Illegal descriptor type 0x%x",
+			       n_cs_desc.Type());
 		}
 		CPU_CHECK_COND(!n_cs_desc.saved.seg.p,
 			"IRET with nonpresent code segment",
@@ -1067,7 +1080,7 @@ CODE_jmp:
 			CPU_SwitchTask(selector,TSwitch_JMP,oldeip);
 			break;
 		default:
-			E_Exit("JMP Illegal descriptor type %" sBitfs(X),desc.Type());
+			E_Exit("JMP Illegal descriptor type 0x%x", desc.Type());
 		}
 	}
 	assert(1);
@@ -1259,7 +1272,7 @@ call_code:
 						break;		
 					} else if (n_cs_dpl > cpu.cpl)
 						E_Exit("CALL:GATE:CS DPL>CPL");		// or #GP(sel)
-					FALLTHROUGH;
+					[[fallthrough]];
 				case DESC_CODE_N_C_A:case DESC_CODE_N_C_NA:
 				case DESC_CODE_R_C_A:case DESC_CODE_R_C_NA:
 					// zrdx extender
@@ -1304,14 +1317,14 @@ call_code:
 			CPU_Exception(EXCEPTION_GP,selector & 0xfffc);
 			return;
 		default:
-			E_Exit("CALL:Descriptor type %" sBitfs(x) " unsupported",call.Type());
+			E_Exit("CALL:Descriptor type 0x%x unsupported", call.Type());
 		}
 	}
 	assert(1);
 }
 
 
-void CPU_RET(bool use32,Bitu bytes, MAYBE_UNUSED Bitu oldeip) {
+void CPU_RET(bool use32,Bitu bytes, [[maybe_unused]] Bitu oldeip) {
 	if (!cpu.pmode || (reg_flags & FLAG_VM)) {
 		Bitu new_ip,new_cs;
 		if (!use32) {
@@ -1362,7 +1375,8 @@ void CPU_RET(bool use32,Bitu bytes, MAYBE_UNUSED Bitu oldeip) {
 					EXCEPTION_GP,selector & 0xfffc)
 				break;
 			default:
-				E_Exit("RET from illegal descriptor type %" sBitfs(X),desc.Type());
+				E_Exit("RET from illegal descriptor type 0x%x",
+				       desc.Type());
 			}
 RET_same_level:
 			if (!desc.saved.seg.p) {
@@ -1407,7 +1421,8 @@ RET_same_level:
 					EXCEPTION_GP,selector & 0xfffc)
 				break;
 			default:
-				E_Exit("RET from illegal descriptor type %" sBitfs(X),desc.Type());		// or #GP(selector)
+				E_Exit("RET from illegal descriptor type 0x%x",
+				       desc.Type()); // or #GP(selector)
 			}
 
 			CPU_CHECK_COND(!desc.saved.seg.p,
@@ -1481,7 +1496,6 @@ RET_same_level:
 		LOG(LOG_CPU,LOG_NORMAL)("Prot ret %X:%X",selector,offset);
 		return;
 	}
-	assert(1);
 }
 
 
@@ -1789,7 +1803,7 @@ void CPU_LAR(Bitu selector,Bitu & ar) {
 				case DESC_CODE_R_NC_A:		case DESC_CODE_R_NC_NA:
 					if (desc.DPL()<cpu.cpl || desc.DPL()<rpl)
 						break;
-					FALLTHROUGH;
+					[[fallthrough]];
 
 				case DESC_CODE_N_C_A:	case DESC_CODE_N_C_NA:
 				case DESC_CODE_R_C_A:	case DESC_CODE_R_C_NA:
@@ -1827,7 +1841,7 @@ void CPU_LSL(Bitu selector,Bitu & limit) {
 				case DESC_CODE_R_NC_A:		case DESC_CODE_R_NC_NA:
 					if (desc.DPL()<cpu.cpl || desc.DPL()<rpl)
 						break;
-					FALLTHROUGH;
+					[[fallthrough]];
 				case DESC_CODE_N_C_A:	case DESC_CODE_N_C_NA:
 				case DESC_CODE_R_C_A:	case DESC_CODE_R_C_NA:
 					limit=desc.GetLimit();
@@ -2116,9 +2130,11 @@ static void CPU_CycleIncrease(bool pressed) {
 	} else {
 		Bit32s old_cycles=CPU_CycleMax;
 		if (CPU_CycleUp < 100) {
-			CPU_CycleMax = (Bit32s)(CPU_CycleMax * (1 + (float)CPU_CycleUp / 100.0));
+			CPU_CycleMax = (Bit32s)(CPU_CycleMax *
+			                        (1 + static_cast<float>(CPU_CycleUp) /
+			                                     100.0f));
 		} else {
-			CPU_CycleMax = (Bit32s)(CPU_CycleMax + CPU_CycleUp);
+			CPU_CycleMax = CPU_CycleMax + CPU_CycleUp;
 		}
 	    
 		CPU_CycleLeft=0;CPU_Cycles=0;
@@ -2143,9 +2159,11 @@ static void CPU_CycleDecrease(bool pressed) {
 		GFX_SetTitle(CPU_CyclePercUsed,-1,false);
 	} else {
 		if (CPU_CycleDown < 100) {
-			CPU_CycleMax = (Bit32s)(CPU_CycleMax / (1 + (float)CPU_CycleDown / 100.0));
+			CPU_CycleMax = (Bit32s)(CPU_CycleMax /
+			                        (1 + static_cast<float>(CPU_CycleDown) /
+			                                     100.0f));
 		} else {
-			CPU_CycleMax = (Bit32s)(CPU_CycleMax - CPU_CycleDown);
+			CPU_CycleMax = CPU_CycleMax - CPU_CycleDown;
 		}
 		CPU_CycleLeft=0;CPU_Cycles=0;
 		if (CPU_CycleMax <= 0) CPU_CycleMax=1;
@@ -2269,7 +2287,8 @@ public:
 						int percval=0;
 						std::istringstream stream(str);
 						stream >> percval;
-						if ((percval>0) && (percval<=105)) CPU_CyclePercUsed=(Bit32s)percval;
+						if ((percval > 0) && (percval <= 105))
+							CPU_CyclePercUsed = percval;
 					} else if (str=="limit") {
 						cmdnum++;
 						if (cmd.FindCommand(cmdnum,str)) {
@@ -2294,7 +2313,9 @@ public:
 							int percval=0;
 							std::istringstream stream(str);
 							stream >> percval;
-							if ((percval>0) && (percval<=105)) CPU_CyclePercUsed=(Bit32s)percval;
+							if ((percval > 0) &&
+							    (percval <= 105))
+								CPU_CyclePercUsed = percval;
 						} else if (str=="limit") {
 							cmdnum++;
 							if (cmd.FindCommand(cmdnum,str)) {
@@ -2308,8 +2329,8 @@ public:
 							std::istringstream stream(str);
 							stream >> rmdval;
 							if (rmdval>0) {
-								CPU_CycleMax=(Bit32s)rmdval;
-								CPU_OldCycleMax=(Bit32s)rmdval;
+								CPU_CycleMax = rmdval;
+								CPU_OldCycleMax = rmdval;
 							}
 						}
 					}
@@ -2319,12 +2340,13 @@ public:
 				int rmdval=0;
 				std::istringstream stream(str);
 				stream >> rmdval;
-				CPU_CycleMax=(Bit32s)rmdval;
+				CPU_CycleMax = rmdval;
 			} else {
 				std::istringstream stream(type);
 				int rmdval=0;
 				stream >> rmdval;
-				if(rmdval) CPU_CycleMax=(Bit32s)rmdval;
+				if (rmdval)
+					CPU_CycleMax = rmdval;
 			}
 			CPU_CycleAutoAdjust=false;
 		}
@@ -2387,7 +2409,7 @@ public:
 		} else if (cputype == "386_slow") {
 			CPU_ArchitectureType = CPU_ARCHTYPE_386SLOW;
 		} else if (cputype == "486_slow") {
-			CPU_ArchitectureType = CPU_ARCHTYPE_486NEWSLOW;
+			CPU_ArchitectureType = CPU_ARCHTYPE_486OLDSLOW;
 		} else if (cputype == "486_prefetch") {
 			CPU_ArchitectureType = CPU_ARCHTYPE_486NEWSLOW;
 			if (core == "normal") {
@@ -2420,7 +2442,7 @@ public:
 
 static CPU * test;
 
-void CPU_ShutDown(MAYBE_UNUSED Section* sec) {
+void CPU_ShutDown([[maybe_unused]] Section* sec) {
 #if (C_DYNAMIC_X86)
 	CPU_Core_Dyn_X86_Cache_Close();
 #elif (C_DYNREC)

@@ -434,15 +434,6 @@ forcenormal:
 		break;
 	}
 	gfx_flags=GFX_GetBestMode(gfx_flags);
-	if (gfx_flags & GFX_UNITY_SCALE &&
-		simpleBlock != NULL &&
-		strstr( simpleBlock->name, "Normal" ) == simpleBlock->name ) {
-		gfx_scalew  = 1.0;
-		gfx_scaleh  = 1.0;
-		xscale      = 1  ;
-		yscale      = 1  ;
-		simpleBlock = &ScaleNormal1x;
-	}
 	if (!gfx_flags) {
 		if (!complexBlock && simpleBlock == &ScaleNormal1x)
 			E_Exit("Failed to create a rendering output");
@@ -580,8 +571,8 @@ static void RENDER_CallBack( GFX_CallBackFunctions_t function ) {
 	}
 }
 
-void RENDER_SetSize(Bitu width,
-                    Bitu height,
+void RENDER_SetSize(uint32_t width,
+                    uint32_t height,
                     unsigned bpp,
                     double fps,
                     double ratio,
@@ -745,7 +736,9 @@ void RENDER_Init(Section * sec) {
 	render.scale.forced = false;
 	if(f == "forced") render.scale.forced = true;
    
-	if (scaler == "none") { render.scale.op = scalerOpNormal;render.scale.size = 1; }
+	const bool in_pixel_perfect_mode = (GFX_GetBestMode(0) & GFX_UNITY_SCALE);
+
+	if (scaler == "none" || in_pixel_perfect_mode) { render.scale.op = scalerOpNormal;render.scale.size = 1; }
 	else if (scaler == "normal2x") { render.scale.op = scalerOpNormal;render.scale.size = 2; }
 	else if (scaler == "normal3x") { render.scale.op = scalerOpNormal;render.scale.size = 3; }
 #if RENDER_USE_ADVANCED_SCALERS>2

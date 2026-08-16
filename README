@@ -1,4 +1,4 @@
-DOSBox (dosbox-staging) 0.78.0 Manual
+DOSBox (dosbox-staging) 0.78.1 Manual
 
 ======
 INDEX:
@@ -77,9 +77,34 @@ START: How to start?
 
 
 AUTOMATION: Do I always have to type these commands?
-    In the DOSBox configuration file is an [autoexec] section. The commands
-    present there are run when DOSBox starts, so you can use this section
-    for the mounting. Look at Section 13: "The configuration (options) file".
+    DOSBox configuration files contain an [autoexec] section that holds
+    one or more commands, listed line by line, just as you would type them
+    into the DOSBox command prompt. The [autoexec] section is run on startup.
+
+    When multiple configuration files are loaded that each have [autoexec]
+    sections, DOSBox Staging by default joins these sections into a combined
+    [autoexec] that's run.
+
+    If you prefer to only run the most recently processed [autoexec] when
+    multiple configuration files are provided, you can set the "autoexec_section"
+    setting to "overwrite", in the [dosbox] section.  When in this mode, the
+    the overwrite-order is as follows:
+
+    1. Highest priority are those command(s) provided on the command line.
+    2. Second is the [autoexec] section from the last processed custom conf file.
+       This would be custom2 if: dosbox -conf custom1.conf -conf custom2.conf
+    3. Third is the [autoexec] section from the local conf, ie: when
+       dosbox.conf is present in the current directory
+    4. Last is the [autoexec] section from the user's portable or primary conf,
+       where:
+        - The portable conf is dosbox-staging.conf that (may) reside along-side
+          the DOSBox executable.
+        - The primary conf is dosbox-staging.conf that (may) reside in the
+          user's configuration directory, which varies by operating system.
+
+    This ordering of configuration files is also discussed in Section 3:
+    "Command Line Parameters", and specific configuration file settings are
+    discussed in Section 13: "The configuration (options) file".
 
 
 FULLSCREEN: How do I change to fullscreen?
@@ -250,6 +275,12 @@ KEYBOARD: Common key-presses conflict with system actions on macOS
      - "Move left a space" to deconflict Control+Left
      - "Move right a space" to deconflict Control+Right
 
+KEYBOARD: The numlock and capslock state isn't correct.
+    A known issue prevents SDL from reading the numlock and capslock
+    states on startup. Until this is resolved, we recommend toggling these
+    off prior to starting DOSBox. After startup, you may use numlock and
+    capslock as desired.
+
 KEYBOARD: I can't type \ or : in DOSBox.
     This can happen in various cases, like your host keyboard layout does not
     have a matching DOS layout representation (or it was not correctly
@@ -388,31 +419,52 @@ dosbox -opencaptures program
   -fullscreen
         Starts DOSBox in fullscreen mode.
 
-  -noprimaryconf, -conf, and -nolocalconf:
+  -noprimaryconf, -nolocal, and -conf:
 
         DOSBox Staging uses a layered configuration approach, as follows:
 
-        1. The primary configuration file is loaded first, which comes
-           from the operating system's user configuration directory.
-           This can be thought of as your "global" configuration file.
+        1. If a dosbox-staging.conf file is found along-side the
+           DOSBox executable, known as a portable layout, then this
+           configuration file is loaded first. In this case, the
+           executable's directory is used to load other assets such as
+           glshaders, mt32-roms, and soundfonts.
 
-        2. Custom configurations can be layered on next using one
-           or more -conf <filename> command-line arguments. For example:
+           If a portable layout isn't found, the user's primary
+           configuration file is loaded from the operating system's
+           user configuration directory. This can be thought of as
+           your "global" configuration file, The -noprimaryconf flag
+           can be used in cases where you want to avoid loading your
+           primary conf file.
+
+        2. Second, if the local directory contains a dosbox.conf file,
+           its settings override those previously set by your portable
+           or primary file. The -nolocalconf flag can be used in cases
+           where you want to avoid loading the local dosbox.conf file.
+
+        3. Finally, custom configurations are layered on, in order,
+           using one or more -conf <filename> arguments. For example:
            dosbox -conf myshader.conf -conf myaudio.conf
+           These settings override those previously set by either the
+           Local or Primary configurations.
 
-        3. Finally, if the local directory contains a "dosbox.conf" file,
-           these settings will be layered on last and therefore have
-           the highest precedence.
+        This layered approach means you can start with general settings
+        (from your Primary conf) and increasingly fine-tune them for a specific
+        game.
 
-        This layered approach means you can start with the most general
-        settings (from your primary conf) and increasingly fine-tune them
-        for a specific game, which may only have a couple DOS-specific
-        settings inside its own local dosbox.conf file.
+        If the [dosbox] "autoexec_section" setting is "overwrite", then
+        the same priority order applies when multiple configuration files
+        provide the [autoexec] section: DOSBox Staging will execute [autoexec]
+        only from the end-most (or highest priority) configuration file.
 
-        The -noprimaryconf and -nolocalconf affect this behavior:
+        Additionally, if you've passed commands as arguments directly on the
+        command line, ie: dosbox /path/game/run.bat, then these take priority
+        over any prior [autoexec] sections - to avoid mount and launch
+        conflicts.
 
-        -noprimaryconf avoids loading your primary conf file.
-        -nolocalconf avoids loading the local dosbox.conf file.
+        If you wish to use the original behavior where [autoexec] sections
+        are joined into a combined set of commands, then set the [dosbox]
+        "autoexec_section" setting to "join". This is also the default.
+
 
   -lang languagefilelocation
         Start DOSBox using the language specified in "languagefilelocation".
@@ -1724,21 +1776,23 @@ Alternatively, you can setup the filename in the configuration file
 in the [dosbox] section. There's a language= entry that can be changed with
 the filelocation.
 
-The DOSBox Staging release package includes a "translations" directory
-containing translated language files. Place the "translations" directory
-inside your config path to allow short-hand notation, as follows:
+The DOSBox Staging release is bundled with a "translations" directory
+containing translated language files. Translations are provided for
+German (de), Spanish (es), Fench (fr), Italian (it), Polish (pl), and
+Russian (ru).  Select your prefered language using short-hand notation,
+as shown in these examples:
 
-On launch:
-  dosbox -lang es
-  dosbox -lang fr
-  dosbox -lang it
-  dosbox -lang pl
-  dosbox -lang ru
+Via LANG environment variable:
+  set LANG de     (on Windows)
+  export LANG=it  (on macOS and Linux)
 
 Via conf setting:
   [dosbox]
   language = es
-  # fr, it, pl, ru
+
+Via command-line flag:
+  dosbox -lang pl
+  dosbox -lang ru
 
 Note: macOS users can find the "translations" directory inside the
       "./Resources/" directory, after expanding the .dmg package.

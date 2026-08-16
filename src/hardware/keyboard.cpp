@@ -24,6 +24,8 @@
 #include "mem.h"
 #include "mixer.h"
 #include "timer.h"
+#include "support.h"
+
 //--Added 2012-02-24 by Alun Bestor to give Boxer more hooks into keyboard behaviour
 #import "BXCoalface.h"
 //--End of modifications
@@ -113,8 +115,9 @@ static uint8_t read_p60(io_port_t, io_width_t)
 	return keyb.p60data;
 }
 
-static void write_p60(io_port_t, uint8_t val, io_width_t)
+static void write_p60(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	switch (keyb.command) {
 	case CMD_NONE:	/* None */
 		/* No active command this would normally get sent to the keyboard then */
@@ -171,7 +174,7 @@ static void write_p60(io_port_t, uint8_t val, io_width_t)
 			keyb.repeat.rate = repeat[val&0x1f];
 			keyb.command=CMD_NONE;
 		}
-		FALLTHROUGH; // CMD_SETLEDS does what we want
+		[[fallthrough]]; // CMD_SETLEDS does what we want
 	case CMD_SETLEDS:
 		keyb.command=CMD_NONE;
 		KEYBOARD_ClrBuffer();
@@ -193,8 +196,9 @@ static uint8_t read_p61(io_port_t, io_width_t)
 }
 
 extern void TIMER_SetGate2(bool);
-static void write_p61(io_port_t, uint8_t val, io_width_t)
+static void write_p61(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	if ((port_61_data ^ val) & 3) {
 		if ((port_61_data ^ val) & 1) TIMER_SetGate2(val&0x1);
 		PCSPEAKER_SetType(val & 3);
@@ -209,8 +213,9 @@ static uint8_t read_p62(io_port_t, io_width_t)
 	return ret;
 }
 
-static void write_p64(io_port_t, uint8_t val, io_width_t)
+static void write_p64(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	switch (val) {
 	case 0xae:		/* Activate keyboard */
 		keyb.active=true;

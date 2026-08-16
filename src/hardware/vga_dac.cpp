@@ -56,17 +56,26 @@ enum {DAC_READ,DAC_WRITE};
 
 static void VGA_DAC_SendColor(uint8_t index, uint8_t src)
 {
-	const Bit8u red = vga.dac.rgb[src].red;
-	const Bit8u green = vga.dac.rgb[src].green;
-	const Bit8u blue = vga.dac.rgb[src].blue;
-	//Set entry in (little endian) 16bit output lookup table
-	const auto pixel = static_cast<uint16_t>(((blue >> 1) & 0x1f) | (((green)&0x3f) << 5) |
-	                                         (((red >> 1) & 0x1f) << 11));
-	var_write(&vga.dac.xlat16[index], pixel);
+	// 6-bit DAC color values (0 to 63)
+	const auto red = vga.dac.rgb[src].red;
+	const auto green = vga.dac.rgb[src].green;
+	const auto blue = vga.dac.rgb[src].blue;
 
-	RENDER_SetPal(index, static_cast<uint8_t>((red << 2) | (red >> 4)),
-	              static_cast<uint8_t>((green << 2) | (green >> 4)),
-	              static_cast<uint8_t>((blue << 2) | (blue >> 4)));
+	// Scale the DAC's combined 18-bit color into 16-bit color
+	const auto rgb565 = ((red >> 1) << 11 | green << 5 | (blue >> 1));
+
+	// Set it in the (little endian) 16bit output lookup table
+	var_write(&vga.dac.xlat16[index], check_cast<uint16_t>(rgb565));
+
+	// Scale the DAC's 6-bit colors to 8-bit to set the VGA palette
+	auto scale_6_to_8 = [](const uint8_t color_6) -> uint8_t {
+		const auto color_8 = (color_6 * 255 + 31) / 63;
+		return check_cast<uint8_t>(color_8);
+	};
+	RENDER_SetPal(index,
+	              scale_6_to_8(red),
+	              scale_6_to_8(green),
+	              scale_6_to_8(blue));
 }
 
 static void VGA_DAC_UpdateColor(uint16_t index)
@@ -77,8 +86,9 @@ static void VGA_DAC_UpdateColor(uint16_t index)
 	VGA_DAC_SendColor(static_cast<uint8_t>(index), static_cast<uint8_t>(maskIndex));
 }
 
-static void write_p3c6(io_port_t, uint8_t val, io_width_t)
+static void write_p3c6(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	if (vga.dac.pel_mask != val) {
 		LOG(LOG_VGAMISC, LOG_NORMAL)("VGA:DCA:Pel Mask set to %X", val);
 		vga.dac.pel_mask = val;
@@ -92,8 +102,9 @@ static uint8_t read_p3c6(io_port_t, io_width_t)
 	return vga.dac.pel_mask;
 }
 
-static void write_p3c7(io_port_t, uint8_t val, io_width_t)
+static void write_p3c7(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	vga.dac.read_index = val;
 	vga.dac.pel_index = 0;
 	vga.dac.state = DAC_READ;
@@ -108,8 +119,9 @@ static uint8_t read_p3c7(io_port_t, io_width_t)
 		return 0x0;
 }
 
-static void write_p3c8(io_port_t, uint8_t val, io_width_t)
+static void write_p3c8(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	vga.dac.write_index = val;
 	vga.dac.pel_index = 0;
 	vga.dac.state = DAC_WRITE;
@@ -121,8 +133,9 @@ static uint8_t read_p3c8(Bitu, io_width_t)
 	return vga.dac.write_index;
 }
 
-static void write_p3c9(io_port_t, uint8_t val, io_width_t)
+static void write_p3c9(io_port_t, io_val_t value, io_width_t)
 {
+	auto val = check_cast<uint8_t>(value);
 	val &= 0x3f;
 	switch (vga.dac.pel_index) {
 	case 0:
@@ -202,7 +215,7 @@ void VGA_DAC_CombineColor(Bit8u attr,Bit8u pal) {
 		// used by copper demo; almost no video card seems to suport it
 		if (!IS_VGA_ARCH || (svgaCard != SVGA_None))
 			break;
-		FALLTHROUGH;
+		[[fallthrough]];
 	default:
 		VGA_DAC_SendColor( attr, pal );
 	}

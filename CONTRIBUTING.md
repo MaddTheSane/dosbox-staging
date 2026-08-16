@@ -77,7 +77,7 @@ These rules apply to code in `src/` and `include/` directories.
 They do not apply to code in `src/libs/` directory (libraries in there
 have their own coding conventions).
 
-Rules outlined below apply to new code landing in master branch.
+Rules outlined below apply to new code landing in the main branch.
 Do not do mass reformatting or renaming of existing code.
 
 ### Language
@@ -91,7 +91,8 @@ We use C-like C++17. To clarify:
 - C++17 has rich STL library, use it (responsibly - sometimes using
   C standard library makes more sense).
 - Use modern C++ features like `constexpr`, `static_assert`, managed pointers,
-  lambda expressions, for-each loops, etc.
+  lambda expressions, for-each and range-expression loops, std::array
+  instead of fixed C-arrays, etc.
 - Avoid using exceptions. C++ exceptions are trickier than you think.
   No, you won't get it right. Or person touching the code after you won't get
   it right. Or person using your exception-ridden interface won't get it right.

@@ -64,7 +64,7 @@ public:
 };
 
 class AutoexecEditor;
-class DOS_Shell final : public Program {
+class DOS_Shell : public Program {
 private:
 	enum class HELP_LIST { ALL, COMMON };
 	void PrintHelpForCommands(HELP_LIST requested_list);
@@ -95,6 +95,8 @@ public:
 	bool Execute(char * name,char * args);
 	/* Checks if it matches a hardware-property */
 	bool CheckConfig(char* cmd_in,char*line);
+	/* Internal utilities for testing */
+	virtual bool execute_shell_cmd(char *name, char *arguments);
 
 	/* Some internal used functions */
 	const char *Which(const char *name) const;
@@ -149,13 +151,9 @@ struct SHELL_Cmd {
 class AutoexecObject{
 private:
 	bool installed = false;
-	std::string buf{};
+	std::string buf = {};
 
 public:
-	AutoexecObject()
-		: installed(false),
-		  buf("")
-	{}
 	void Install(std::string const &in);
 	void InstallBefore(std::string const &in);
 	const std::string &GetLine() const { return buf; }

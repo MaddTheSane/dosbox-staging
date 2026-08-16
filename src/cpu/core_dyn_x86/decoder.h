@@ -18,6 +18,8 @@
 
 #include "compiler.h"
 
+#include "inout.h"
+
 #define X86_INLINED_MEMACCESS
 
 enum REP_Type {
@@ -54,33 +56,42 @@ static bool MakeCodePage(Bitu lin_addr,CodePageHandler * &cph) {
 	Bit8u rdval;
 	const Bitu cflag = cpu.code.big ? PFLAG_HASCODE32:PFLAG_HASCODE16;
 	//Ensure page contains memory:
-	if (GCC_UNLIKELY(mem_readb_checked(lin_addr,&rdval))) return true;
-	PageHandler * handler=get_tlb_readhandler(lin_addr);
+	const auto lin_addr_as_physpt = check_cast<PhysPt>(lin_addr);
+	if (GCC_UNLIKELY(mem_readb_checked(lin_addr_as_physpt, &rdval)))
+		return true;
+	PageHandler *handler = get_tlb_readhandler(lin_addr_as_physpt);
 	if (handler->flags & PFLAG_HASCODE) {
 		cph=( CodePageHandler *)handler;
-		return false;
+		if (CPU_AllowSpeedMods || (handler->flags & cflag)) {
+			return false;
+		}
+		cph->ClearRelease();
+		cph = nullptr;
+		handler = get_tlb_readhandler(lin_addr_as_physpt);
 	}
 	if (handler->flags & PFLAG_NOCODE) {
 		if (PAGING_ForcePageInit(lin_addr)) {
-			handler=get_tlb_readhandler(lin_addr);
+			handler = get_tlb_readhandler(lin_addr_as_physpt);
 			if (handler->flags & PFLAG_HASCODE) {
 				cph=( CodePageHandler *)handler;
 				if (handler->flags & cflag) return false;
 				cph->ClearRelease();
-				cph=0;
-				handler=get_tlb_readhandler(lin_addr);
+				cph = nullptr;
+				handler = get_tlb_readhandler(lin_addr_as_physpt);
 			}
 		}
 		if (handler->flags & PFLAG_NOCODE) {
 			LOG_MSG("DYNX86:Can't run code in this page!");
-			cph=0;		return false;
+			cph = nullptr;
+			return false;
 		}
 	} 
 	Bitu lin_page=lin_addr >> 12;
 	Bitu phys_page=lin_page;
 	if (!PAGING_MakePhysPage(phys_page)) {
 		LOG_MSG("DYNX86:Can't find physpage");
-		cph=0;		return false;
+		cph = nullptr;
+		return false;
 	}
 	/* Find a free CodePage */
 	if (!cache.free_pages && cache.used_pages) {
@@ -163,7 +174,7 @@ static Bit32u decode_fetchd(void) {
 
 #define START_WMMEM 64
 
-static INLINE void decode_increase_wmapmask(Bitu size) {
+static inline void decode_increase_wmapmask(Bitu size) {
 	Bitu mapidx;
 	CacheBlock* activecb=decode.active_block; 
 	if (GCC_UNLIKELY(!activecb->cache.wmapmask)) {
@@ -294,19 +305,19 @@ static void dyn_set_eip_last_end(DynReg * endreg) {
 	gen_dop_word_imm(DOP_ADD,decode.big_op,DREG(EIP),decode.op_start-decode.code_start);
 }
 
-static INLINE void dyn_set_eip_end(void) {
+static inline void dyn_set_eip_end(void) {
 	gen_protectflags();
 	gen_dop_word_imm(DOP_ADD,cpu.code.big,DREG(EIP),decode.code-decode.code_start);
 }
 
-static INLINE void dyn_set_eip_end(MAYBE_UNUSED DynReg * endreg) {
+static inline void dyn_set_eip_end([[maybe_unused]] DynReg * endreg) {
 	gen_protectflags();
 	if (cpu.code.big) gen_dop_word(DOP_MOV,true,DREG(TMPW),DREG(EIP));
 	else gen_extend_word(false,DREG(TMPW),DREG(EIP));
 	gen_dop_word_imm(DOP_ADD,cpu.code.big,DREG(TMPW),decode.code-decode.code_start);
 }
 
-static INLINE void dyn_set_eip_last(void) {
+static inline void dyn_set_eip_last(void) {
 	gen_protectflags();
 	gen_dop_word_imm(DOP_ADD,cpu.code.big,DREG(EIP),decode.op_start-decode.code_start);
 }
@@ -316,12 +327,12 @@ enum save_info_type {db_exception, cycle_check, normal, fpu_restore};
 
 
 static struct {
-	save_info_type type;
-	DynState state;
-	const Bit8u * branch_pos;
-	Bit32u eip_change;
-	Bitu cycles;
-	const Bit8u * return_pos;
+	save_info_type type = {};
+	DynState state = {};
+	const Bit8u * branch_pos = nullptr;
+	Bit32u eip_change = 0;
+	Bitu cycles = 0;
+	const Bit8u * return_pos = nullptr;
 } save_info[512];
 
 Bitu used_save_info=0;
@@ -1055,7 +1066,7 @@ static void dyn_pop(DynReg * dynreg,bool checked=true) {
 	}
 }
 
-static INLINE void dyn_get_modrm(void) {
+static inline void dyn_get_modrm(void) {
 	decode.modrm.val=decode_fetchb();
 	decode.modrm.mod=(decode.modrm.val >> 6) & 3;
 	decode.modrm.reg=(decode.modrm.val >> 3) & 7;
@@ -2056,7 +2067,7 @@ static void dyn_iret(void) {
 	dyn_closeblock();
 }
 
-MAYBE_UNUSED static void dyn_interrupt(Bitu num)
+[[maybe_unused]] static void dyn_interrupt(Bitu num)
 {
 	gen_protectflags();
 	dyn_flags_gen_to_host();
@@ -2068,38 +2079,44 @@ MAYBE_UNUSED static void dyn_interrupt(Bitu num)
 	dyn_closeblock();
 }
 
-static bool dyn_io_writeB(Bitu port,Bit8u val) {
-	bool ex = CPU_IO_Exception(port,1);
+static bool dyn_io_writeB(const io_port_t port, const uint8_t val)
+{
+	bool ex = CPU_IO_Exception(port, 1);
 	if (!ex) IO_WriteB(port,val);
 	return ex;
 }
 
-static bool dyn_io_writeW(Bitu port,Bit16u val) {
-	bool ex = CPU_IO_Exception(port,2);
+static bool dyn_io_writeW(const io_port_t port, const uint16_t val)
+{
+	bool ex = CPU_IO_Exception(port, 2);
 	if (!ex) IO_WriteW(port,val);
 	return ex;
 }
 
-static bool dyn_io_writeD(Bitu port,Bit32u val) {
-	bool ex = CPU_IO_Exception(port,4);
+static bool dyn_io_writeD(const io_port_t port, const uint32_t val)
+{
+	bool ex = CPU_IO_Exception(port, 4);
 	if (!ex) IO_WriteD(port,val);
 	return ex;
 }
 
-static bool dyn_io_readB(Bitu port) {
-	bool ex = CPU_IO_Exception(port,1);
+static bool dyn_io_readB(const io_port_t port)
+{
+	bool ex = CPU_IO_Exception(port, 1);
 	if (!ex) core_dyn.readdata = IO_ReadB(port);
 	return ex;
 }
 
-static bool dyn_io_readW(Bitu port) {
-	bool ex = CPU_IO_Exception(port,2);
+static bool dyn_io_readW(const io_port_t port)
+{
+	bool ex = CPU_IO_Exception(port, 2);
 	if (!ex) core_dyn.readdata = IO_ReadW(port);
 	return ex;
 }
 
-static bool dyn_io_readD(Bitu port) {
-	bool ex = CPU_IO_Exception(port,4);
+static bool dyn_io_readD(const io_port_t port)
+{
+	bool ex = CPU_IO_Exception(port, 4);
 	if (!ex) core_dyn.readdata = IO_ReadD(port);
 	return ex;
 }
@@ -2509,17 +2526,17 @@ restart_prefix:
 			dyn_write_word_release(DREG(EA),DREG(EAX),decode.big_op);
 			break;
 		/* MOVSB/W/D*/
-		case 0xa4:dyn_string(STR_MOVSB);break;
-		case 0xa5:dyn_string(decode.big_op ? STR_MOVSD : STR_MOVSW);break;
+		case 0xa4:dyn_string(R_MOVSB);break;
+		case 0xa5:dyn_string(decode.big_op ? R_MOVSD : R_MOVSW);break;
 		/* TEST AL,AX Imm */
 		case 0xa8:gen_discardflags();gen_dop_byte_imm(DOP_TEST,DREG(EAX),0,decode_fetchb());break;
 		case 0xa9:gen_discardflags();gen_dop_word_imm(DOP_TEST,decode.big_op,DREG(EAX),decode.big_op ? decode_fetchd() :  decode_fetchw());break;
 		/* STOSB/W/D*/
-		case 0xaa:dyn_string(STR_STOSB);break;
-		case 0xab:dyn_string(decode.big_op ? STR_STOSD : STR_STOSW);break;
+		case 0xaa:dyn_string(R_STOSB);break;
+		case 0xab:dyn_string(decode.big_op ? R_STOSD : R_STOSW);break;
 		/* LODSB/W/D*/
-		case 0xac:dyn_string(STR_LODSB);break;
-		case 0xad:dyn_string(decode.big_op ? STR_LODSD : STR_LODSW);break;
+		case 0xac:dyn_string(R_LODSB);break;
+		case 0xad:dyn_string(decode.big_op ? R_LODSD : R_LODSW);break;
 		//Mov Byte reg,Imm byte
 		case 0xb0:case 0xb1:case 0xb2:case 0xb3:case 0xb4:case 0xb5:case 0xb6:case 0xb7:	
 			gen_dop_byte_imm(DOP_MOV,&DynRegs[opcode&3],opcode&4,decode_fetchb());
@@ -2897,7 +2914,7 @@ finish_block:
 	/* Setup the correct end-address */
 	decode.active_block->page.end=--decode.page.index;
 	dyn_mem_execute(cache_addr, cache_bytes);
-	const auto cache_flush_bytes = static_cast<size_t>(decode.block->cache.size);
+	const auto cache_flush_bytes = decode.block->cache.size;
 	dyn_cache_invalidate(cache_addr, cache_flush_bytes);
 	assert(decode.block->cache.size <= cache_bytes);
 	//	LOG_MSG("Created block size %d start %d end

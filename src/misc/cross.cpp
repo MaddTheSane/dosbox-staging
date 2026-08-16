@@ -46,7 +46,7 @@
 
 static std::string GetConfigName()
 {
-	return "dosbox" CONF_SUFFIX ".conf";
+	return "dosbox-staging.conf";
 }
 
 #ifndef WIN32
@@ -145,7 +145,24 @@ static void W32_ConfDir(std::string& in,bool create) {
 
 std::string CROSS_GetPlatformConfigDir()
 {
-	std::string conf_dir = "";
+	// Cache the result, as this doesn't change
+	static std::string conf_dir = {};
+	if (conf_dir.length())
+		return conf_dir;
+
+	// Check if a portable layout exists
+	std::string config_file;
+	Cross::GetPlatformConfigName(config_file);
+	const auto portable_conf_path = GetExecutablePath() / config_file;
+	if (std_fs::is_regular_file(portable_conf_path)) {
+		conf_dir = portable_conf_path.parent_path().string();
+		LOG_MSG("CONFIG: Using portable configuration layout in %s",
+		        conf_dir.c_str());
+		conf_dir += CROSS_FILESPLIT;
+		return conf_dir;
+	}
+
+	// Otherwise get the OS-specific configuration directory
 #ifdef WIN32
 	W32_ConfDir(conf_dir, false);
 	conf_dir += "\\DOSBox\\";
@@ -397,6 +414,29 @@ FILE *fopen_wrap(const char *path, const char *mode) {
 #endif
 
 	return fopen(path,mode);
+}
+
+// A helper for fopen_wrap that will fallback to read-only if read-write isn't possible.
+// In the fallback case, is_readonly argument is toggled to true.
+// In all cases, a pointer to the file is returned (or nullptr on failure).
+FILE *fopen_wrap_ro_fallback(const std::string &filename, bool &is_readonly)
+{
+	// Try with the requested permissions
+	const auto requested_perms = is_readonly ? "rb" : "rb+";
+	FILE *fp = fopen_wrap(filename.c_str(), requested_perms);
+	if (fp || is_readonly) {
+		return fp;
+	}
+	// Fallback to read-only
+	assert(!fp && !is_readonly);
+	fp = fopen_wrap(filename.c_str(), "rb");
+	if (fp) {
+		is_readonly = true;
+		LOG_INFO("FILESYSTEM: Opened %s read-only per host filesystem permissions",
+		         filename.c_str());
+	}
+	// Note: if failed, the caller should provide a context-specific message
+	return fp;
 }
 
 namespace cross {

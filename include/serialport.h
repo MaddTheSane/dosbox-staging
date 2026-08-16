@@ -143,6 +143,15 @@ private:
 	size_t used = 0;
 };
 
+enum SERIAL_PORT_TYPE { // Also change src/dos/program_serial.cpp
+	DISABLED = 0,
+	DUMMY,
+	DIRECT_SERIAL,
+	MODEM,
+	NULL_MODEM,
+	INVALID,
+};
+
 class CSerial {
 public:
 	CSerial(const CSerial &) = delete;            // prevent copying
@@ -279,6 +288,12 @@ public:
 	bool Putchar(uint8_t data, bool wait_dtr, bool wait_rts, uint32_t timeout);
 	bool Getchar(uint8_t *data, uint8_t *lsr, bool wait_dsr, uint32_t timeout);
 	uint8_t GetPortNumber() const { return port_index + 1; }
+
+	// What type of port is this?
+	SERIAL_PORT_TYPE serialType = SERIAL_PORT_TYPE::DISABLED;
+
+	// How was it created?
+	std::string commandLineString = "";
 
 private:
 	DOS_Device *mydosdevice = nullptr;

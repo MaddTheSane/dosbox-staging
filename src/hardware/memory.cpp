@@ -17,14 +17,15 @@
  */
 
 
-#include "dosbox.h"
 #include "mem.h"
+
+#include <string.h>
+
 #include "inout.h"
 #include "setup.h"
 #include "paging.h"
 #include "regs.h"
-
-#include <string.h>
+#include "support.h"
 
 #define PAGES_IN_BLOCK	((1024*1024)/MEM_PAGE_SIZE)
 #define SAFE_MEMORY	32
@@ -63,7 +64,8 @@ public:
 	IllegalPageHandler() {
 		flags=PFLAG_INIT|PFLAG_NOCODE;
 	}
-	Bitu readb(PhysPt addr) {
+	uint8_t readb(PhysPt addr)
+	{
 #if C_DEBUG
 		LOG_MSG("Illegal read from %x, CS:IP %8x:%8x",addr,SegValue(cs),reg_eip);
 #else
@@ -75,7 +77,7 @@ public:
 #endif
 		return 0xff;
 	}
-	void writeb(PhysPt addr, MAYBE_UNUSED Bitu val)
+	void writeb(PhysPt addr, [[maybe_unused]] uint8_t val)
 	{
 #if C_DEBUG
 		LOG_MSG("Illegal write to %x, CS:IP %8x:%8x",addr,SegValue(cs),reg_eip);
@@ -107,14 +109,14 @@ public:
 	ROMPageHandler() {
 		flags=PFLAG_READABLE|PFLAG_HASROM;
 	}
-	void writeb(PhysPt addr,Bitu val){
-		LOG(LOG_CPU,LOG_ERROR)("Write %" sBitfs(x) " to rom at %x",val,addr);
+	void writeb(PhysPt addr,uint8_t val){
+		LOG(LOG_CPU, LOG_ERROR)("Write 0x%x to rom at %x", val, addr);
 	}
-	void writew(PhysPt addr,Bitu val){
-		LOG(LOG_CPU,LOG_ERROR)("Write %" sBitfs(x) " to rom at %x",val,addr);
+	void writew(PhysPt addr,uint16_t val){
+		LOG(LOG_CPU, LOG_ERROR)("Write 0x%x to rom at %x", val, addr);
 	}
-	void writed(PhysPt addr,Bitu val){
-		LOG(LOG_CPU,LOG_ERROR)("Write %" sBitfs(x) " to rom at %x",val,addr);
+	void writed(PhysPt addr,uint32_t val){
+		LOG(LOG_CPU, LOG_ERROR)("Write 0x%x to rom at %x", val, addr);
 	}
 };
 
@@ -248,7 +250,7 @@ Bitu MEM_AllocatedPages(MemHandle handle)
 
 //TODO Maybe some protection for this whole allocation scheme
 
-INLINE Bitu BestMatch(Bitu size) {
+inline Bitu BestMatch(Bitu size) {
 	Bitu index=XMS_START;	
 	Bitu first=0;
 	Bitu best=0xfffffff;
@@ -531,8 +533,9 @@ void mem_writed(PhysPt address,Bit32u val) {
 	mem_writed_inline(address,val);
 }
 
-static void write_p92(io_port_t, uint8_t val, io_width_t)
+static void write_p92(io_port_t, io_val_t value, io_width_t)
 {
+	const auto val = check_cast<uint8_t>(value);
 	// Bit 0 = system reset (switch back to real mode)
 	if (val&1) E_Exit("XMS: CPU reset via port 0x92 not supported.");
 	memory.a20.controlport = val & ~2;
@@ -645,7 +648,7 @@ public:
 
 static MEMORY* test;
 
-static void MEM_ShutDown(MAYBE_UNUSED Section *sec)
+static void MEM_ShutDown([[maybe_unused]] Section *sec)
 {
 	delete test;
 }

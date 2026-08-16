@@ -23,6 +23,7 @@
 
 #include <list>
 #include <string>
+#include "std_filesystem.h"
 
 #include "dos_inc.h"
 
@@ -39,7 +40,7 @@ public:
 	bool FindCommand(unsigned int which,std::string & value);
 	bool FindStringBegin(char const * const begin,std::string & value, bool remove=false);
 	bool FindStringRemain(char const * const name,std::string & value);
-	bool FindStringRemainBegin(char const * const name,std::string & value);
+	bool FindStringRemainBegin(char const *const name, std::string &value);
 	bool GetStringRemain(std::string & value);
 	int GetParameterFromList(const char* const params[], std::vector<std::string> & output);
 	void FillVector(std::vector<std::string> & vector);
@@ -80,7 +81,8 @@ public:
 	bool GetEnvNum(Bitu num, std::string &result) const;
 	Bitu GetEnvCount() const;
 	bool SetEnv(const char * entry,const char * new_string);
-	void WriteOut(const char *format, ...);	// printf to DOS stdout
+	virtual void WriteOut(const char *format, const char * arguments);
+	virtual void WriteOut(const char *format, ...);	// printf to DOS stdout
 	void WriteOut_NoParsing(const char *str); // write string to DOS stdout
 	bool SuppressWriteOut(const char *format); // prevent writing to DOS stdout
 	void InjectMissingNewline();

@@ -16,7 +16,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
+#include "../string_ops.h"
 
 /*
 	This file provides some definitions and basic level functions
@@ -58,17 +58,6 @@ enum BranchTypes {
 	BR_Z,BR_NZ,BR_BE,BR_NBE,
 	BR_S,BR_NS,BR_P,BR_NP,
 	BR_L,BR_NL,BR_LE,BR_NLE
-};
-
-// string instructions
-enum StringOps {
-	STR_OUTSB=0,STR_OUTSW,STR_OUTSD,
-	STR_INSB=4,STR_INSW,STR_INSD,
-	STR_MOVSB=8,STR_MOVSW,STR_MOVSD,
-	STR_LODSB=12,STR_LODSW,STR_LODSD,
-	STR_STOSB=16,STR_STOSW,STR_STOSD,
-	STR_SCASB=20,STR_SCASW,STR_SCASD,
-	STR_CMPSB=24,STR_CMPSW,STR_CMPSD
 };
 
 // repeat prefix type (for string operations)
@@ -138,7 +127,14 @@ static bool MakeCodePage(Bitu lin_addr, CodePageHandler *&cph)
 	if (handler->flags & PFLAG_HASCODE) {
 		// this is a codepage handler, make sure it matches current code size
 		cph = (CodePageHandler *)handler;
-		return false;
+		if (CPU_AllowSpeedMods || (handler->flags & cflag)) {
+			return false;
+		}
+		// wrong code size/stale dynamic code, drop it
+		cph->ClearRelease();
+		cph = nullptr;
+		// handler was changed, refresh
+		handler = get_tlb_readhandler(lin_addr);
 	}
 	if (handler->flags & PFLAG_NOCODE) {
 		if (PAGING_ForcePageInit(lin_addr)) {
@@ -147,13 +143,13 @@ static bool MakeCodePage(Bitu lin_addr, CodePageHandler *&cph)
 				cph = (CodePageHandler *)handler;
 				if (handler->flags & cflag) return false;
 				cph->ClearRelease();
-				cph=0;
-				handler=get_tlb_readhandler(lin_addr);
+				cph = nullptr;
+				handler=get_tlb_readhandler(static_cast<PhysPt>(lin_addr));
 			}
 		}
 		if (handler->flags & PFLAG_NOCODE) {
 			LOG_MSG("DYNREC:Can't run code in this page");
-			cph=0;
+			cph = nullptr;
 			return false;
 		}
 	} 
@@ -162,7 +158,7 @@ static bool MakeCodePage(Bitu lin_addr, CodePageHandler *&cph)
 	// find the physical page that the linear page is mapped to
 	if (!PAGING_MakePhysPage(phys_page)) {
 		LOG_MSG("DYNREC:Can't find physpage");
-		cph=0;
+		cph = nullptr;
 		return false;
 	}
 	// find a free CodePage
@@ -255,7 +251,7 @@ static Bit32u decode_fetchd(void) {
 
 // adjust writemap mask to care for map holes due to special
 // codefetch functions
-static void INLINE decode_increase_wmapmask(Bitu size) {
+static void inline decode_increase_wmapmask(Bitu size) {
 	Bitu mapidx;
 	CacheBlock *activecb = decode.active_block;
 	if (GCC_UNLIKELY(!activecb->cache.wmapmask)) {
@@ -375,7 +371,7 @@ static bool decode_fetchd_imm(Bitu & val) {
 
 
 // modrm decoding helper
-static void INLINE dyn_get_modrm(void) {
+static void inline dyn_get_modrm(void) {
 	Bitu val=decode_fetchb();
 	decode.modrm.mod=(val >> 6) & 3;
 	decode.modrm.reg=(val >> 3) & 7;
@@ -476,24 +472,24 @@ static void dyn_reduce_cycles(void) {
 
 // set reg to the start of the next instruction
 // set reg_eip to the start of the current instruction
-static INLINE void dyn_set_eip_last_end(HostReg reg) {
+static inline void dyn_set_eip_last_end(HostReg reg) {
 	gen_mov_word_to_reg(reg,&reg_eip,true);
 	gen_add_imm(reg,(Bit32u)(decode.code-decode.code_start));
 	gen_add_direct_word(&reg_eip,decode.op_start-decode.code_start,decode.big_op);
 }
 
 // set reg_eip to the start of the current instruction
-static INLINE void dyn_set_eip_last(void) {
+static inline void dyn_set_eip_last(void) {
 	gen_add_direct_word(&reg_eip,decode.op_start-decode.code_start,cpu.code.big);
 }
 
 // set reg_eip to the start of the next instruction
-static INLINE void dyn_set_eip_end(void) {
+static inline void dyn_set_eip_end(void) {
 	gen_add_direct_word(&reg_eip,decode.code-decode.code_start,cpu.code.big);
 }
 
 // set reg_eip to the start of the next instruction plus an offset (imm)
-static INLINE void dyn_set_eip_end(HostReg reg,Bit32u imm=0) {
+static inline void dyn_set_eip_end(HostReg reg,Bit32u imm=0) {
 	gen_mov_word_to_reg(reg,&reg_eip,true); //get_extend_word will mask off the upper bits
 	//gen_mov_word_to_reg(reg,&reg_eip,decode.big_op);
 	gen_add_imm(reg,(Bit32u)(decode.code-decode.code_start+imm));
@@ -506,72 +502,72 @@ static INLINE void dyn_set_eip_end(HostReg reg,Bit32u imm=0) {
 // is architecture dependent
 // R=host register; I=32bit immediate value; A=address value; m=memory
 
-static INLINE const Bit8u* gen_call_function_R(void * func,Bitu op) {
+static inline const Bit8u* gen_call_function_R(void * func,Bitu op) {
 	gen_load_param_reg(op,0);
 	return gen_call_function_setup(func, 1);
 }
 
-static INLINE const Bit8u* gen_call_function_R3(void * func,Bitu op) {
+static inline const Bit8u* gen_call_function_R3(void * func,Bitu op) {
 	gen_load_param_reg(op,2);
 	return gen_call_function_setup(func, 3, true);
 }
 
-static INLINE const Bit8u* gen_call_function_RI(void * func,Bitu op1,Bitu op2) {
+static inline const Bit8u* gen_call_function_RI(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_imm(op2,1);
 	gen_load_param_reg(op1,0);
 	return gen_call_function_setup(func, 2);
 }
 
-static INLINE const Bit8u* gen_call_function_RA(void * func,Bitu op1,Bitu op2) {
+static inline const Bit8u* gen_call_function_RA(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_addr(op2,1);
 	gen_load_param_reg(op1,0);
 	return gen_call_function_setup(func, 2);
 }
 
-static INLINE const Bit8u* gen_call_function_RR(void * func,Bitu op1,Bitu op2) {
+static inline const Bit8u* gen_call_function_RR(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_reg(op2,1);
 	gen_load_param_reg(op1,0);
 	return gen_call_function_setup(func, 2);
 }
 
-static INLINE const Bit8u* gen_call_function_IR(void * func,Bitu op1,Bitu op2) {
+static inline const Bit8u* gen_call_function_IR(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_reg(op2,1);
 	gen_load_param_imm(op1,0);
 	return gen_call_function_setup(func, 2);
 }
 
-static INLINE const Bit8u* gen_call_function_I(void * func,Bitu op) {
+static inline const Bit8u* gen_call_function_I(void * func,Bitu op) {
 	gen_load_param_imm(op,0);
 	return gen_call_function_setup(func, 1);
 }
 
-static INLINE const Bit8u* gen_call_function_II(void * func,Bitu op1,Bitu op2) {
+static inline const Bit8u* gen_call_function_II(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_imm(op2,1);
 	gen_load_param_imm(op1,0);
 	return gen_call_function_setup(func, 2);
 }
 
-static INLINE const Bit8u* gen_call_function_III(void * func,Bitu op1,Bitu op2,Bitu op3) {
+static inline const Bit8u* gen_call_function_III(void * func,Bitu op1,Bitu op2,Bitu op3) {
 	gen_load_param_imm(op3,2);
 	gen_load_param_imm(op2,1);
 	gen_load_param_imm(op1,0);
 	return gen_call_function_setup(func, 3);
 }
 
-static INLINE const Bit8u* gen_call_function_IA(void * func,Bitu op1,Bitu op2) {
+static inline const Bit8u* gen_call_function_IA(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_addr(op2,1);
 	gen_load_param_imm(op1,0);
 	return gen_call_function_setup(func, 2);
 }
 
-static INLINE const Bit8u* gen_call_function_IIR(void * func,Bitu op1,Bitu op2,Bitu op3) {
+static inline const Bit8u* gen_call_function_IIR(void * func,Bitu op1,Bitu op2,Bitu op3) {
 	gen_load_param_reg(op3,2);
 	gen_load_param_imm(op2,1);
 	gen_load_param_imm(op1,0);
 	return gen_call_function_setup(func, 3);
 }
 
-static INLINE const Bit8u* gen_call_function_IIIR(void * func,Bitu op1,Bitu op2,Bitu op3,Bitu op4) {
+static inline const Bit8u* gen_call_function_IIIR(void * func,Bitu op1,Bitu op2,Bitu op3,Bitu op4) {
 	gen_load_param_reg(op4,3);
 	gen_load_param_imm(op3,2);
 	gen_load_param_imm(op2,1);
@@ -579,7 +575,7 @@ static INLINE const Bit8u* gen_call_function_IIIR(void * func,Bitu op1,Bitu op2,
 	return gen_call_function_setup(func, 4);
 }
 
-static INLINE const Bit8u* gen_call_function_IRRR(void * func,Bitu op1,Bitu op2,Bitu op3,Bitu op4) {
+static inline const Bit8u* gen_call_function_IRRR(void * func,Bitu op1,Bitu op2,Bitu op3,Bitu op4) {
 	gen_load_param_reg(op4,3);
 	gen_load_param_reg(op3,2);
 	gen_load_param_reg(op2,1);
@@ -587,12 +583,12 @@ static INLINE const Bit8u* gen_call_function_IRRR(void * func,Bitu op1,Bitu op2,
 	return gen_call_function_setup(func, 4);
 }
 
-static INLINE const Bit8u* gen_call_function_m(void * func,Bitu op) {
+static inline const Bit8u* gen_call_function_m(void * func,Bitu op) {
 	gen_load_param_mem(op,2);
 	return gen_call_function_setup(func, 3, true);
 }
 
-static INLINE const Bit8u* gen_call_function_mm(void * func,Bitu op1,Bitu op2) {
+static inline const Bit8u* gen_call_function_mm(void * func,Bitu op1,Bitu op2) {
 	gen_load_param_mem(op2,3);
 	gen_load_param_mem(op1,2);
 	return gen_call_function_setup(func, 4, true);
@@ -805,7 +801,7 @@ static void dyn_write_word(HostReg reg_addr,HostReg reg_val,bool dword) {
 
 // effective address calculation helper, op2 has to be present!
 // loads op1 into ea_reg and adds the scaled op2 and the immediate to it
-MAYBE_UNUSED static void dyn_lea_mem_mem(HostReg ea_reg,
+[[maybe_unused]] static void dyn_lea_mem_mem(HostReg ea_reg,
                                          void *op1,
                                          void *op2,
                                          Bitu scale,
@@ -1248,7 +1244,7 @@ static void InvalidateFlagsPartially(void* current_simple_function,const Bit8u* 
 }
 
 // the current function needs the condition flags thus reset the queue
-static void AcquireFlags(MAYBE_UNUSED Bitu flags_mask) {
+static void AcquireFlags([[maybe_unused]] Bitu flags_mask) {
 #ifdef DRC_FLAGS_INVALIDATION
 	mf_functions_num=0;
 #endif

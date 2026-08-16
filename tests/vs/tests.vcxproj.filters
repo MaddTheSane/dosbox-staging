@@ -21,6 +21,9 @@
     <ClCompile Include="..\fs_utils_tests.cpp">
       <Filter>tests</Filter>
     </ClCompile>
+    <ClCompile Include="..\iohandler_containers_tests.cpp">
+      <Filter>tests</Filter>
+    </ClCompile>
     <ClCompile Include="..\rwqueue_tests.cpp">
       <Filter>tests</Filter>
     </ClCompile>
@@ -57,7 +60,13 @@
     <ClCompile Include="..\..\src\misc\cross.cpp">
       <Filter>dosbox_sources</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\submodules\loguru\loguru.cpp">
+    <ClCompile Include="..\..\src\libs\ghc\fs_std_impl.cpp">
+      <Filter>dosbox_sources</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\libs\loguru\loguru.cpp">
+      <Filter>dosbox_sources</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\libs\whereami\whereami.c">
       <Filter>dosbox_sources</Filter>
     </ClCompile>
     <ClCompile Include="..\support_tests.cpp">

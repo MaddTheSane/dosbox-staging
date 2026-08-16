@@ -489,7 +489,9 @@ CDROM_Interface_Image::CDROM_Interface_Image(uint8_t sub_unit)
 	images[sub_unit] = this;
 	if (refCount == 0) {
 		if (!player.channel) {
-			player.channel = player.mixerChannel.Install(&CDAudioCallBack, 0, "CDAUDIO");
+			const auto mixer_callback = std::bind(&CDROM_Interface_Image::CDAudioCallBack,
+			                                      this, std::placeholders::_1);
+			player.channel = MIXER_AddChannel(mixer_callback, 0, "CDAUDIO");
 			player.channel->Enable(false); // only enabled during playback periods
 		}
 #ifdef DEBUG
@@ -513,6 +515,7 @@ CDROM_Interface_Image::~CDROM_Interface_Image()
 	if (player.cd == this) {
 		player.cd = nullptr;
 	}
+	player.channel.reset();
 }
 
 bool CDROM_Interface_Image::SetDevice(char* path)
@@ -975,8 +978,19 @@ bool CDROM_Interface_Image::ReadSector(uint8_t *buffer, const bool raw, const ui
 	return track->file->read(buffer, offset, length);
 }
 
+bool CDROM_Interface_Image::ReadSectorsHost(void *buffer, bool raw, unsigned long sector, unsigned long num)
+{
+	unsigned int sectorSize = raw ? BYTES_PER_RAW_REDBOOK_FRAME : BYTES_PER_COOKED_REDBOOK_FRAME;
+	bool success = true; //Gobliiins reads 0 sectors
+	for(unsigned long i = 0; i < num; i++) {
+		success = ReadSector((uint8_t*)buffer + (i * (Bitu)sectorSize), raw, sector + i);
+		if (!success) break;
+	}
 
-void CDROM_Interface_Image::CDAudioCallBack(Bitu desired_track_frames)
+	return success;
+}
+
+void CDROM_Interface_Image::CDAudioCallBack(uint16_t desired_track_frames)
 {
 	/**
 	 *  This callback runs in SDL's mixer thread, so there's a risk
@@ -1008,7 +1022,7 @@ void CDROM_Interface_Image::CDAudioCallBack(Bitu desired_track_frames)
 	 *  Uses either the stereo or mono and native or nonnative
 	 *  AddSamples call assigned during construction
 	 */
-	(player.channel->*player.addFrames)(decoded_track_frames, player.buffer);
+	(player.channel.get()->*player.addFrames)(decoded_track_frames, player.buffer);
 
 	if (player.playedTrackFrames >= player.totalTrackFrames) {
 #ifdef DEBUG

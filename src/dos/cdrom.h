@@ -110,6 +110,7 @@ public:
 	virtual bool StopAudio          (void) = 0;
 	virtual void ChannelControl     (TCtrl ctrl) = 0;
 	virtual bool ReadSectors        (PhysPt buffer, const bool raw, const uint32_t sector, const uint16_t num) = 0;
+	virtual bool ReadSectorsHost    (void* buffer, bool raw, unsigned long sector, unsigned long num) = 0;
 	virtual bool LoadUnloadMedia    (bool unload) = 0;
 	virtual void InitNewMedia       (void) {}
 };
@@ -128,9 +129,10 @@ public:
 	bool PauseAudio         (bool /*resume*/) { return true; }
 	bool StopAudio          (void) { return true; }
 
-	void ChannelControl(MAYBE_UNUSED TCtrl ctrl) {}
+	void ChannelControl([[maybe_unused]] TCtrl ctrl) {}
 
 	bool ReadSectors        (PhysPt /*buffer*/, const bool /*raw*/, const uint32_t /*sector*/, const uint16_t /*num*/) { return true; }
+	bool ReadSectorsHost    ([[maybe_unused]] void* buffer, [[maybe_unused]] bool raw, [[maybe_unused]] unsigned long sector, [[maybe_unused]] unsigned long num) { return true; }
 	bool LoadUnloadMedia    (bool /*unload*/) { return true; }
 };
 
@@ -206,7 +208,7 @@ private:
 		int             getLength();
 		// This is a no-op because we track the audio position in all
 		// areas of this class.
-		void setAudioPosition(MAYBE_UNUSED uint32_t pos) {}
+		void setAudioPosition([[maybe_unused]] uint32_t pos) {}
 	private:
 		Sound_Sample *sample = nullptr;
 	};
@@ -240,6 +242,7 @@ public:
 	bool	StopAudio               (void);
 	void	ChannelControl          (TCtrl ctrl);
 	bool	ReadSectors             (PhysPt buffer, const bool raw, const uint32_t sector, const uint16_t num);
+	bool	ReadSectorsHost			(void* buffer, bool raw, unsigned long sector, unsigned long num);
 	bool	LoadUnloadMedia         (bool unload);
 	bool	ReadSector              (uint8_t *buffer, const bool raw, const uint32_t sector);
 	bool	HasDataTrack            (void);
@@ -248,11 +251,10 @@ public:
 private:
 	static struct imagePlayer {
 		// Objects, pointers, and then scalars; in descending size-order.
-		MixerObject              mixerChannel       = {};
 		std::weak_ptr<TrackFile> trackFile = {};
-		MixerChannel             *channel           = nullptr;
+		mixer_channel_t channel = nullptr;
 		CDROM_Interface_Image    *cd                = nullptr;
-		void (MixerChannel::*addFrames) (Bitu, const Bit16s*) = nullptr;
+		void (MixerChannel::*addFrames)(uint16_t, const int16_t *) = nullptr;
 		uint32_t                 playedTrackFrames  = 0;
 		uint32_t                 totalTrackFrames   = 0;
 		uint32_t                 startSector        = 0;
@@ -268,7 +270,7 @@ private:
 	                 const uint16_t sectorSize,
 	                 const bool mode2);
 	std::vector<Track>::iterator GetTrack(const uint32_t sector);
-	static void CDAudioCallBack (Bitu desired_frames);
+	void CDAudioCallBack(uint16_t desired_frames);
 
 	// Private functions for cue sheet processing
 	bool  LoadCueSheet(char *cuefile);

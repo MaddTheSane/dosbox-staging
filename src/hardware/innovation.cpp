@@ -75,8 +75,7 @@ void Innovation::Open(const std::string &model_choice,
 	// Setup the mixer and get it's sampling rate
 	using namespace std::placeholders;
 	const auto mixer_callback = std::bind(&Innovation::MixerCallBack, this, _1);
-	channel_t mixer_channel(MIXER_AddChannel(mixer_callback, 0, "INNOVATION"),
-	                        MIXER_DelChannel);
+	const auto mixer_channel = MIXER_AddChannel(mixer_callback, 0, "INNOVATION");
 	sid_sample_rate = mixer_channel->GetSampleRate();
 
 	// Determine the passband frequency, which is capped at 90% of Nyquist.
@@ -89,7 +88,7 @@ void Innovation::Open(const std::string &model_choice,
 	// Setup and assign the port address
 	const auto read_from = std::bind(&Innovation::ReadFromPort, this, _1, _2);
 	const auto write_to = std::bind(&Innovation::WriteToPort, this, _1, _2, _3);
-	base_port = static_cast<uint16_t>(port_choice);
+	base_port = check_cast<io_port_t>(port_choice);
 	read_handler.Install(base_port, read_from, io_width_t::byte, 0x20);
 	write_handler.Install(base_port, write_to, io_width_t::byte, 0x20);
 
@@ -152,14 +151,15 @@ void Innovation::Close()
 
 uint8_t Innovation::ReadFromPort(io_port_t port, io_width_t)
 {
-	const auto sid_port = static_cast<uint16_t>(port - base_port);
+	const auto sid_port = static_cast<io_port_t>(port - base_port);
 	const std::lock_guard<std::mutex> lock(service_mutex);
 	return service->read(sid_port);
 }
 
-void Innovation::WriteToPort(io_port_t port, uint8_t data, io_width_t)
+void Innovation::WriteToPort(io_port_t port, io_val_t value, io_width_t)
 {
-	const auto sid_port = static_cast<uint16_t>(port - base_port);
+	const auto data = check_cast<uint8_t>(value);
+	const auto sid_port = static_cast<io_port_t>(port - base_port);
 	{ // service-lock
 		const std::lock_guard<std::mutex> lock(service_mutex);
 		service->write(sid_port, data);
@@ -237,7 +237,7 @@ uint16_t Innovation::GetRemainingSamples()
 }
 
 Innovation innovation;
-static void innovation_destroy(MAYBE_UNUSED Section *sec)
+static void innovation_destroy([[maybe_unused]] Section *sec)
 {
 	innovation.Close();
 }
@@ -306,7 +306,7 @@ static void init_innovation_dosbox_settings(Section_prop &sec_prop)
 	        "Adjusts the 8580's filtering strength as a percent from 0 to 100.");
 }
 
-void INNOVATION_AddConfigSection(Config *conf)
+void INNOVATION_AddConfigSection(const config_ptr_t &conf)
 {
 	assert(conf);
 	Section_prop *sec = conf->AddSection_prop("innovation",

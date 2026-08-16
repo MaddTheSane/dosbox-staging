@@ -2,6 +2,10 @@ name: Linux builds
 
 on: [push, pull_request]
 
+concurrency: 
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CCACHE_DIR:      "/dev/shm/.ccache"
   CCACHE_MAXSIZE:  "64M"
@@ -19,22 +23,23 @@ jobs:
           - name: Clang, Ubuntu 20.04
             os: ubuntu-20.04
             packages: clang
-            build_flags: --native-file=.github/meson/native-clang.ini
+            build_flags: -Dunit_tests=disabled --native-file=.github/meson/native-clang.ini
             max_warnings: 0
 
           - name: GCC, Ubuntu 20.04
             os: ubuntu-20.04
+            build_flags: -Dunit_tests=disabled
             max_warnings: 0
 
           - name: GCC, Ubuntu 18.04
             os: ubuntu-18.04
-            build_flags: -Duse_fluidsynth=false
+            build_flags: -Dunit_tests=disabled
             max_warnings: 0
 
-          - name: GCC 5, Ubuntu 18.04
+          - name: GCC 7, Ubuntu 18.04
             os: ubuntu-18.04
-            packages: g++-5
-            build_flags: --native-file=.github/meson/native-gcc-5.ini --wrap-mode=nofallback -Dunit_tests=disabled -Duse_fluidsynth=false -Duse_mt32emu=false
+            packages: g++-7
+            build_flags: -Dunit_tests=disabled --native-file=.github/meson/native-gcc-7.ini
             max_warnings: 0
 
           - name: GCC, +tests
@@ -44,36 +49,42 @@ jobs:
 
           - name: GCC, +debugger
             os: ubuntu-20.04
-            build_flags: -Denable_debugger=normal
+            build_flags: -Dunit_tests=disabled -Denable_debugger=normal
             max_warnings: 0
 
           - name: GCC, -dyn-x86
             os: ubuntu-20.04
-            build_flags: -Ddynamic_core=dynrec
+            build_flags: -Dunit_tests=disabled -Ddynamic_core=dynrec
             max_warnings: 0
 
           - name: GCC, -dyn-x86, +debugger
             os: ubuntu-20.04
-            build_flags: -Ddynamic_core=dynrec -Denable_debugger=normal
+            build_flags: -Dunit_tests=disabled -Ddynamic_core=dynrec -Denable_debugger=normal
             max_warnings: 0
 
           - name: GCC, -network
             os: ubuntu-20.04
-            build_flags: -Duse_sdl2_net=false
+            build_flags: -Dunit_tests=disabled -Duse_sdl2_net=false -Duse_slirp=false
             max_warnings: 0
 
           - name: GCC, minimum build
             os: ubuntu-20.04
-            build_flags: --wrap-mode=nofallback -Dunit_tests=disabled -Duse_fluidsynth=false -Duse_sdl2_net=false -Duse_opengl=false -Duse_fluidsynth=false -Duse_mt32emu=false -Duse_png=false -Duse_alsa=false
+            build_flags: >-
+              --wrap-mode=nofallback
+              -Dunit_tests=disabled
+              -Duse_alsa=false
+              -Duse_fluidsynth=false
+              -Duse_mt32emu=false
+              -Duse_opengl=false
+              -Duse_png=false
+              -Duse_sdl2_net=false
+              -Duse_slirp=false
             min_dependencies: true
             max_warnings: 0
 
     steps:
-      - name: Checkout repository and submodules
+      - name: Checkout repository
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
-
       - run:  sudo apt-get update
 
       - name: Install dependencies (minimum set)
@@ -136,16 +147,13 @@ jobs:
         run:  ./scripts/count-warnings.py -lf build.log
 
 
-  build_linux_release_dynamic:
+  build_linux_release:
     name: Release build
     runs-on: ubuntu-18.04
     if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier', github.actor) == false
     steps:
-      - name: Checkout repository and submodules
+      - name: Checkout repository
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
-
       - run:  sudo apt-get update
 
       - name: Install dependencies
@@ -153,6 +161,11 @@ jobs:
           sudo apt-get install -y tree \
             $(cat ./.github/packages/ubuntu-18.04-apt.txt)
           sudo pip3 install --upgrade meson ninja
+
+      # Workaround frequent HTTPS-based connectivity issues
+      # https://gitlab.freedesktop.org/freedesktop/freedesktop/-/issues/407
+      - name:  Fetch the libffi subproject for Glib
+        run: ./scripts/fetch-libffi-subproject.sh
 
       - name:  Prepare compiler cache
         id:    prep-ccache
@@ -175,7 +188,7 @@ jobs:
         uses:  actions/cache@v2
         with:
           path: subprojects/packagecache
-          key:  subprojects-${{ hashFiles('subprojects/*.wrap') }}
+          key:  subprojects-${{ hashFiles('subprojects/*.wrap') }}-1
 
       - name: Log environment
         run:  ./scripts/log-env.sh
@@ -184,18 +197,18 @@ jobs:
         run: |
           set -x
           git fetch --prune --unshallow
-          export VERSION=$(git describe --abbrev=5)
+          git fetch --tags --force
+          export VERSION=$(git describe --abbrev=0)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Setup release build
         run: |
           meson setup \
+            --wrap-mode=forcefallback \
             -Dbuildtype=release \
             -Ddefault_library=static \
             -Db_asneeded=true \
             -Db_lto=true \
-            -Dtry_static_libs=png \
-            -Dfluidsynth:enable-floats=true \
             -Dfluidsynth:try-static-deps=true \
             build
 
@@ -204,50 +217,13 @@ jobs:
 
       - name: Package
         run: |
-          set -x
+          ./scripts/create-package.sh \
+            -p linux \
+            build \
+            "dosbox-staging-linux-$VERSION"
 
-          # Print shared object dependencies
-          ldd build/dosbox
-
-          # Prepare content
-          install -DT        build/dosbox         dest/dosbox
-          install -DT -m 644 docs/README.template dest/README
-          install -DT -m 644 COPYING              dest/COPYING
-          install -DT -m 644 README               dest/doc/manual.txt
-          install -DT -m 644 docs/dosbox.1        dest/man/dosbox.1
-
-          # Install .desktop entry and icon files
-          install -DT contrib/linux/dosbox-staging.desktop dest/desktop/dosbox-staging.desktop
-          DESTDIR="$PWD" make -C contrib/icons/ install datadir=dest
-
-          # Fill README template file
-          sed -i "s|%GIT_COMMIT%|$GITHUB_SHA|"               dest/README
-          sed -i "s|%GIT_BRANCH%|${GITHUB_REF#refs/heads/}|" dest/README
-          sed -i "s|%GITHUB_REPO%|$GITHUB_REPOSITORY|"       dest/README
-
-          # Prepare translation files
-          #
-          # Note:
-          #   We conciously drop the dialect postfix because no dialects are available.
-          #   (US was the default DOS dialect and therefore is the default for 'en').
-          #   There users get the generic translation and benefit from simpler filenames.
-          #   Dialect translations will be added if/when they're available.
-          #
-          install -DT -m 644 contrib/translations/de/de_DE.lng       dest/translations/de.lng
-          install -DT -m 644 contrib/translations/en/en_US.lng       dest/translations/en.lng
-          install -DT -m 644 contrib/translations/es/es_ES.lng       dest/translations/es.lng
-          install -DT -m 644 contrib/translations/fr/fr_FR.lng       dest/translations/fr.lng
-          install -DT -m 644 contrib/translations/it/it_IT.lng       dest/translations/it.lng
-          install -DT -m 644 contrib/translations/pl/pl_PL.CP437.lng dest/translations/pl.cp437.lng
-          install -DT -m 644 contrib/translations/pl/pl_PL.lng       dest/translations/pl.lng
-          install -DT -m 644 contrib/translations/ru/ru_RU.lng       dest/translations/ru.lng
-
-          # Finalize directory for tar'ing
-          mv dest "dosbox-staging-linux-$VERSION"
-          tree --si -p "dosbox-staging-linux-$VERSION"
-
-          # Create tarball
-          tar -cJf "dosbox-staging-linux-$VERSION.tar.xz" "dosbox-staging-linux-$VERSION"
+      - name: Create tarball
+        run: tar -cJf "dosbox-staging-linux-$VERSION.tar.xz" "dosbox-staging-linux-$VERSION"
 
       - name:  Prepare Clam AV DB cache
         id:    prep-clamdb
@@ -285,20 +261,21 @@ jobs:
 
 
   # This job exists only to publish an artifact with version info when building
-  # from master branch, so snapshot build version will be visible on:
+  # from main branch, so snapshot build version will be visible on:
   # https://dosbox-staging.github.io/downloads/devel/
   #
   publish_additional_artifacts:
     name: Publish additional artifacts
-    needs: build_linux_release_dynamic
+    needs: build_linux_release
     runs-on: ubuntu-18.04
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v2
       - name: Generate changelog
         run: |
           set +x
           git fetch --unshallow
+          git fetch --tags --force
           VERSION=$(git describe --abbrev=4)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           NEWEST_TAG=$(git describe --abbrev=0)

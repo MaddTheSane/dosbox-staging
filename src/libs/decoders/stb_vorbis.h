@@ -82,6 +82,8 @@
 #include <stdio.h>
 #endif
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -729,9 +731,9 @@ typedef struct
 
 typedef struct
 {
+   uint8 order;
    uint16 rate;
    uint16 bark_map_size;
-   uint8 order;
    uint8 amplitude_bits;
    uint8 amplitude_offset;
    uint8 number_of_books;
@@ -2336,10 +2338,10 @@ static void decode_residue(vorb *f, float *residue_buffers[], int ch, int n, int
                   int b = r->residue_books[c][pass];
                   if (b >= 0) {
                      float *target = residue_buffers[j];
-                     int offset = r->begin + pcount * r->part_size;
-                     int n = r->part_size;
+                     const int part_size = r->part_size;
+                     int offset = r->begin + pcount * part_size;
                      Codebook *book = f->codebooks + b;
-                     if (!residue_decode(f, book, target, offset, n, rtype))
+                     if (!residue_decode(f, book, target, offset, part_size, rtype))
                         goto done;
                   }
                }
@@ -3408,24 +3410,21 @@ static int vorbis_decode_packet_rest(vorb *f, int *len, Mode *m, int left_start,
 // INVERSE COUPLING
    for (i = map->coupling_steps-1; i >= 0; --i) {
       int n2 = n >> 1;
-      float *m = f->channel_buffers[map->chan[i].magnitude];
+      float *magnitude = f->channel_buffers[map->chan[i].magnitude];
       float *a = f->channel_buffers[map->chan[i].angle    ];
       for (j=0; j < n2; ++j) {
          float a2,m2;
-         if (m[j] > 0) {
-            if (a[j] > 0) {
-               m2 = m[j]; a2 = m[j] - a[j];
-            } else {
-               a2 = m[j]; m2 = m[j] + a[j];
-			}
-         } else {
-            if (a[j] > 0) {
-               m2 = m[j]; a2 = m[j] + a[j];
-            } else {
-               a2 = m[j]; m2 = m[j] - a[j];
-			 }
-		 }
-         m[j] = m2;
+         if (magnitude[j] > 0)
+            if (a[j] > 0)
+               m2 = magnitude[j], a2 = magnitude[j] - a[j];
+            else
+               a2 = magnitude[j], m2 = magnitude[j] + a[j];
+         else
+            if (a[j] > 0)
+               m2 = magnitude[j], a2 = magnitude[j] + a[j];
+            else
+               a2 = magnitude[j], m2 = magnitude[j] - a[j];
+         magnitude[j] = m2;
          a[j] = a2;
       }
    }
@@ -3752,6 +3751,7 @@ static int start_decoder(vorb *f)
       len = get32_packet(f);
       f->comment_list[i] = (char*)setup_malloc(f, sizeof(char) * (len+1));
       if (f->comment_list[i] == NULL)               return error(f, VORBIS_outofmem);
+
       for(j=0; j < len; ++j) {
          f->comment_list[i][j] = get8_packet(f);
       }
@@ -4615,6 +4615,7 @@ stb_vorbis *stb_vorbis_open_pushdata(
          *error = VORBIS_need_more_data;
       else
          *error = p.error;
+      vorbis_deinit(&p);
       return NULL;
    }
    f = vorbis_alloc(&p);
@@ -5284,6 +5285,12 @@ static int8 channel_position[7][6] =
    #define FASTDEF(x)
 #endif
 
+int16_t CLAMP_SAMPLE(int s)
+{
+    s = (s > INT16_MAX) ? INT16_MAX : s;
+    return (short)((s < INT16_MIN) ? INT16_MIN : s);
+}
+
 static void copy_samples(short *dest, float *src, int len)
 {
    int i;
@@ -5291,9 +5298,7 @@ static void copy_samples(short *dest, float *src, int len)
    for (i=0; i < len; ++i) {
       FASTDEF(temp);
       int v = FAST_SCALED_FLOAT_TO_INT(temp, src[i],15);
-      if ((unsigned int) (v + 32768) > 65535)
-         v = v < 0 ? -32768 : 32767;
-      dest[i] = v;
+      dest[i] = CLAMP_SAMPLE(v);
    }
 }
 
@@ -5315,9 +5320,7 @@ static void compute_samples(int mask, short *output, int num_c, float **data, in
       for (i=0; i < n; ++i) {
          FASTDEF(temp);
          int v = FAST_SCALED_FLOAT_TO_INT(temp,buffer[i],15);
-         if ((unsigned int) (v + 32768) > 65535)
-            v = v < 0 ? -32768 : 32767;
-         output[o+i] = v;
+         output[o+i] = CLAMP_SAMPLE(v);
       }
    }
    #undef STB_BUFFER_SIZE
@@ -5355,9 +5358,7 @@ static void compute_stereo_samples(short *output, int num_c, float **data, int d
       for (i=0; i < (n<<1); ++i) {
          FASTDEF(temp);
          int v = FAST_SCALED_FLOAT_TO_INT(temp,buffer[i],15);
-         if ((unsigned int) (v + 32768) > 65535)
-            v = v < 0 ? -32768 : 32767;
-         output[o2+i] = v;
+         output[o2+i] = CLAMP_SAMPLE(v);
       }
    }
    #undef STB_BUFFER_SIZE
@@ -5405,9 +5406,7 @@ static void convert_channels_short_interleaved(int buf_c, short *buffer, int dat
             FASTDEF(temp);
             float f = data[i][d_offset+j];
             int v = FAST_SCALED_FLOAT_TO_INT(temp, f,15);//data[i][d_offset+j],15);
-            if ((unsigned int) (v + 32768) > 65535)
-               v = v < 0 ? -32768 : 32767;
-            *buffer++ = v;
+            *buffer++ = CLAMP_SAMPLE(v);
          }
          for (   ; i < buf_c; ++i)
             *buffer++ = 0;

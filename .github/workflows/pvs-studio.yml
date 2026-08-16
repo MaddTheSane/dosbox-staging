@@ -2,18 +2,19 @@ name: PVS-Studio analysis
 
 on: push
 
+concurrency: 
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pvs_studio_analyzer:
     name: PVS-Studio static analyzer
     runs-on: ubuntu-20.04
     env:
-      debfile: pvs-studio-7.14.50353.142-amd64.deb
+      debfile: pvs-studio-7.16.55312.179-amd64.deb
     steps:
-      - name: Checkout repository and submodules
+      - name: Checkout repository
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
-
       - run:  sudo apt-get update
 
       - name: Log and setup environment
@@ -29,7 +30,7 @@ jobs:
 
       - name:  Fetch PVS-Studio package
         if:    steps.cache-pvs.outputs.cache-hit != 'true'
-        run:   wget "https://files.viva64.com/${debfile}" -O "pvs-package/pvs.deb"
+        run:   wget "https://cdn.pvs-studio.com/${debfile}" -O "pvs-package/pvs.deb"
 
       - name: Install dependencies
         run: |
@@ -48,16 +49,7 @@ jobs:
       - name: Build
         run: |
           set -xeu
-
-          CC=clang CXX=clang++ \
-          meson setup \
-            -Dbuildtype=debug \
-            -Dunit_tests=disabled \
-            -Ddefault_library=static \
-            -Dfluidsynth:enable-floats=true \
-            -Dfluidsynth:try-static-deps=true \
-            build
-
+          meson setup -Dunit_tests=disabled --native-file=.github/meson/native-clang.ini build
           pvs-studio-analyzer trace -- ninja -C build
 
       - name: Analyze
@@ -111,7 +103,7 @@ jobs:
 
       - name: Summarize report
         env:
-          MAX_BUGS: 282
+          MAX_BUGS: 262
         run: |
           echo "Full report is included in build Artifacts"
           echo

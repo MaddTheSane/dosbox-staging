@@ -3,7 +3,11 @@ name: Coverity Scan analysis
 on:
   push:
     branches:
-      - master
+      - main
+
+concurrency: 
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   COVERITY_EMAIL: ${{ secrets.CoverityEmail }}
@@ -22,11 +26,8 @@ jobs:
     name: Coverity static analyzer
     runs-on: ubuntu-20.04
     steps:
-      - name: Checkout repository and submodules
+      - name: Checkout repository
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
-
       - run:  sudo apt-get update
 
       - name: Log and setup environment
@@ -58,7 +59,7 @@ jobs:
       - name: Build and instrument the project
         run: |
           set -xeu
-          CC="clang" CXX="clang++" meson setup -Dbuild-type=debug -Duse_mt32emu=false -Dunit_tests=disabled build
+          CC="clang" CXX="clang++" meson setup -Duse_slirp=false -Duse_mt32emu=false -Duse_fluidsynth=false -Dunit_tests=disabled build
           PATH="${BASE_DIR}/cov-analysis-linux64-${PACKAGE_VERSION}/bin:${PATH}"
           cov-build --dir cov-int ninja -C build
           tar -cvaf package.tar.gz cov-int

@@ -31,8 +31,6 @@
 #include <direct.h>
 #include <io.h>
 #define LONGTYPE(a) a##i64
-#define snprintf _snprintf
-#define vsnprintf _vsnprintf
 #else										/* LINUX / GCC */
 #include <dirent.h>
 #include <unistd.h>
@@ -54,7 +52,7 @@
 #define CROSS_FILE	1
 #define CROSS_DIR	2
 
-#if defined (WIN32)
+#if defined (WIN32) && !defined (__MINGW32__)
 #define ftruncate(blah,blah2) chsize(blah,blah2)
 #endif
 
@@ -127,5 +125,6 @@ bool read_directory_next(dir_information* dirp, char* entry_name, bool& is_direc
 void close_directory(dir_information* dirp);
 
 FILE *fopen_wrap(const char *path, const char *mode);
+FILE *fopen_wrap_ro_fallback(const std::string &filename, bool &is_readonly);
 
 #endif

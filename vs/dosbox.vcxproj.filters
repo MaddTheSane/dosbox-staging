@@ -127,6 +127,9 @@
     <ClCompile Include="..\src\gui\sdl_mapper.cpp">
       <Filter>src\gui</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\hardware\ide.cpp">
+      <Filter>src\hardware</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\hardware\adlib.cpp">
       <Filter>src\hardware</Filter>
     </ClCompile>
@@ -367,6 +370,12 @@
     <ClCompile Include="..\src\misc\cross.cpp">
       <Filter>src\misc</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\misc\ethernet.cpp">
+      <Filter>src\misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\misc\ethernet_slirp.cpp">
+      <Filter>src\misc</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\misc\messages.cpp">
       <Filter>src\misc</Filter>
     </ClCompile>
@@ -422,6 +431,9 @@
       <Filter>src\dos</Filter>
     </ClCompile>
     <ClCompile Include="..\src\dos\program_ls.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_placeholder.cpp">
       <Filter>src\dos</Filter>
     </ClCompile>
     <ClCompile Include="..\src\misc\fs_utils_win32.cpp">
@@ -484,8 +496,50 @@
     <ClCompile Include="..\src\misc\pacer.cpp">
       <Filter>src\misc</Filter>
     </ClCompile>
-    <ClCompile Include="..\submodules\loguru\loguru.cpp">
-      <Filter>submodules\loguru</Filter>
+    <ClCompile Include="..\src\dos\program_biostest.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_boot.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_imgmount.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_intro.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_keyb.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_loadfix.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_loadrom.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_mem.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_mount.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_mount_common.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_rescan.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\dos\program_serial.cpp">
+      <Filter>src\dos</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\loguru\loguru.cpp">
+      <Filter>src\libs\loguru</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\whereami\whereami.c">
+      <Filter>src\libs\whereami</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\libs\ghc\fs_std_impl.cpp">
+      <Filter>src\libs\ghc</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -921,8 +975,14 @@
     <ClInclude Include="..\src\cpu\core_dyn_x86\risc_x64.h">
       <Filter>src\cpu\core_dyn_x86</Filter>
     </ClInclude>
-    <ClInclude Include="..\submodules\loguru\loguru.hpp">
-      <Filter>submodules\loguru</Filter>
+    <ClInclude Include="..\src\dos\program_serial.h">
+      <Filter>src\dos</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\loguru\loguru.hpp">
+      <Filter>src\libs\loguru</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\whereami\whereami.h">
+      <Filter>src\libs\whereami</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -1016,6 +1076,15 @@
     </Filter>
     <Filter Include="src\libs\residfp">
       <UniqueIdentifier>{e8ef008d-ceb9-4224-9b9e-b5b62933ca0d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\loguru">
+      <UniqueIdentifier>{61f19037-c60b-46ea-8d28-53fbf18dc6db}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\whereami">
+      <UniqueIdentifier>{d1c1e098-73ca-4f3a-a2f7-e8186a52c4dc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\libs\ghc">
+      <UniqueIdentifier>{9df2bcc2-35e3-4be4-a577-dff8be565c65}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

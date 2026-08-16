@@ -16,15 +16,9 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-enum STRING_OP {
-	STR_OUTSB=0,STR_OUTSW,STR_OUTSD,
-	STR_INSB=4,STR_INSW,STR_INSD,
-	STR_MOVSB=8,STR_MOVSW,STR_MOVSD,
-	STR_LODSB=12,STR_LODSW,STR_LODSD,
-	STR_STOSB=16,STR_STOSW,STR_STOSD,
-	STR_SCASB=20,STR_SCASW,STR_SCASD,
-	STR_CMPSB=24,STR_CMPSW,STR_CMPSD
-};
+#include "../string_ops.h"
+
+#include <cassert>
 
 static void dyn_string(STRING_OP op) {
 	DynReg * si_base=decode.segprefix ? decode.segprefix : DREG(DS);
@@ -38,17 +32,17 @@ static void dyn_string(STRING_OP op) {
 	}
 	/* Check what each string operation will be using */
 	switch (op) {
-	case STR_MOVSB:	case STR_MOVSW:	case STR_MOVSD:
-	case STR_CMPSB:	case STR_CMPSW:	case STR_CMPSD:
+	case R_MOVSB:	case R_MOVSW:	case R_MOVSD:
+	case R_CMPSB:	case R_CMPSW:	case R_CMPSD:
 		tmp_reg=DREG(TMPB);usesi=true;usedi=true;break;
-	case STR_LODSB:	case STR_LODSW:	case STR_LODSD:
+	case R_LODSB:	case R_LODSW:	case R_LODSD:
 		tmp_reg=DREG(EAX);usesi=true;usedi=false;break;
-	case STR_OUTSB:	case STR_OUTSW:	case STR_OUTSD:
+	case R_OUTSB:	case R_OUTSW:	case R_OUTSD:
 		tmp_reg=DREG(TMPB);usesi=true;usedi=false;break;
-	case STR_SCASB:	case STR_SCASW:	case STR_SCASD:
-	case STR_STOSB:	case STR_STOSW:	case STR_STOSD:
+	case R_SCASB:	case R_SCASW:	case R_SCASD:
+	case R_STOSB:	case R_STOSW:	case R_STOSD:
 		tmp_reg=DREG(EAX);usesi=false;usedi=true;break;
-	case STR_INSB:	case STR_INSW:	case STR_INSD:
+	case R_INSB:	case R_INSW:	case R_INSD:
 		tmp_reg=DREG(TMPB);usesi=false;usedi=true;break;
 	default:
 		IllegalOption("dyn_string op");
@@ -79,12 +73,13 @@ static void dyn_string(STRING_OP op) {
 	DynState rep_state;
 	dyn_savestate(&rep_state);
 	const Bit8u * rep_start=cache.pos;
-	const Bit8u * rep_ecx_jmp;
+
 	/* Check if ECX!=zero */
 	if (decode.rep) {
-		gen_dop_word(DOP_TEST,decode.big_addr,DREG(ECX),DREG(ECX));
-		rep_ecx_jmp=gen_create_branch_long(BR_Z);
+		gen_dop_word(DOP_TEST, decode.big_addr, DREG(ECX), DREG(ECX));
 	}
+	const uint8_t *rep_ecx_jmp = decode.rep ? gen_create_branch_long(BR_Z)
+	                                        : nullptr;
 	if (usesi) {
 		if (!decode.big_addr) {
 			gen_extend_word(false,DREG(EA),DREG(ESI));
@@ -98,11 +93,11 @@ static void dyn_string(STRING_OP op) {
 		case 2:dyn_read_word(DREG(EA),tmp_reg,true);break;
 		}
 		switch (op) {
-		case STR_OUTSB:
+		case R_OUTSB:
 			gen_call_function((void*)&IO_WriteB,"%Dw%Dl",DREG(EDX),tmp_reg);break;
-		case STR_OUTSW:
+		case R_OUTSW:
 			gen_call_function((void*)&IO_WriteW,"%Dw%Dw",DREG(EDX),tmp_reg);break;
-		case STR_OUTSD:
+		case R_OUTSD:
 			gen_call_function((void*)&IO_WriteD,"%Dw%Dd",DREG(EDX),tmp_reg);break;
 		default:
 			break;
@@ -117,25 +112,25 @@ static void dyn_string(STRING_OP op) {
 		}
 		/* Maybe something special to be done to fill the value */
 		switch (op) {
-		case STR_INSB:
+		case R_INSB:
 			gen_call_function((void*)&IO_ReadB,"%Dw%Rl",DREG(EDX),tmp_reg);
-			FALLTHROUGH;
-		case STR_MOVSB:
-		case STR_STOSB:
+			[[fallthrough]];
+		case R_MOVSB:
+		case R_STOSB:
 			dyn_write_byte(DREG(EA),tmp_reg,false);
 			break;
-		case STR_INSW:
+		case R_INSW:
 			gen_call_function((void*)&IO_ReadW,"%Dw%Rw",DREG(EDX),tmp_reg);
-			FALLTHROUGH;
-		case STR_MOVSW:
-		case STR_STOSW:
+			[[fallthrough]];
+		case R_MOVSW:
+		case R_STOSW:
 			dyn_write_word(DREG(EA),tmp_reg,false);
 			break;
-		case STR_INSD:
+		case R_INSD:
 			gen_call_function((void*)&IO_ReadD,"%Dw%Rd",DREG(EDX),tmp_reg);
-			FALLTHROUGH;
-		case STR_MOVSD:
-		case STR_STOSD:
+			[[fallthrough]];
+		case R_MOVSD:
+		case R_STOSD:
 			dyn_write_word(DREG(EA),tmp_reg,true);
 			break;
 		default:
@@ -163,6 +158,7 @@ static void dyn_string(STRING_OP op) {
 		gen_create_jump(rep_start);
 
 		dyn_loadstate(&rep_state);
+		assert(rep_ecx_jmp);
 		gen_fill_branch_long(rep_ecx_jmp);
 	}
 	gen_releasereg(DREG(TMPW));

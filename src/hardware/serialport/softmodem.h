@@ -42,6 +42,10 @@
 #define MODEM_RING_EVENT SERIAL_BASE_EVENT_COUNT + 3
 #define SERIAL_MODEM_EVENT_COUNT SERIAL_BASE_EVENT_COUNT+3
 
+#define MODEM_TICKRATE 1000 // Ticks per second
+#define MODEM_TICKTIME (1000 / MODEM_TICKRATE) // Tick interval in milliseconds
+#define MODEM_RINGINTERVAL (3000 / MODEM_TICKTIME)
+
 
 enum ResTypes {
 	ResNONE,
@@ -193,7 +197,7 @@ public:
 
 	void TelnetEmulation(uint8_t *data, uint32_t size);
 
-	//TODO
+	void Echo(uint8_t ch);
 	void Timer2();
 	void handleUpperEvent(uint16_t type);
 
@@ -241,9 +245,10 @@ protected:
 	uint8_t tmpbuf[MODEM_BUFFER_QUEUE_SIZE] = {0};
 	uint16_t listenport = 23; // 23 is the default telnet TCP/IP port
 	uint8_t reg[SREGS] = {0};
-	std::unique_ptr<TCPServerSocket> serversocket = nullptr;
-	std::unique_ptr<TCPClientSocket> clientsocket = nullptr;
-	std::unique_ptr<TCPClientSocket> waitingclientsocket = nullptr;
+	SocketTypesE socketType = SOCKET_TYPE_TCP;
+	std::unique_ptr<NETServerSocket> serversocket = nullptr;
+	std::unique_ptr<NETClientSocket> clientsocket = nullptr;
+	std::unique_ptr<NETClientSocket> waitingclientsocket = nullptr;
 
 	struct {
 		bool binary[2] = {false};

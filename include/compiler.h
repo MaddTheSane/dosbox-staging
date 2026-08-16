@@ -47,12 +47,8 @@
 #endif
 
 // When passing the -Wunused flag to GCC or Clang, entities that are unused by
-// the program may be diagnosed.  The MAYBE_UNUSED attribute can be used to
+// the program may be diagnosed. The MAYBE_UNUSED attribute can be used to
 // silence such diagnostics when the entity cannot be removed.
-//
-// The attribute may be applied to the declaration of a class, a typedef,
-// a variable, a function or method, a function parameter, an enumeration,
-// an enumerator, a non-static data member, or a label.
 
 #if __has_cpp_attribute(maybe_unused)
 #define MAYBE_UNUSED [[maybe_unused]]
@@ -82,23 +78,10 @@
 #define GCC_ATTRIBUTE(x) /* attribute not supported */
 #endif
 
-// Wrapper for various compiler extensions for inlining aggresively.
+// Wrapper for various compiler extensions for inlining aggressively.
 //
-// There is NO way to truly FORCE compiler to do inlining, therefore all these
-// methods are only strong hints, usually non-preferrable over simple
-// 'inline' keyword.
-//
-// Normal C++ 'inline' is indicator that there might be more than one
-// definition for the function (as long as all definitions are the same).
-// It's used to define functions in C++ headers. Compiler will automatically
-// try to inline (embed compiled code without function call) any function
-// defined in a header.
-//
-// For details about GCC/Clang always_inline, see:
-// https://gcc.gnu.org/onlinedocs/gcc/Common-Function-Attributes.html#Common-Function-Attributes
-//
-// For details about MSVC __forceinline, see:
-// https://docs.microsoft.com/en-us/cpp/cpp/inline-functions-cpp#inline-__inline-and-__forceinline
+// There is no way to truly force compiler inlining, so these methods are only
+// strong hints, usually less preferable than the simple 'inline' keyword.
 
 #if __has_attribute(always_inline)
 #define INLINE inline __attribute__((always_inline))

@@ -28,8 +28,8 @@
 #include "inout.h"
 #include "vga.h"
 
-#define XGA_SCREEN_WIDTH	vga.s3.xga_screen_width
-#define XGA_COLOR_MODE		vga.s3.xga_color_mode
+constexpr auto &XGA_SCREEN_WIDTH = vga.s3.xga_screen_width;
+constexpr auto &XGA_COLOR_MODE = vga.s3.xga_color_mode;
 
 #define XGA_SHOW_COMMAND_TRACE 0
 
@@ -147,7 +147,7 @@ void XGA_DrawPoint(Bitu x, Bitu y, Bitu c) {
 	if(y < xga.scissors.y1) return;
 	if(y > xga.scissors.y2) return;
 
-	Bit32u memaddr = (y * XGA_SCREEN_WIDTH) + x;
+	const auto memaddr = (y * XGA_SCREEN_WIDTH) + x;
 	/* Need to zero out all unused bits in modes that have any (15-bit or "32"-bit -- the last
 	   one is actually 24-bit. Without this step there may be some graphics corruption (mainly,
 	   during windows dragging. */
@@ -175,7 +175,7 @@ void XGA_DrawPoint(Bitu x, Bitu y, Bitu c) {
 }
 
 Bitu XGA_GetPoint(Bitu x, Bitu y) {
-	Bit32u memaddr = (y * XGA_SCREEN_WIDTH) + x;
+	const auto memaddr = (y * XGA_SCREEN_WIDTH) + x;
 
 	switch(XGA_COLOR_MODE) {
 	case M_LIN8:
@@ -699,7 +699,10 @@ void XGA_DrawWait(uint32_t val, io_width_t width)
 				xga.waitcmd.newline = false;
 				for (Bitu n = 0; n < chunksize; ++n) { // pixels
 					// This formula can rule the world ;)
-					Bitu mask = 1 << ((((n&0xF8)+(8-(n&0x7)))-1)+chunksize*k);
+					const auto lshift = (((n & 0xF8) +
+					                      (8 - (n & 0x7))) -
+					                     1) + chunksize * k;
+					const auto mask = static_cast<uint64_t>(1) << lshift;
 
 					const uint32_t mixmode = (val & mask)
 					                                 ? xga.foremix
@@ -1037,13 +1040,14 @@ uint32_t XGA_GetDualReg(Bit32u reg) {
 
 extern uint8_t vga_read_p3da(io_port_t port, io_width_t width);
 
-extern void vga_write_p3d4(io_port_t port, uint8_t val, io_width_t width);
+extern void vga_write_p3d4(io_port_t port, io_val_t value, io_width_t width);
 extern uint8_t vga_read_p3d4(io_port_t port, io_width_t width);
 
-extern void vga_write_p3d5(io_port_t port, uint8_t val, io_width_t width);
+extern void vga_write_p3d5(io_port_t port, io_val_t value, io_width_t width);
 extern uint8_t vga_read_p3d5(io_port_t port, io_width_t width);
 
-void XGA_Write(io_port_t port, uint32_t val, io_width_t width)
+// Writes can range from 8bit to 32bit
+void XGA_Write(io_port_t port, io_val_t val, io_width_t width)
 {
 	//	LOG_MSG("XGA: Write to port %x, val %8x, len %x", port,val, len);
 
@@ -1147,6 +1151,7 @@ void XGA_Write(io_port_t port, uint32_t val, io_width_t width)
 		if (width == io_width_t::byte)
 			vga_write_p3d4(0, val, io_width_t::byte);
 		else if (width == io_width_t::word) {
+			LOG_WARNING("XGA 16-bit write to vga_write_p3d4, vga_write_p3d5");
 			vga_write_p3d4(0, val & 0xff, io_width_t::byte);
 			vga_write_p3d5(0, val >> 8, io_width_t::byte);
 		} else

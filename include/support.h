@@ -39,6 +39,8 @@
 #include <type_traits>
 #include <vector>
 
+#include "std_filesystem.h"
+
 #ifdef _MSC_VER
 #define strcasecmp(a, b) _stricmp(a, b)
 #define strncasecmp(a, b, n) _strnicmp(a, b, n)
@@ -74,8 +76,9 @@ T to_finite(const std::string& input) {
 			result = static_cast<T>(interim);
 	}
 	// Capture expected exceptions stod may throw
-	catch (MAYBE_UNUSED std::invalid_argument &e) {
-	} catch (MAYBE_UNUSED std::out_of_range &e) {
+	catch (...) {
+		// Do nothing, the return value provides
+		// the success or failure indication.
 	}
 	return result;
 }
@@ -212,8 +215,9 @@ inline bool is_empty(const char *str) noexcept
 {
 	return str[0] == '\0';
 }
-
-bool ScanCMDBool(char * cmd,char const * const check);
+// Scans the provided command-line string for the '/'flag and removes it from
+// the string, returning if the flag was found and removed.
+bool ScanCMDBool(char *cmd, const char * flag);
 char * ScanCMDRemain(char * cmd);
 char * StripWord(char *&cmd);
 
@@ -290,6 +294,23 @@ constexpr int wrap(int val, int const lower_bound, int const upper_bound)
 		val += range_size * ((lower_bound - val) / range_size + 1);
 
 	return lower_bound + (val - lower_bound) % range_size;
+}
+
+struct FILE_closer {
+	void operator()(FILE *f) noexcept;
+};
+using FILE_unique_ptr = std::unique_ptr<FILE, FILE_closer>;
+
+// Opens and returns a std::unique_ptr to a FILE, which automatically closes
+// itself when it goes out of scope
+FILE_unique_ptr make_fopen(const char *fname, const char *mode);
+
+const std_fs::path &GetExecutablePath();
+
+template <typename container_t>
+bool contains(const container_t &container, const typename container_t::value_type &value)
+{
+	return std::find(container.begin(), container.end(), value) != container.end();
 }
 
 #endif

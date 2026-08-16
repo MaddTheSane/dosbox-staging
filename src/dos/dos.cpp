@@ -33,8 +33,13 @@
 #include "string_utils.h"
 #include "support.h"
 
+#if defined(WIN32)
+#include <winsock2.h> // for gethostname
+#endif
+
 DOS_Block dos;
 DOS_InfoBlock dos_infoblock;
+unsigned int result_errorcode = 0;
 
 #define DOS_COPYBUFSIZE 0x10000
 Bit8u dos_copybuf[DOS_COPYBUFSIZE];
@@ -515,13 +520,23 @@ static Bitu DOS_21Handler(void) {
 		break;
 	}
 	case 0x2d:		/* Set System Time */
-		LOG(LOG_DOSMISC,LOG_ERROR)("DOS:Set System Time not supported");
-		//Check input parameters nonetheless
 		if( reg_ch > 23 || reg_cl > 59 || reg_dh > 59 || reg_dl > 99 )
 			reg_al = 0xff; 
 		else { //Allow time to be set to zero. Restore the orginal time for all other parameters. (QuickBasic)
 			if (reg_cx == 0 && reg_dx == 0) {time_start = mem_readd(BIOS_TIMER);LOG_MSG("Warning: game messes with DOS time!");}
 			else time_start = 0;
+			// Original IBM PC used ~1.19MHz crystal for timer,
+			// because at 1.19MHz, 2^16 ticks is ~1 hour, making it
+			// easy to count hours and days. More precisely:
+			//
+			// clock updates at 1193180/65536 ticks per second.
+			// ticks per second ≈ 18.2
+			// ticks per hour   ≈ 65543
+			// ticks per day    ≈ 1573040
+			constexpr uint64_t ticks_per_day = 1573040;
+			const auto seconds = reg_ch * 3600 + reg_cl * 60 + reg_dh;
+			const auto ticks = ticks_per_day * seconds / (24 * 3600);
+			mem_writed(BIOS_TIMER, check_cast<uint32_t>(ticks));
 			reg_al = 0;
 		}
 		break;
@@ -854,7 +869,8 @@ static Bitu DOS_21Handler(void) {
 			break;
 		}
 	case 0x4b:					/* EXEC Load and/or execute program */
-		{ 
+		{
+			result_errorcode = 0;
 			MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
 			LOG(LOG_EXEC,LOG_ERROR)("Execute %s %d",name1,reg_al);
 			if (!DOS_Execute(name1,SegPhys(es)+reg_bx,reg_al)) {
@@ -866,6 +882,8 @@ static Bitu DOS_21Handler(void) {
 //TODO Check for use of execution state AL=5
 	case 0x4c:					/* EXIT Terminate with return code */
 		DOS_Terminate(dos.psp(),false,reg_al);
+		if (result_errorcode)
+			dos.return_code = result_errorcode;
 		break;
 	case 0x4d:					/* Get Return code */
 		reg_al=dos.return_code;/* Officially read from SDA and clear when read */
@@ -1035,8 +1053,23 @@ static Bitu DOS_21Handler(void) {
 			LOG(LOG_DOSMISC,LOG_ERROR)("Get SDA, Let's hope for the best!");
 		}
 		break;
-	case 0x5f:					/* Network redirection */
-		reg_ax=0x0001;		//Failing it
+	case 0x5e:             /* Network and printer functions */
+		if (!reg_al) { // Get machine name
+			int result = gethostname(name1, DOSNAMEBUF);
+			if (!result) {
+				strcat(name1, "               ");
+				name1[15] = 0;
+				MEM_BlockWrite(SegPhys(ds) + reg_dx, name1, 16);
+				reg_cx = 0x1ff;
+				CALLBACK_SCF(false);
+				break;
+			}
+		}
+		reg_al = 1;
+		CALLBACK_SCF(true);
+		break;
+	case 0x5f:               /* Network redirection */
+		reg_ax = 0x0001; // Failing it
 		CALLBACK_SCF(true);
 		break; 
 	case 0x60:					/* Canonicalize filename or path */
@@ -1212,7 +1245,6 @@ static Bitu DOS_21Handler(void) {
 	case 0x6b:		            /* NULL Function */
 	case 0x61:		            /* UNUSED */
 	case 0xEF:                  /* Used in Ancient Art Of War CGA */
-	case 0x5e:					/* More Network Functions */
 	default:
 		if (reg_ah < 0x6d) LOG(LOG_DOSMISC,LOG_ERROR)("DOS:Unhandled call %02X al=%02X. Set al to default of 0",reg_ah,reg_al); //Less errors. above 0x6c the functions are simply always skipped, only al is zeroed, all other registers untouched
 		reg_al=0x00; /* default value */
@@ -1371,20 +1403,17 @@ public:
 		}
 	}
 	~DOS(){
-		//--Modified 2009-12-20 by Alun Bestor to properly clear the devices list on shutdown.
+		//--Modified 2009-12-20 by Alun Bestor to properly clear drives on shutdown.
 		//We could also do this with Files, but DOS_SetupFiles() already does this.
-		Bit16u i;
-		for (i=0;i<DOS_DEVICES;i++) if (Devices[i])
-		{
-			delete Devices[i];
-			Devices[i] = 0;
-		}
-		for (i=0;i<DOS_DRIVES;i++) if (Drives[i])
-		{
+		for (Bit16u i = 0; i < DOS_DRIVES; i++) {
 			delete Drives[i];
 			Drives[i] = 0;
 		}
 		//--End of modifications
+		// de-init devices, this allows DOSBox to cleanly re-initialize
+		// without throwing an inevitable `DOS: Too many devices added`
+		// exception
+		DOS_ShutDownDevices();
 	}
 };
 

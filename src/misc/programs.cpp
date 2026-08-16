@@ -194,6 +194,27 @@ void Program::WriteOut(const char *format, ...)
 //	DOS_WriteFile(STDOUT,(Bit8u *)buf,&size);
 }
 
+void Program::WriteOut(const char *format, const char *arguments)
+{
+	if (SuppressWriteOut(format))
+		return;
+
+	char buf[2048];
+	sprintf(buf,format,arguments);
+
+	Bit16u size = (Bit16u)strlen(buf);
+	dos.internal_output=true;
+	for (Bit16u i = 0; i < size; i++) {
+		Bit8u out;Bit16u s=1;
+		if (buf[i] == 0xA && last_written_character != 0xD) {
+			out = 0xD;DOS_WriteFile(STDOUT,&out,&s);
+		}
+		last_written_character = out = buf[i];
+		DOS_WriteFile(STDOUT,&out,&s);
+	}
+	dos.internal_output=false;
+}
+
 void Program::WriteOut_NoParsing(const char * format) {
 	if (SuppressWriteOut(format))
 		return;
@@ -459,7 +480,7 @@ void CONFIG::Run(void) {
 		case P_NOPARAMS:
 			if (!first)
 				break;
-			FALLTHROUGH;
+			[[fallthrough]];
 
 		case P_NOMATCH:
 			WriteOut(MSG_Get("PROGRAM_CONFIG_USAGE"));
@@ -863,12 +884,19 @@ static void CONFIG_ProgramStart(Program * * make) {
 	*make=new CONFIG;
 }
 
+void PROGRAMS_Destroy(Section*) {
+	internal_progs_comdata.clear();
+	internal_progs.clear();
+}
 
-void PROGRAMS_Init(Section* /*sec*/) {
+void PROGRAMS_Init(Section* sec) {
 	/* Setup a special callback to start virtual programs */
 	call_program=CALLBACK_Allocate();
 	CALLBACK_Setup(call_program,&PROGRAMS_Handler,CB_RETF,"internal program");
 	PROGRAMS_MakeFile("CONFIG.COM",CONFIG_ProgramStart);
+
+	// Cleanup -- allows unit tests to run indefinitely & cleanly
+	sec->AddDestroyFunction(&PROGRAMS_Destroy,false);
 
 	// listconf
 	MSG_Add("PROGRAM_CONFIG_NOCONFIGFILE","No config file loaded!\n");
@@ -925,4 +953,7 @@ void PROGRAMS_Init(Section* /*sec*/) {
 	MSG_Add("PROGRAM_CONFIG_GET_SYNTAX","Correct syntax: config -get \"section property\".\n");
 	MSG_Add("PROGRAM_CONFIG_PRINT_STARTUP", "\nDOSBox was started with the following command line parameters:\n%s\n");
 	MSG_Add("PROGRAM_CONFIG_MISSINGPARAM", "Missing parameter.\n");
+	MSG_Add("PROGRAM_PATH_TOO_LONG",
+	        "The path \"%s\" exceeds the DOS maximum length of %d characters\n");
+	MSG_Add("PROGRAM_EXECUTABLE_MISSING", "Executable file not found: %s\n");
 }

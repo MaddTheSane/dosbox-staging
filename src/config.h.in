@@ -27,9 +27,6 @@
 // Emulator version
 #define VERSION "@version@"
 
-// Suffix appended to the default .conf file name
-#define CONF_SUFFIX "@conf_suffix@"
-
 /* Operating System
  */
 
@@ -86,9 +83,6 @@
 // Define to 1 to enable IPX over Internet networking (using SDL2_net)
 #mesondefine C_IPX
 
-// Define to 1 to enable NE2000 ethernet passthrough
-#mesondefine C_NE2000
-
 // Enable serial port passthrough support
 #mesondefine C_DIRECTSERIAL
 
@@ -97,6 +91,12 @@
 
 // Define to 1 to enable FluidSynth integration (built-in MIDI synth)
 #mesondefine C_FLUIDSYNTH
+
+// Define to 1 to enable libslirp Ethernet support
+#mesondefine C_SLIRP
+
+// Define to 1 to enable Novell NE 2000 NIC emulation
+#mesondefine C_NE2000
 
 // Define to 1 to enable screenshots in .png format
 #mesondefine C_SSHOT
@@ -115,6 +115,9 @@
 
 // Compiler supports Core MIDI headers
 #mesondefine C_COREMIDI
+
+// Compiler supports Core Foundation headers
+#mesondefine C_COREFOUNDATION
 
 // Define to 1 to enable ALSA MIDI support
 #mesondefine C_ALSA

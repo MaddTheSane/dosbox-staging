@@ -7,7 +7,12 @@ libdebug_sources = files([
 
 libdebug = static_library('debug', libdebug_sources,
                           include_directories : incdir,
-                          dependencies: [sdl2_dep, curses_dep])
+                          dependencies: [
+                            sdl2_dep,
+                            curses_dep,
+                            libghc_dep,
+                            libloguru_dep,
+                         ])
 
 libdebug_dep = declare_dependency(link_with : libdebug)
 
