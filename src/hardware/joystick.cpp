@@ -501,9 +501,11 @@ static JOYSTICK* test;
 void JOYSTICK_Destroy([[maybe_unused]] Section *sec)
 {
 	delete test;
+	test = nullptr;
 }
 
 void JOYSTICK_Init(Section* sec) {
+	delete test;
 	test = new JOYSTICK(sec);
-	sec->AddDestroyFunction(&JOYSTICK_Destroy,true); 
+	sec->AddDestroyFunction(&JOYSTICK_Destroy,true);
 }
