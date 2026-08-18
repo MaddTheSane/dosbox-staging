@@ -442,11 +442,6 @@ public:
 
 		// Get the [joystock] conf section
 		const auto section = static_cast<Section_prop *>(configuration);
-		//--Modified 2011-05-08 by Alun Bestor to let Boxer set and retrieve the gameport timing mode.
-		gameport_timed = section->Get_bool("timed");
-		ReadHandler.Install(0x201,read_p201_switchable,io_width_t::byte);
-		WriteHandler.Install(0x201,write_p201_switchable,io_width_t::byte);
-		//--End of modifications
 		
 		assert(section);
 
