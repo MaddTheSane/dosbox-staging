@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -73,29 +73,31 @@ centerline.
 */
 
 #include "dosbox.h"
-#include "inout.h"
-#include "mixer.h"
-#include "mem.h"
-#include "setup.h"
-#include "pic.h"
-#include "dma.h"
-#include "hardware.h"
+
+#include <algorithm>
 #include <cstring>
 #include <math.h>
+
+#include "dma.h"
+#include "hardware.h"
+#include "inout.h"
+#include "mem.h"
+#include "mixer.h"
+#include "pic.h"
+#include "setup.h"
+
 #include "mame/emu.h"
 #include "mame/sn76496.h"
 
-
-#define SOUND_CLOCK (14318180 / 4)
-
-#define TDAC_DMA_BUFSIZE 1024
+constexpr int SOUND_CLOCK = 14318180 / 4;
+constexpr uint16_t TDAC_DMA_BUFSIZE = 1024;
 
 static struct {
-	MixerChannel *chan = nullptr;
+	mixer_channel_t chan = nullptr;
 	bool enabled = false;
 	Bitu last_write = 0u;
 	struct {
-		MixerChannel *chan = nullptr;
+		mixer_channel_t chan = nullptr;
 		bool enabled = false;
 		struct {
 			Bitu base = 0u;
@@ -122,8 +124,10 @@ static ncr8496_device device_ncr8496(machine_config(), 0, 0, SOUND_CLOCK);
 static sn76496_base_device* activeDevice = &device_ncr8496;
 #define device (*activeDevice)
 
-static void SN76496Write(Bitu /*port*/,Bitu data,Bitu /*iolen*/) {
-	tandy.last_write=PIC_Ticks;
+static void SN76496Write(io_port_t, io_val_t value, io_width_t)
+{
+	const auto data = check_cast<uint8_t>(value);
+	tandy.last_write = PIC_Ticks;
 	if (!tandy.enabled && tandy.chan) {
 		tandy.chan->Enable(true);
 		tandy.enabled=true;
@@ -134,7 +138,8 @@ static void SN76496Write(Bitu /*port*/,Bitu data,Bitu /*iolen*/) {
 	//%7.3f",data,PIC_FullIndex());
 }
 
-static void SN76496Update(Bitu length) {
+static void SN76496Update(uint16_t length)
+{
 	if (!tandy.chan)
 		return;
 
@@ -223,11 +228,13 @@ static void TandyDACDMAEnabled()
 static void TandyDACDMADisabled()
 {}
 
-static void TandyDACWrite(Bitu port,Bitu data,Bitu /*iolen*/) {
+static void TandyDACWrite(io_port_t port, io_val_t value, io_width_t)
+{
+	const auto data = check_cast<uint8_t>(value);
 	switch (port) {
 	case 0xc4: {
 		Bitu oldmode = tandy.dac.mode;
-		tandy.dac.mode = (Bit8u)(data&0xff);
+		tandy.dac.mode = data;
 		if ((data&3)!=(oldmode&3)) {
 			TandyDACModeChanged();
 		}
@@ -243,9 +250,7 @@ static void TandyDACWrite(Bitu port,Bitu data,Bitu /*iolen*/) {
 		case 0:
 			// joystick mode
 			break;
-		case 1:
-			tandy.dac.control = (Bit8u)(data&0xff);
-			break;
+		case 1: tandy.dac.control = data; break;
 		case 2:
 			break;
 		case 3:
@@ -254,7 +259,7 @@ static void TandyDACWrite(Bitu port,Bitu data,Bitu /*iolen*/) {
 		}
 		break;
 	case 0xc6:
-		tandy.dac.frequency = (tandy.dac.frequency & 0xf00) | (Bit8u)(data & 0xff);
+		tandy.dac.frequency = (tandy.dac.frequency & 0xf00) | data;
 		switch (tandy.dac.mode&3) {
 		case 0:
 			// joystick mode
@@ -267,9 +272,9 @@ static void TandyDACWrite(Bitu port,Bitu data,Bitu /*iolen*/) {
 		}
 		break;
 	case 0xc7:
-		tandy.dac.frequency = (tandy.dac.frequency & 0x00ff) | (((Bit8u)(data & 0xf)) << 8);
-		tandy.dac.amplitude = (Bit8u)(data>>5);
-		switch (tandy.dac.mode&3) {
+		tandy.dac.frequency = static_cast<uint16_t>((tandy.dac.frequency & 0x00ff) | ((data & 0xf) << 8));
+		tandy.dac.amplitude = data >> 5;
+		switch (tandy.dac.mode & 3) {
 		case 0:
 			// joystick mode
 			break;
@@ -283,20 +288,20 @@ static void TandyDACWrite(Bitu port,Bitu data,Bitu /*iolen*/) {
 	}
 }
 
-static Bitu TandyDACRead(Bitu port,Bitu /*iolen*/) {
+static uint8_t TandyDACRead(io_port_t port, io_width_t)
+{
 	switch (port) {
 	case 0xc4:
 		return (tandy.dac.mode&0x77) | (tandy.dac.irq_activated ? 0x08 : 0x00);
-	case 0xc6:
-		return (Bit8u)(tandy.dac.frequency&0xff);
+	case 0xc6: return static_cast<uint8_t>(tandy.dac.frequency & 0xff);
 	case 0xc7:
-		return (Bit8u)(((tandy.dac.frequency>>8)&0xf) | (tandy.dac.amplitude<<5));
+		return static_cast<uint8_t>(((tandy.dac.frequency >> 8) & 0xf) | (tandy.dac.amplitude << 5));
 	}
-	LOG_MSG("Tandy DAC: Read from unknown %#" PRIxPTR, port);
+	LOG_MSG("Tandy DAC: Read from unknown %x", port);
 	return 0xff;
 }
 
-static void TandyDACUpdate(size_t requested)
+static void TandyDACUpdate(uint16_t requested)
 {
 	if (!tandy.dac.chan || !tandy.dac.dma.chan) {
 		DEBUG_LOG_MSG(
@@ -304,35 +309,41 @@ static void TandyDACUpdate(size_t requested)
 		return;
 	}
 
-	uint8_t *buf = tandy.dac.dma.buf;
 	const bool should_read = tandy.dac.enabled &&
 	                         (tandy.dac.mode & 0x0c) == 0x0c &&
 	                         !tandy.dac.dma.transfer_done;
-	size_t actual = should_read ? tandy.dac.dma.chan->Read(requested, buf) : 0u;
-	// If we came up short, move back one to terminate the tail in silence
-	if (actual && actual < requested)
-		actual--;
-	// Always write the requested quantity regardless of read status
-	memset(buf + actual, 128u, requested - actual);
-	tandy.dac.chan->AddSamples_m8(requested, buf);
+
+	auto buf = tandy.dac.dma.buf;
+	while (requested) {
+		const auto bytes_to_read = std::min(requested, TDAC_DMA_BUFSIZE);
+
+		auto actual = should_read ? tandy.dac.dma.chan->Read(bytes_to_read, buf) : 0u;
+
+		// If we came up short, move back one to terminate the tail in silence
+		if (actual && actual < bytes_to_read)
+			actual--;
+		memset(buf + actual, 128u, bytes_to_read - actual);
+
+		// Always write the requested quantity regardless of read status
+		tandy.dac.chan->AddSamples_m8(bytes_to_read, buf);
+		requested -= bytes_to_read;
+	}
 }
 
-class TANDYSOUND: public Module_base {
+class TANDYSOUND final : public Module_base {
 private:
 	IO_WriteHandleObject WriteHandler[4];
 	IO_ReadHandleObject ReadHandler[4];
-	MixerObject MixerChan;
-	MixerObject MixerChanDAC;
+
 public:
-	TANDYSOUND(Section *configuration)
-	        : Module_base(configuration),
-	          MixerChan(),
-	          MixerChanDAC()
+	TANDYSOUND(Section *configuration) : Module_base(configuration)
 	{
 		Section_prop *section = static_cast<Section_prop *>(configuration);
 
 		bool enable_hw_tandy_dac=true;
-		Bitu sbport, sbirq, sbdma;
+		uint16_t sbport;
+		uint8_t sbirq;
+		uint8_t sbdma;
 		if (SB_Get_Address(sbport, sbirq, sbdma)) {
 			enable_hw_tandy_dac=false;
 		}
@@ -356,25 +367,24 @@ public:
 			CloseSecondDMAController();
 
 			if (enable_hw_tandy_dac) {
-				WriteHandler[2].Install(0x1e0,SN76496Write,IO_MB,2);
-				WriteHandler[3].Install(0x1e4,TandyDACWrite,IO_MB,4);
-//				ReadHandler[3].Install(0x1e4,TandyDACRead,IO_MB,4);
+				WriteHandler[2].Install(0x1e0, SN76496Write, io_width_t::byte, 2);
+				WriteHandler[3].Install(0x1e4, TandyDACWrite, io_width_t::byte, 4);
+				//				ReadHandler[3].Install(0x1e4,TandyDACRead,io_width_t::byte,4);
 			}
 		}
 
+		const auto sample_rate = static_cast<uint32_t>(section->Get_int("tandyrate"));
+		tandy.chan = MIXER_AddChannel(&SN76496Update, sample_rate, "TANDY");
 
-		Bit32u sample_rate = section->Get_int("tandyrate");
-		tandy.chan=MixerChan.Install(&SN76496Update,sample_rate,"TANDY");
-
-		WriteHandler[0].Install(0xc0,SN76496Write,IO_MB,2);
+		WriteHandler[0].Install(0xc0, SN76496Write, io_width_t::byte, 2);
 
 		if (enable_hw_tandy_dac) {
 			// enable low-level Tandy DAC emulation
-			WriteHandler[1].Install(0xc4,TandyDACWrite,IO_MB,4);
-			ReadHandler[1].Install(0xc4,TandyDACRead,IO_MB,4);
+			WriteHandler[1].Install(0xc4, TandyDACWrite, io_width_t::byte, 4);
+			ReadHandler[1].Install(0xc4, TandyDACRead, io_width_t::byte, 4);
 
 			tandy.dac.enabled=true;
-			tandy.dac.chan=MixerChanDAC.Install(&TandyDACUpdate,sample_rate,"TANDYDAC");
+			tandy.dac.chan = MIXER_AddChannel(&TandyDACUpdate, sample_rate, "TANDYDAC");
 
 			tandy.dac.hw.base=0xc4;
 			tandy.dac.hw.irq =7;
@@ -396,7 +406,7 @@ public:
 		real_writeb(0x40,0xd4,0xff);	/* BIOS Tandy DAC initialization value */
 
 		((device_t&)device).device_start();
-		device.convert_samplerate(sample_rate);
+		device.convert_samplerate(static_cast<int>(sample_rate));
 	}
 	~TANDYSOUND(){ }
 };

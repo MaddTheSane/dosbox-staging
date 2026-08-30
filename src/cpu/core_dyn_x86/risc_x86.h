@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -15,7 +15,6 @@
  *  with this program; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
-
 
 static void gen_init(void);
 
@@ -40,14 +39,12 @@ static struct {
 
 class GenReg {
 public:
-	GenReg(Bit8u _index) {
-		index=_index;
-		notusable=false;dynreg=0;
-	}
-	DynReg  * dynreg;
-	Bitu last_used;			//Keeps track of last assigned regs 
-    Bit8u index;
-	bool notusable;
+	Bit8u index = 0;
+	DynReg  * dynreg = nullptr;
+	Bitu last_used = 0;			//Keeps track of last assigned regs 
+	bool notusable = false;
+
+	GenReg(Bit8u _index) : index(_index) {}
 	void Load(DynReg * _dynreg,bool stale=false) {
 		if (!_dynreg) return;
 		if (GCC_UNLIKELY((Bitu)dynreg)) Clear();
@@ -73,18 +70,20 @@ public:
 			Save();
 		}
 		dynreg->flags&=~(DYNFLG_CHANGED|DYNFLG_ACTIVE);
-		dynreg->genreg=0;dynreg=0;
+		dynreg->genreg = nullptr;
+		dynreg = nullptr;
 	}
 	void Clear(void) {
 		if (!dynreg) return;
 		if (dynreg->flags&DYNFLG_CHANGED) {
 			Save();
 		}
-		dynreg->genreg=0;dynreg=0;
+		dynreg->genreg = nullptr;
+		dynreg = nullptr;
 	}
 };
 
-static BlockReturn gen_runcode(Bit8u * code) {
+static BlockReturn gen_runcode(const Bit8u * code) {
 	BlockReturn retval;
 #if defined (_MSC_VER)
 	__asm {
@@ -214,7 +213,8 @@ static void gen_setupreg(DynReg * dnew,DynReg * dsetup) {
 	/* Not the same genreg must be wrong */
 	if (dnew->genreg) {
 		/* Check if the genreg i'm changing is actually linked to me */
-		if (dnew->genreg->dynreg==dnew) dnew->genreg->dynreg=0;
+		if (dnew->genreg->dynreg == dnew)
+			dnew->genreg->dynreg = nullptr;
 	}
 	dnew->genreg=dsetup->genreg;
 	if (dnew->genreg) dnew->genreg->dynreg=dnew;
@@ -295,7 +295,7 @@ static void gen_reinit(void) {
 	x86gen.last_used=0;
 	x86gen.flagsactive=false;
 	for (Bitu i=0;i<X86_REGS;i++) {
-		x86gen.regs[i]->dynreg=0;
+		x86gen.regs[i]->dynreg = nullptr;
 	}
 }
 
@@ -319,6 +319,7 @@ static void gen_mov_host(void * data,DynReg * dr1,Bitu size,Bitu di1=0) {
 	switch (size) {
 	case 1:cache_addb(0x8a);break;	//mov byte
 	case 2:cache_addb(0x66);		//mov word
+	[[fallthrough]];
 	case 4:cache_addb(0x8b);break;	//mov
 	default:
 		IllegalOption("gen_mov_host");
@@ -968,40 +969,40 @@ static void gen_call_write(DynReg * dr,Bit32u val,Bitu write_size) {
 #endif
 }
 
-static Bit8u * gen_create_branch(BranchTypes type) {
+static const Bit8u * gen_create_branch(BranchTypes type) {
 	/* First free all registers */
 	cache_addw(0x70+type);
 	return (cache.pos-1);
 }
 
-static void gen_fill_branch(Bit8u * data,Bit8u * from=cache.pos) {
+static void gen_fill_branch(const Bit8u * data,const Bit8u * from=cache.pos) {
 #if C_DEBUG
 	Bits len=from-data;
 	if (len<0) len=-len;
 	if (len>126) LOG_MSG("Big jump %d",len);
 #endif
-	*data=(from-data-1);
+	cache_addb((Bit8u)(from-data-1),data);
 }
 
-static Bit8u * gen_create_branch_long(BranchTypes type) {
+static const Bit8u * gen_create_branch_long(BranchTypes type) {
 	cache_addw(0x800f+(type<<8));
 	cache_addd(0);
 	return (cache.pos-4);
 }
 
-static void gen_fill_branch_long(Bit8u * data,Bit8u * from=cache.pos) {
-	*(Bit32u*)data=(from-data-4);
+static void gen_fill_branch_long(const Bit8u * data,const Bit8u * from=cache.pos) {
+	cache_addd((Bit32u)(from-data-4),data);
 }
 
-static Bit8u * gen_create_jump(Bit8u * to=0) {
+static const Bit8u * gen_create_jump(const Bit8u * to=0) {
 	/* First free all registers */
 	cache_addb(0xe9);
 	cache_addd(to-(cache.pos+4));
 	return (cache.pos-4);
 }
 
-static void gen_fill_jump(Bit8u * data,Bit8u * to=cache.pos) {
-	*(Bit32u*)data=(to-data-4);
+static void gen_fill_jump(const Bit8u * data,const Bit8u * to=cache.pos) {
+	gen_fill_branch_long(data,to);
 }
 
 

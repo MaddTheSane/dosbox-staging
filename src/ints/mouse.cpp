@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,17 +16,15 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "mouse.h"
 
 #include <string.h>
 #include <math.h>
 
-
-#include "dosbox.h"
 #include "callback.h"
 #include "mem.h"
 #include "regs.h"
 #include "cpu.h"
-#include "mouse.h"
 #include "pic.h"
 #include "inout.h"
 #include "int10.h"
@@ -197,7 +195,8 @@ Bitu PS2_Handler(void) {
 #define MOUSE_MIDDLE_RELEASED 64
 #define MOUSE_DELAY 5.0
 
-void MOUSE_Limit_Events(Bitu /*val*/) {
+void MOUSE_Limit_Events(uint32_t /*val*/)
+{
 	mouse.timer_in_progress = false;
 	if (mouse.events) {
 		mouse.timer_in_progress = true;
@@ -206,7 +205,7 @@ void MOUSE_Limit_Events(Bitu /*val*/) {
 	}
 }
 
-INLINE void Mouse_AddEvent(Bit8u type) {
+inline void Mouse_AddEvent(Bit8u type) {
 	if (mouse.events<QUEUE_SIZE) {
 		if (mouse.events>0) {
 			/* Skip duplicate events */
@@ -386,7 +385,9 @@ void DrawCursor() {
 
 	// Check video page. Seems to be ignored for text mode. 
 	// hence the text mode handled above this
-	if (real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_PAGE)!=mouse.page) return;
+	// >>> removed because BIOS page is not actual page in some cases, e.g. QQP games
+//	if (real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_PAGE)!=mouse.page) return;
+
 // Check if cursor in update region
 /*	if ((POS_X >= mouse.updateRegion_x[0]) && (POS_X <= mouse.updateRegion_x[1]) &&
 	    (POS_Y >= mouse.updateRegion_y[0]) && (POS_Y <= mouse.updateRegion_y[1])) {
@@ -480,7 +481,7 @@ void Mouse_CursorMoved(float xrel,float yrel,float x,float y,bool emulate) {
 	} else {
 		if (CurMode->type == M_TEXT) {
 			mouse.x = x*real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS)*8;
-			mouse.y = y*(real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS)+1)*8;
+			mouse.y = y*(IS_EGAVGA_ARCH?(real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS)+1):25)*8;
 		} else if ((mouse.max_x < 2048) || (mouse.max_y < 2048) || (mouse.max_x != mouse.max_y)) {
 			if ((mouse.max_x > 0) && (mouse.max_y > 0)) {
 				mouse.x = x*mouse.max_x;
@@ -610,7 +611,8 @@ static void Mouse_ResetHardware(void){
 	PIC_SetIRQMask(MOUSE_IRQ,false);
 }
 
-void Mouse_BeforeNewVideoMode(bool setmode) {
+void Mouse_BeforeNewVideoMode()
+{
 	if (CurMode->type!=M_TEXT) RestoreCursorBackground();
 	else RestoreCursorBackgroundText();
 	mouse.hidden = 1;
@@ -634,7 +636,7 @@ void Mouse_AfterNewVideoMode(bool setmode) {
 	case 0x07: {
 		mouse.gran_x = (mode<2)?0xfff0:0xfff8;
 		mouse.gran_y = (Bit16s)0xfff8;
-		Bitu rows = real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS);
+		Bitu rows = IS_EGAVGA_ARCH?real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS):24;
 		if ((rows == 0) || (rows > 250)) rows = 25 - 1;
 		mouse.max_y = 8*(rows+1) - 1;
 		break;
@@ -693,8 +695,9 @@ void Mouse_AfterNewVideoMode(bool setmode) {
 }
 
 //Much too empty, Mouse_NewVideoMode contains stuff that should be in here
-static void Mouse_Reset(void) {
-	Mouse_BeforeNewVideoMode(false);
+static void Mouse_Reset()
+{
+	Mouse_BeforeNewVideoMode();
 	Mouse_AfterNewVideoMode(false);
 	Mouse_SetMickeyPixelRate(8,16);
 
@@ -723,7 +726,8 @@ static Bitu INT33_Handler(void) {
 //	LOG(LOG_MOUSE,LOG_NORMAL)("MOUSE: %04X %X %X %d %d",reg_ax,reg_bx,reg_cx,POS_X,POS_Y);
 	switch (reg_ax) {
 	case 0x00:	/* Reset Driver and Read Status */
-		Mouse_ResetHardware(); /* fallthrough */
+		Mouse_ResetHardware();
+		[[fallthrough]];
 	case 0x21:	/* Software Reset */
 		reg_ax=0xffff;
 		reg_bx=MOUSE_BUTTONS;
@@ -768,8 +772,8 @@ static Bitu INT33_Handler(void) {
 			reg_dx=mouse.last_pressed_y[but];
 			reg_bx=mouse.times_pressed[but];
 			mouse.times_pressed[but]=0;
-			break;
 		}
+		break;
 	case 0x06:	/* Return Button Release Data */
 		{
 			Bit16u but=reg_bx;
@@ -779,8 +783,8 @@ static Bitu INT33_Handler(void) {
 			reg_dx=mouse.last_released_y[but];
 			reg_bx=mouse.times_released[but];
 			mouse.times_released[but]=0;
-			break;
 		}
+		break;
 	case 0x07:	/* Define horizontal cursor range */
 		{	//lemmings set 1-640 and wants that. iron seeds set 0-640 but doesn't like 640
 			//Iron seed works if newvideo mode with mode 13 sets 0-639
@@ -838,6 +842,10 @@ static Bitu INT33_Handler(void) {
 		}
 		DrawCursor();
 		break;
+	case 0x27:	/* Get Screen/Cursor Masks and Mickey Counts */
+		reg_ax=mouse.textAndMask;
+		reg_bx=mouse.textXorMask;
+		[[fallthrough]];
 	case 0x0b:	/* Read Motion Data */
 		reg_cx=static_cast<Bit16s>(mouse.mickey_x);
 		reg_dx=static_cast<Bit16s>(mouse.mickey_y);

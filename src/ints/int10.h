@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -20,6 +20,8 @@
 #define DOSBOX_INT10_H
 
 #include "dosbox.h"
+
+#include <vector>
 
 #include "mem.h"
 #include "vga.h"
@@ -99,7 +101,11 @@
 #define VGAMEM_MTEXT 0xB000
 
 #define BIOS_NCOLS Bit16u ncols=real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS);
-#define BIOS_NROWS Bit16u nrows=(Bit16u)real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS)+1;
+#define BIOS_NROWS Bit16u nrows=IS_EGAVGA_ARCH?((Bit16u)real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS)+1):25;
+#define BIOS_CHEIGHT Bit8u cheight=IS_EGAVGA_ARCH?real_readb(BIOSMEM_SEG,BIOSMEM_CHAR_HEIGHT):8;
+
+uint16_t INT10_GetTextColumns();
+uint16_t INT10_GetTextRows();
 
 extern Bit8u int10_font_08[256 * 8];
 extern Bit8u int10_font_14[256 * 14];
@@ -108,23 +114,32 @@ extern Bit8u int10_font_14_alternate[20 * 15 + 1];
 extern Bit8u int10_font_16_alternate[19 * 17 + 1];
 
 struct VideoModeBlock {
-	Bit16u	mode;
-	VGAModes	type;
-	Bitu	swidth, sheight;
-	Bitu	twidth, theight;
-	Bitu	cwidth, cheight;
-	Bitu	ptotal,pstart,plength;
+	uint16_t mode;
+	VGAModes type;
+	uint16_t swidth, sheight;
+	uint8_t twidth, theight;
+	uint8_t cwidth, cheight;
+	uint8_t ptotal;
+	uint32_t pstart;
+	uint32_t plength;
 
-	Bitu	htotal,vtotal;
-	Bitu	hdispend,vdispend;
-	Bitu	special;
-	
+	uint16_t htotal, vtotal;
+	uint16_t hdispend, vdispend;
+	uint16_t special;
 };
-extern VideoModeBlock ModeList_VGA[];
-extern VideoModeBlock * CurMode;
 
-typedef struct {
-	struct {
+extern std::vector<VideoModeBlock> ModeList_VGA;
+extern std::vector<VideoModeBlock> ModeList_VGA_Paradise;
+extern std::vector<VideoModeBlock> ModeList_VGA_Tseng;
+extern std::vector<VideoModeBlock>::const_iterator CurMode;
+
+enum class VESA_MODE_PREF {
+	COMPATIBLE, // optimizes out-of-the-box compatibility with games
+	ALL, // use all VESA modes (compromise being some games might not handle them properly)
+};
+
+struct Int10Data {
+	struct Int10DataRom{
 		RealPt font_8_first;
 		RealPt font_8_second;
 		RealPt font_14;
@@ -146,11 +161,13 @@ typedef struct {
 		Bit16u pmode_interface_window;
 		Bit16u pmode_interface_palette;
 		Bit16u used;
-	} rom;
-	Bit16u vesa_setmode;
-	bool vesa_nolfb;
-	bool vesa_oldvbe;
-} Int10Data;
+	} rom = {};
+	Bit16u vesa_setmode = 0;
+
+	VESA_MODE_PREF vesa_mode_preference = VESA_MODE_PREF::COMPATIBLE;
+	bool vesa_nolfb = false;
+	bool vesa_oldvbe = false;
+};
 
 extern Int10Data int10;
 
@@ -168,6 +185,7 @@ void INT10_SetCurMode(void);
 void INT10_ScrollWindow(Bit8u rul,Bit8u cul,Bit8u rlr,Bit8u clr,Bit8s nlines,Bit8u attr,Bit8u page);
 
 void INT10_SetActivePage(Bit8u page);
+void INT10_DisplayCombinationCode(Bit16u * dcc,bool set);
 void INT10_GetFuncStateInformation(PhysPt save);
 
 void INT10_SetCursorShape(Bit8u first,Bit8u last);
@@ -175,7 +193,7 @@ void INT10_SetCursorPos(Bit8u row,Bit8u col,Bit8u page);
 void INT10_TeletypeOutput(Bit8u chr,Bit8u attr);
 void INT10_TeletypeOutputAttr(Bit8u chr,Bit8u attr,bool useattr);
 void INT10_ReadCharAttr(Bit16u * result,Bit8u page);
-void INT10_WriteChar(Bit8u chr,Bit8u attr,Bit8u page,Bit16u count,bool showattr);
+void INT10_WriteChar(uint8_t chr, uint8_t attr, uint8_t page, uint16_t count, bool showattr);
 void INT10_WriteString(Bit8u row,Bit8u col,Bit8u flag,Bit8u attr,PhysPt string,Bit16u count,Bit8u page);
 
 /* Graphics Stuff */
@@ -187,10 +205,10 @@ void INT10_LoadFont(PhysPt font,bool reload,Bitu count,Bitu offset,Bitu map,Bitu
 void INT10_ReloadFont(void);
 
 /* Palette Group */
-void INT10_SetBackgroundBorder(Bit8u val);
+void INT10_SetBackgroundBorder(uint8_t val);
 void INT10_SetColorSelect(Bit8u val);
-void INT10_SetSinglePaletteRegister(Bit8u reg,Bit8u val);
-void INT10_SetOverscanBorderColor(Bit8u val);
+void INT10_SetSinglePaletteRegister(uint8_t reg, uint8_t val);
+void INT10_SetOverscanBorderColor(uint8_t val);
 void INT10_SetAllPaletteRegisters(PhysPt data);
 void INT10_ToggleBlinkingBit(Bit8u state);
 void INT10_GetSinglePaletteRegister(Bit8u reg,Bit8u * val);

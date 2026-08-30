@@ -1,6 +1,7 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
- *  OPL2/OPL3 emulation library
+ *  SPDX-License-Identifier: LGPL-2.1-or-later
+ *
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -17,37 +18,19 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-
-/*
+/* OPL2/OPL3 emulation library
+ *
  * Originally based on ADLIBEMU.C, an AdLib/OPL2 emulation library by Ken Silverman
  * Copyright (C) 1998-2001 Ken Silverman
  * Ken Silverman's official web site: "http://www.advsys.net/ken"
  */
 
+#include "config.h"
+
+#include "types.h"
+
 
 #define fltype double
-
-/*
-	define Bits, Bitu, Bit32s, Bit32u, Bit16s, Bit16u, Bit8s, Bit8u here
-*/
-/*
-#include <stdint.h>
-typedef uintptr_t	Bitu;
-typedef intptr_t	Bits;
-typedef uint32_t	Bit32u;
-typedef int32_t		Bit32s;
-typedef uint16_t	Bit16u;
-typedef int16_t		Bit16s;
-typedef uint8_t		Bit8u;
-typedef int8_t		Bit8s;
-*/
-
-
-/*
-	define attribution that inlines/forces inlining of a function (optional)
-*/
-#define OPL_INLINE INLINE
-
 
 #undef NUM_CHANNELS
 #if defined(OPLTYPE_IS_OPL3)
@@ -190,10 +173,10 @@ void change_feedback(Bitu chanbase, op_type* op_pt);
 
 // general functions
 void adlib_init(Bit32u samplerate);
-void adlib_write(Bitu idx, Bit8u val);
+void adlib_write(io_port_t idx, Bit8u val);
 void adlib_getsample(Bit16s* sndptr, Bits numsamples);
 
-Bitu adlib_reg_read(Bitu port);
-void adlib_write_index(Bitu port, Bit8u val);
+uint8_t adlib_reg_read(io_port_t port);
+void adlib_write_index(io_port_t port, io_val_t value);
 
 static Bit32u generator_add;	// should be a chip parameter

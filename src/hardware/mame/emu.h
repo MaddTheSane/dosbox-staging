@@ -1,6 +1,26 @@
-#ifndef DOSBOX_EMU_H
-#define DOSBOX_EMU_H
+/*
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2017-2020  The DOSBox Team
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+ */
 
+#ifndef DOSBOX_MAME_EMU_H
+#define DOSBOX_MAME_EMU_H
 
 #include "dosbox.h"
 
@@ -34,7 +54,7 @@ struct machine_config;
 #define DECLARE_READ8_MEMBER(name)      u8     name( int, int)
 #define DECLARE_WRITE8_MEMBER(name)     void   name( int, int, u8 data)
 #define READ8_MEMBER(name)              u8     name( int, int)
-#define WRITE8_MEMBER(name)				void   name( int offset, int space, u8 data)
+#define WRITE8_MEMBER(name)				void   name([[maybe_unused]] int offset, [[maybe_unused]] int space, [[maybe_unused]] u8 data)
 
 #define DECLARE_DEVICE_TYPE(Type, Class) \
 		extern const device_type Type; \
@@ -51,13 +71,13 @@ public:
 
 	sound_stream temp;
 
-	device_sound_interface(const machine_config &mconfig, device_t &_device)
+	device_sound_interface(const machine_config & /* mconfig */, [[maybe_unused]] device_t &_device)
 	        : temp()
 	{}
 
 	virtual ~device_sound_interface() = default;
 
-	sound_stream *stream_alloc(int whatever, int channels, int size)
+	sound_stream *stream_alloc([[maybe_unused]] int whatever, [[maybe_unused]] int channels, [[maybe_unused]] int size)
 	{
 		return &temp;
 	}
@@ -71,7 +91,7 @@ public:
 struct attotime {
 	int whatever;
 
-	static attotime from_hz(int hz) {
+	static attotime from_hz([[maybe_unused]] int hz) {
 		return attotime();
 	}
 };
@@ -100,7 +120,7 @@ public:
 		return clockRate;
 	}
 
-	void logerror(const char* format, ...) {
+	void logerror([[maybe_unused]] const char* format, ...) {
 #if C_DEBUG
 		char buf[512*2];
 		va_list msg;
@@ -118,19 +138,15 @@ public:
 	virtual void device_start() {
 	}
 
-	void save_item(int wtf, int blah= 0) {
+	void save_item(int, [[maybe_unused]] int blah= 0) {
 	}
 
-	device_t(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 _clock) : clockRate( _clock ) {
+	device_t(const machine_config & /* mconfig */, [[maybe_unused]] device_type type, [[maybe_unused]] const char *tag, [[maybe_unused]] device_t *owner, u32 _clock) : clockRate( _clock ) {
 	}
 
 	virtual ~device_t() {
 	}
 };
-
-static inline void auto_free(const device_t::machine_t& machine, void * buffer) {
-	free(buffer);
-}
 
 #define auto_alloc_array_clear(m, t, c) calloc(c, sizeof(t) )
 #define auto_alloc_clear(m, t) static_cast<t*>( calloc(1, sizeof(t) ) )

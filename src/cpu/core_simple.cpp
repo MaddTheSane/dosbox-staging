@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -105,18 +105,18 @@ static struct {
 #define BaseDS		core.base_ds
 #define BaseSS		core.base_ss
 
-static INLINE Bit8u Fetchb() {
+static inline Bit8u Fetchb() {
 	Bit8u temp=host_readb(core.cseip);
 	core.cseip+=1;
 	return temp;
 }
 
-static INLINE Bit16u Fetchw() {
+static inline Bit16u Fetchw() {
 	Bit16u temp=host_readw(core.cseip);
 	core.cseip+=2;
 	return temp;
 }
-static INLINE Bit32u Fetchd() {
+static inline Bit32u Fetchd() {
 	Bit32u temp=host_readd(core.cseip);
 	core.cseip+=4;
 	return temp;
@@ -193,7 +193,7 @@ Bits CPU_Core_Simple_Trap_Run(void) {
 	cpu.trap_skip = false;
 
 	Bits ret=CPU_Core_Simple_Run();
-	if (!cpu.trap_skip) CPU_HW_Interrupt(1);
+	if (!cpu.trap_skip) CPU_DebugException(DBINT_STEP,reg_eip);
 	CPU_Cycles = oldCycles-1;
 	cpudecoder = &CPU_Core_Simple_Run;
 

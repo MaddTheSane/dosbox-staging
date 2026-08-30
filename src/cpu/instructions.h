@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -15,6 +15,8 @@
  *  with this program; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
+
+#include "lazyflags.h"
 
 /* Jumps */
 
@@ -315,66 +317,65 @@
 	SETFLAGBIT(OF,(reg_flags & 1) ^ (lf_resw >> 15));	\
 }
 
-#define RCLD(op1,op2,load,save)							\
-	if (!op2) break;									\
-{	Bit32u cf=(Bit32u)FillFlags()&0x1;					\
-	lf_var1d=load(op1);									\
-	lf_var2b=op2;										\
-	if (lf_var2b==1)	{								\
-		lf_resd=(lf_var1d << 1) | cf;					\
-	} else 	{											\
-		lf_resd=(lf_var1d << lf_var2b) |				\
-		(cf << (lf_var2b-1)) |							\
-		(lf_var1d >> (33-lf_var2b));					\
-	}													\
-	save(op1,lf_resd);									\
-	SETFLAGBIT(CF,((lf_var1d >> (32-lf_var2b)) & 1));	\
-	SETFLAGBIT(OF,(reg_flags & 1) ^ (lf_resd >> 31));	\
-}
-
-#define RCRB(op1,op2,load,save)								\
-	if (op2%9) {											\
-		Bit8u cf=(Bit8u)FillFlags()&0x1;					\
-		lf_var1b=load(op1);									\
-		lf_var2b=op2%9;										\
-	 	lf_resb=(lf_var1b >> lf_var2b) |					\
-				(cf << (8-lf_var2b)) |						\
-				(lf_var1b << (9-lf_var2b));					\
-		save(op1,lf_resb);									\
-		SETFLAGBIT(CF,(lf_var1b >> (lf_var2b - 1)) & 1);	\
-		SETFLAGBIT(OF,(lf_resb ^ (lf_resb<<1)) & 0x80);		\
+#define RCLD(op1, op2, load, save) \
+	if (!op2) \
+		break; \
+	{ \
+		const uint32_t cf = FillFlags() & 0x1; \
+		lf_var1d = load(op1); \
+		lf_var2b = op2; \
+		if (lf_var2b == 1) { \
+			lf_resd = (lf_var1d << 1) | cf; \
+		} else { \
+			lf_resd = (lf_var1d << lf_var2b) | \
+			          (cf << lf_var2b_minus_one()) | \
+			          (lf_var1d >> (33 - lf_var2b)); \
+		} \
+		save(op1, lf_resd); \
+		SETFLAGBIT(CF, ((lf_var1d >> (32 - lf_var2b)) & 1)); \
+		SETFLAGBIT(OF, (reg_flags & 1) ^ (lf_resd >> 31)); \
 	}
 
-#define RCRW(op1,op2,load,save)								\
-	if (op2%17) {											\
-		Bit16u cf=(Bit16u)FillFlags()&0x1;					\
-		lf_var1w=load(op1);									\
-		lf_var2b=op2%17;									\
-	 	lf_resw=(lf_var1w >> lf_var2b) |					\
-				(cf << (16-lf_var2b)) |						\
-				(lf_var1w << (17-lf_var2b));				\
-		save(op1,lf_resw);									\
-		SETFLAGBIT(CF,(lf_var1w >> (lf_var2b - 1)) & 1);	\
-		SETFLAGBIT(OF,(lf_resw ^ (lf_resw<<1)) & 0x8000);	\
+#define RCRB(op1, op2, load, save) \
+	if (op2 % 9) { \
+		Bit8u cf = (Bit8u)FillFlags() & 0x1; \
+		lf_var1b = load(op1); \
+		lf_var2b = op2 % 9; \
+		lf_resb = (lf_var1b >> lf_var2b) | (cf << (8 - lf_var2b)) | \
+		          (lf_var1b << (9 - lf_var2b)); \
+		save(op1, lf_resb); \
+		SETFLAGBIT(CF, (lf_var1b >> lf_var2b_minus_one()) & 1); \
+		SETFLAGBIT(OF, (lf_resb ^ (lf_resb << 1)) & 0x80); \
 	}
 
-#define RCRD(op1,op2,load,save)								\
-	if (op2) {												\
-		Bit32u cf=(Bit32u)FillFlags()&0x1;					\
-		lf_var1d=load(op1);									\
-		lf_var2b=op2;										\
-		if (lf_var2b==1) {									\
-			lf_resd=lf_var1d >> 1 | cf << 31;				\
-		} else {											\
- 			lf_resd=(lf_var1d >> lf_var2b) |				\
-				(cf << (32-lf_var2b)) |						\
-				(lf_var1d << (33-lf_var2b));				\
-		}													\
-		save(op1,lf_resd);									\
-		SETFLAGBIT(CF,(lf_var1d >> (lf_var2b - 1)) & 1);	\
-		SETFLAGBIT(OF,(lf_resd ^ (lf_resd<<1)) & 0x80000000);	\
+#define RCRW(op1, op2, load, save) \
+	if (op2 % 17) { \
+		Bit16u cf = (Bit16u)FillFlags() & 0x1; \
+		lf_var1w = load(op1); \
+		lf_var2b = op2 % 17; \
+		lf_resw = (lf_var1w >> lf_var2b) | (cf << (16 - lf_var2b)) | \
+		          (lf_var1w << (17 - lf_var2b)); \
+		save(op1, lf_resw); \
+		SETFLAGBIT(CF, (lf_var1w >> lf_var2b_minus_one()) & 1); \
+		SETFLAGBIT(OF, (lf_resw ^ (lf_resw << 1)) & 0x8000); \
 	}
 
+#define RCRD(op1, op2, load, save) \
+	if (op2) { \
+		const uint32_t cf = FillFlags() & 0x1; \
+		lf_var1d = load(op1); \
+		lf_var2b = op2; \
+		if (lf_var2b == 1) { \
+			lf_resd = lf_var1d >> 1 | cf << 31; \
+		} else { \
+			lf_resd = (lf_var1d >> lf_var2b) | \
+			          (cf << (32 - lf_var2b)) | \
+			          (lf_var1d << (33 - lf_var2b)); \
+		} \
+		save(op1, lf_resd); \
+		SETFLAGBIT(CF, (lf_var1d >> lf_var2b_minus_one()) & 1); \
+		SETFLAGBIT(OF, (lf_resd ^ (lf_resd << 1)) & 0x80000000); \
+	}
 
 #define SHLB(op1,op2,load,save)								\
 	lf_var1b=load(op1);lf_var2b=op2;				\
@@ -596,33 +597,39 @@
 		SETFLAGBIT(CF,false);SETFLAGBIT(OF,false);			\
 	}
 
-#define MULW(op1,load,save)									\
-{															\
-	Bitu tempu=(Bitu)reg_ax*(Bitu)(load(op1));				\
-	reg_ax=(Bit16u)(tempu);									\
-	reg_dx=(Bit16u)(tempu >> 16);							\
-	FillFlagsNoCFOF();										\
-	SETFLAGBIT(ZF,reg_ax == 0);								\
-	if (reg_dx) {											\
-		SETFLAGBIT(CF,true);SETFLAGBIT(OF,true);			\
-	} else {												\
-		SETFLAGBIT(CF,false);SETFLAGBIT(OF,false);			\
-	}														\
-}
+#define MULW(op1, load, save) \
+	{ \
+		const uint32_t res = static_cast<uint32_t>(reg_ax) * \
+		                     static_cast<uint32_t>(load(op1)); \
+		reg_ax = static_cast<uint16_t>(res); \
+		reg_dx = static_cast<uint16_t>(res >> 16); \
+		FillFlagsNoCFOF(); \
+		SETFLAGBIT(ZF, reg_ax == 0); \
+		if (reg_dx) { \
+			SETFLAGBIT(CF, true); \
+			SETFLAGBIT(OF, true); \
+		} else { \
+			SETFLAGBIT(CF, false); \
+			SETFLAGBIT(OF, false); \
+		} \
+	}
 
-#define MULD(op1,load,save)									\
-{															\
-	Bit64u tempu=(Bit64u)reg_eax*(Bit64u)(load(op1));		\
-	reg_eax=(Bit32u)(tempu);								\
-	reg_edx=(Bit32u)(tempu >> 32);							\
-	FillFlagsNoCFOF();										\
-	SETFLAGBIT(ZF,reg_eax == 0);							\
-	if (reg_edx) {											\
-		SETFLAGBIT(CF,true);SETFLAGBIT(OF,true);			\
-	} else {												\
-		SETFLAGBIT(CF,false);SETFLAGBIT(OF,false);			\
-	}														\
-}
+#define MULD(op1, load, save) \
+	{ \
+		const uint64_t res = static_cast<uint64_t>(reg_eax) * \
+		                     static_cast<uint64_t>(load(op1)); \
+		reg_eax = static_cast<uint32_t>(res); \
+		reg_edx = static_cast<uint32_t>(res >> 32); \
+		FillFlagsNoCFOF(); \
+		SETFLAGBIT(ZF, reg_eax == 0); \
+		if (reg_edx) { \
+			SETFLAGBIT(CF, true); \
+			SETFLAGBIT(OF, true); \
+		} else { \
+			SETFLAGBIT(CF, false); \
+			SETFLAGBIT(OF, false); \
+		} \
+	}
 
 #define DIVB(op1,load,save)									\
 {															\
@@ -680,20 +687,21 @@
 	SETFLAGBIT(OF,false);									\
 }
 
-
-#define IDIVW(op1,load,save)								\
-{															\
-	Bits val=(Bit16s)(load(op1));							\
-	if (val==0) EXCEPTION(0);									\
-	Bits num=(Bit32s)((reg_dx<<16)|reg_ax);					\
-	Bits quo=num/val;										\
-	Bit16s rem=(Bit16s)(num % val);							\
-	Bit16s quo16s=(Bit16s)quo;								\
-	if (quo!=(Bit32s)quo16s) EXCEPTION(0);					\
-	reg_dx=rem;												\
-	reg_ax=quo16s;											\
-	SETFLAGBIT(OF,false);									\
-}
+#define IDIVW(op1, load, save) \
+	{ \
+		const auto val = static_cast<int16_t>(load(op1)); \
+		if (val == 0) \
+			EXCEPTION(0); \
+		const auto num = (reg_dx << 16) | reg_ax; \
+		const auto quo = num / val; \
+		const auto rem = num % val; \
+		const auto quo16s = static_cast<int16_t>(quo); \
+		if (quo != quo16s) \
+			EXCEPTION(0); \
+		reg_ax = quo16s; \
+		reg_dx = static_cast<int16_t>(rem); \
+		SETFLAGBIT(OF, false); \
+	}
 
 #define IDIVD(op1,load,save)								\
 {															\
@@ -722,68 +730,76 @@
 		SETFLAGBIT(CF,true);SETFLAGBIT(OF,true);			\
 	}														\
 }
-	
 
-#define IMULW(op1,load,save)								\
-{															\
-	Bits temps=((Bit16s)reg_ax)*((Bit16s)(load(op1)));		\
-	reg_ax=(Bit16s)(temps);									\
-	reg_dx=(Bit16s)(temps >> 16);							\
-	FillFlagsNoCFOF();										\
-	SETFLAGBIT(ZF,reg_ax == 0);								\
-	SETFLAGBIT(SF,reg_ax & 0x8000);							\
-	if (((temps & 0xffff8000)==0xffff8000 ||				\
-		(temps & 0xffff8000)==0x0000)) {					\
-		SETFLAGBIT(CF,false);SETFLAGBIT(OF,false);			\
-	} else {												\
-		SETFLAGBIT(CF,true);SETFLAGBIT(OF,true);			\
-	}														\
-}
+#define IMULW(op1, load, save) \
+	{ \
+		const auto res = static_cast<int16_t>(reg_ax) * \
+		                 static_cast<int16_t>(load(op1)); \
+		reg_ax = static_cast<int16_t>(res); \
+		reg_dx = static_cast<int16_t>(res >> 16); \
+		FillFlagsNoCFOF(); \
+		SETFLAGBIT(ZF, reg_ax == 0); \
+		SETFLAGBIT(SF, reg_ax & 0x8000); \
+		if (((res & 0xffff8000) == 0xffff8000 || \
+		     (res & 0xffff8000) == 0x0000)) { \
+			SETFLAGBIT(CF, false); \
+			SETFLAGBIT(OF, false); \
+		} else { \
+			SETFLAGBIT(CF, true); \
+			SETFLAGBIT(OF, true); \
+		} \
+	}
 
-#define IMULD(op1,load,save)								\
-{															\
-	Bit64s temps=((Bit64s)((Bit32s)reg_eax))*				\
-				 ((Bit64s)((Bit32s)(load(op1))));			\
-	reg_eax=(Bit32u)(temps);								\
-	reg_edx=(Bit32u)(temps >> 32);							\
-	FillFlagsNoCFOF();										\
-	SETFLAGBIT(ZF,reg_eax == 0);							\
-	SETFLAGBIT(SF,reg_eax & 0x80000000);					\
-	if ((reg_edx==0xffffffff) &&							\
-		(reg_eax & 0x80000000) ) {							\
-		SETFLAGBIT(CF,false);SETFLAGBIT(OF,false);			\
-	} else if ( (reg_edx==0x00000000) &&					\
-				(reg_eax< 0x80000000) ) {					\
-		SETFLAGBIT(CF,false);SETFLAGBIT(OF,false);			\
-	} else {												\
-		SETFLAGBIT(CF,true);SETFLAGBIT(OF,true);			\
-	}														\
-}
+#define IMULD(op1, load, save) \
+	{ \
+		Bit64s temps = ((Bit64s)((Bit32s)reg_eax)) * \
+		               ((Bit64s)((Bit32s)(load(op1)))); \
+		reg_eax = (Bit32s)(temps); \
+		reg_edx = (Bit32s)(temps >> 32); \
+		FillFlagsNoCFOF(); \
+		SETFLAGBIT(ZF, reg_eax == 0); \
+		SETFLAGBIT(SF, reg_eax & 0x80000000); \
+		if ((reg_edx == 0xffffffff) && (reg_eax & 0x80000000)) { \
+			SETFLAGBIT(CF, false); \
+			SETFLAGBIT(OF, false); \
+		} else if ((reg_edx == 0x00000000) && (reg_eax < 0x80000000)) { \
+			SETFLAGBIT(CF, false); \
+			SETFLAGBIT(OF, false); \
+		} else { \
+			SETFLAGBIT(CF, true); \
+			SETFLAGBIT(OF, true); \
+		} \
+	}
 
-#define DIMULW(op1,op2,op3,load,save)						\
-{															\
-	Bits res=((Bit16s)op2) * ((Bit16s)op3);					\
-	save(op1,res & 0xffff);									\
-	FillFlagsNoCFOF();										\
-	if ((res>= -32768)  && (res<=32767)) {					\
-		SETFLAGBIT(CF,false);SETFLAGBIT(OF,false);			\
-	} else {												\
-		SETFLAGBIT(CF,true);SETFLAGBIT(OF,true);			\
-	}														\
-}
+#define DIMULW(op1, op2, op3, load, save) \
+	{ \
+		const auto res = op2 * op3; \
+		save(op1, res & 0xffff); \
+		FillFlagsNoCFOF(); \
+		if ((res >= -32768) && (res <= 32767)) { \
+			SETFLAGBIT(CF, false); \
+			SETFLAGBIT(OF, false); \
+		} else { \
+			SETFLAGBIT(CF, true); \
+			SETFLAGBIT(OF, true); \
+		} \
+	}
 
-#define DIMULD(op1,op2,op3,load,save)						\
-{															\
-	Bit64s res=((Bit64s)((Bit32s)op2))*((Bit64s)((Bit32s)op3));	\
-	save(op1,(Bit32s)res);									\
-	FillFlagsNoCFOF();										\
-	if ((res>=-((Bit64s)(2147483647)+1)) &&					\
-		(res<=(Bit64s)2147483647)) {						\
-		SETFLAGBIT(CF,false);SETFLAGBIT(OF,false);			\
-	} else {												\
-		SETFLAGBIT(CF,true);SETFLAGBIT(OF,true);			\
-	}														\
-}
+#define DIMULD(op1, op2, op3, load, save) \
+	{ \
+		const auto res = static_cast<int64_t>(op2) * \
+		                 static_cast<int64_t>(op3); \
+		save(op1, (Bit32s)res); \
+		FillFlagsNoCFOF(); \
+		if ((res >= -((Bit64s)(2147483647) + 1)) && \
+		    (res <= (Bit64s)2147483647)) { \
+			SETFLAGBIT(CF, false); \
+			SETFLAGBIT(OF, false); \
+		} else { \
+			SETFLAGBIT(CF, true); \
+			SETFLAGBIT(OF, true); \
+		} \
+	}
 
 #define GRP2B(blah)											\
 {															\

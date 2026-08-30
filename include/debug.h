@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -15,6 +15,11 @@
  *  with this program; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
+
+#ifndef DOSBOX_DEBUG_H
+#define DOSBOX_DEBUG_H
+
+#include "dosbox.h"
 
 void DEBUG_SetupConsole(void);
 void DEBUG_DrawScreen(void);
@@ -32,4 +37,6 @@ extern Bitu debugCallback;
 #ifdef C_HEAVY_DEBUG
 bool DEBUG_HeavyIsBreakpoint(void);
 void DEBUG_HeavyWriteLogInstruction(void);
+#endif
+
 #endif

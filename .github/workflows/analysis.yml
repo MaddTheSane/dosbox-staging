@@ -2,6 +2,10 @@ name: Code analysis
 
 on: [push, pull_request]
 
+concurrency: 
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CCACHE_DIR:      "/dev/shm/.ccache"
   CCACHE_MAXSIZE:  "64M"
@@ -10,10 +14,11 @@ env:
 jobs:
   run_linters:
     name: Script linters
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier', github.actor) == false
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v2
       - run:  sudo apt-get update
       - name: Run shellcheck
         run:  ./scripts/verify-bash.sh
@@ -25,23 +30,29 @@ jobs:
         run:  ./scripts/verify-python.sh
       - name: Install markdownlint
         run: |
-          sudo apt-get install ruby
+          sudo apt-get install ruby-full
+          ruby --version
           sudo gem install mdl
-          sudo chmod go-w /usr/share/rust/.cargo/bin
       - name: Run markdownlint
         run:  ./scripts/verify-markdown.sh
+      - name: Install appstream-util
+        run:  sudo apt-get install appstream-util
+      - name: Verify metainfo.xml
+        run:  appstream-util validate-relax --nonet contrib/linux/dosbox-staging.metainfo.xml
 
   build_clang_static_analyser:
     name: Clang static analyzer
     runs-on: ubuntu-20.04
     needs: run_linters
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v2
       - run:  sudo apt-get update
-      - name: Install C++ compiler and libraries
-        run:  sudo apt-get install python3-setuptools $(./scripts/list-build-dependencies.sh -m apt -c gcc)
-      - name: Install scan-build (Python version)
-        run:  sudo pip3 install scan-build beautifulsoup4 html5lib
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get install clang-tools python3-bs4 $(cat .github/packages/ubuntu-20.04-apt.txt)
+          sudo pip3 install --upgrade meson ninja
 
       - name:  Prepare compiler cache
         id:    prep-ccache
@@ -51,6 +62,7 @@ jobs:
           echo "::set-output name=dir::$CCACHE_DIR"
           echo "::set-output name=today::$(date -I)"
           echo "::set-output name=yesterday::$(date --date=yesterday -I)"
+
       - uses:  actions/cache@v2
         id:    cache-ccache
         with:
@@ -58,59 +70,98 @@ jobs:
           key:  ccache-static-clang-${{ steps.prep-ccache.outputs.today }}
           restore-keys: |
             ccache-static-clang-${{ steps.prep-ccache.outputs.yesterday }}
+
+      - name:  Cache subprojects
+        uses:  actions/cache@v2
+        with:
+          path: subprojects/packagecache
+          key:  subprojects-${{ hashFiles('subprojects/*.wrap') }}
+
       - name: Log environment
         run:  ./scripts/log-env.sh
-      - name: Build
+
+      - run:  meson setup -Dunit_tests=disabled build
+
+      - name: Build and run scan-build
         run: |
-          # build steps
           set -x
-          g++ --version
-          ./autogen.sh
-          ./configure CC="ccache gcc" CXX="ccache g++"
-          intercept-build make -j "$(nproc)"
-      - name: Analyze
-        run:  analyze-build -v -o report --html-title="dosbox-staging (${GITHUB_SHA:0:8})"
+          ninja -C build scan-build
+          mv build/meson-logs/scanbuild report
+
       - name: Upload report
         uses: actions/upload-artifact@v2
         with:
           name: clang-analysis-report
           path: report
+
       - name: Summarize report
         env:
-          MAX_BUGS: 198
+          MAX_BUGS: 27
         run: |
           # summary
           echo "Full report is included in build Artifacts"
           echo
           ./scripts/count-clang-bugs.py report/*/index.html
 
+
   dynamic_matrix:
-    name: ${{ matrix.conf.name }} dynamic sanitizers
+    name: ${{ matrix.conf.name }}
     needs: run_linters
     runs-on: ubuntu-20.04
     strategy:
       matrix:
         conf:
-          - name: Clang
-            sanitizers: USAN
-            usan:  0  # cleared out in our existing tests
-            tsan:  -1
-            uasan: -1
-          - name: GCC
-            sanitizers: TSAN UASAN
-            usan:  -1
-            tsan:  0  # our test does not trigger multiple threads yet
-            uasan: 14
+          # AddressSanitizer is a fast memory error detector. Memory access
+          # instructions are instrumented to detect out-of-bounds and
+          # use-after-free bugs.
+          # See GCC manual to learn more.
+          - name: GCC address sanitizer
+            build_flags: -Db_sanitize=address
+            logs: gcc-asan-logs
+            max_issues: 0
+
+          # UndefinedBehaviorSanitizer is a fast undefined behavior detector.
+          # Various computations are instrumented to detect undefined behavior
+          # at runtime, such as shift operation correctness, integer division by
+          # zero, null-pointer dereference, signed integer overflow,
+          # dereferencing memory with wrong alignment, and more.
+          # See GCC manual to learn more.
+          - name: GCC undefined sanitizer
+            build_flags: -Db_sanitize=undefined
+            logs: gcc-usan-logs
+            max_issues: 0
+
+          # Clang allows enabling both AddressSanitizer and
+          # UndefinedBehaviorSanitizer at the same time.
+          # See Clang manual to learn more.
+          - name: Clang undefined+address sanitizer
+            build_flags: >-
+              --native-file=.github/meson/native-clang.ini
+              -Db_sanitize=address,undefined
+              -Dc_args=-fsanitize-recover=all
+              -Dcpp_args=-fsanitize-recover=all
+              -Db_asneeded=true
+              -Db_lundef=false
+              -Ddefault_library=static
+              --wrap-mode=forcefallback
+              -Dfluidsynth:try-static-deps=true 
+            logs: clang-uasan-logs
+            max_issues: 4
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v2
       - run:  sudo apt-get update
-      - name: Install C++ compiler and libraries
-        env:
-          VERSION_GCC: 9
-          VERSION_Clang: 8
-        run:  >
-          sudo apt-get install -y $(./scripts/list-build-dependencies.sh -m apt
-          -c ${{ matrix.conf.name }} -v $VERSION_${{ matrix.conf.name }})
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get install $(cat .github/packages/ubuntu-20.04-apt.txt)
+          sudo pip3 install --upgrade meson ninja
+
+      # Workaround frequent HTTPS-based connectivity issues
+      # https://gitlab.freedesktop.org/freedesktop/freedesktop/-/issues/407
+      - name:  Fetch the libffi subproject for Glib
+        run: ./scripts/fetch-libffi-subproject.sh
+
       - name:  Prepare compiler cache
         id:    prep-ccache
         shell: bash
@@ -119,55 +170,37 @@ jobs:
           echo "::set-output name=dir::$CCACHE_DIR"
           echo "::set-output name=today::$(date -I)"
           echo "::set-output name=yesterday::$(date --date=yesterday -I)"
+
       - uses:  actions/cache@v2
         id:    cache-ccache
         with:
           path: ${{ steps.prep-ccache.outputs.dir }}
-          key:  ccache-sanitizers-${{ matrix.conf.name }}-${{ steps.prep-ccache.outputs.today }}
-          restore-keys: |
-            ccache-sanitizers-${{ matrix.conf.name }}-${{ steps.prep-ccache.outputs.yesterday }}
+          key:          ccache-sanitizers-${{ steps.prep-ccache.outputs.today }}
+          restore-keys: ccache-sanitizers-${{ steps.prep-ccache.outputs.yesterday }}
+
+      - name:  Cache subprojects
+        uses:  actions/cache@v2
+        with:
+          path: subprojects/packagecache
+          key:  subprojects-${{ hashFiles('subprojects/*.wrap') }}
+
       - name: Log environment
         run:  ./scripts/log-env.sh
-      - name: Build and run sanitizers
-        env:
-          VERSION_GCC: 9
-          VERSION_Clang: 8
-        run: |
-          ./.github/scripts/build-and-run-sanitizers.sh \
-            ${{ matrix.conf.name }} \
-            $VERSION_${{ matrix.conf.name }} \
-            ${{ matrix.conf.sanitizers }}
+
+      - run:  meson setup -Dunit_tests=disabled ${{ matrix.conf.build_flags }} build
+
+      - run:  ninja -C build
+
+      - name: Run sanitizer test cases
+        run:  ./.github/scripts/run-sanitizers.sh build sanitizer-logs
+
       - name: Upload logs
         uses: actions/upload-artifact@v2
         with:
-          name: ${{ matrix.conf.name }}-sanitizer-logs
-          path: ${{ matrix.conf.name }}-logs
+          name: ${{ matrix.conf.logs }}
+          path: sanitizer-logs
+
       - name: Summarize issues
-        env:
-          USAN_LOG:  ${{ matrix.conf.name }}-logs/${{ matrix.conf.name }}-USAN-EnterExit.log.xz
-          TSAN_LOG:  ${{ matrix.conf.name }}-logs/${{ matrix.conf.name }}-TSAN-EnterExit.log.xz
-          UASAN_LOG: ${{ matrix.conf.name }}-logs/${{ matrix.conf.name }}-UASAN-EnterExit.log.xz
-        run: |
-          # summary
-
-          echo_bold () {
-            echo -e "\\033[1m$*\\033[0m"
-          }
-
-          if [[ -f "$USAN_LOG" ]] ; then
-            echo_bold "Undefined Behaviour sanitizer:"
-            echo
-            xzcat "$USAN_LOG" | MAX_ISSUES=${{ matrix.conf.usan }} ./scripts/count-xsan-issues.py -
-          fi
-
-          if [[ -f "$TSAN_LOG" ]] ; then
-            echo_bold "Thread sanitizer:"
-            echo
-            xzcat "$TSAN_LOG" | MAX_ISSUES=${{ matrix.conf.tsan }} ./scripts/count-xsan-issues.py -
-          fi
-
-          if [[ -f "$UASAN_LOG" ]] ; then
-            echo_bold "Undefined Behaviour + Address sanitizers:"
-            echo
-            xzcat "$UASAN_LOG" | MAX_ISSUES=${{ matrix.conf.uasan }} ./scripts/count-xsan-issues.py -
-          fi
+        run: >
+          xzcat sanitizer-logs/EnterExit.log.xz |
+          MAX_ISSUES=${{ matrix.conf.max_issues }} ./scripts/count-xsan-issues.py -

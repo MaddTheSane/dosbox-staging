@@ -1,0 +1,300 @@
+name: MSYS2 builds
+
+on: [push, pull_request]
+
+concurrency: 
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CCACHE_DIR:      "/c/ccache"
+  CCACHE_MAXSIZE:  "64M"
+  CCACHE_COMPRESS: "true"
+  BUILD_FLAGS: "-Dbuildtype=release -Db_asneeded=true --force-fallback-for=fluidsynth,mt32emu,slirp -Dtry_static_libs=fluidsynth,mt32emu,opusfile,png,slirp"
+  BUILD_RELEASE_DIR: build/release
+  BUILD_DEBUGGER_DIR: build/debugger
+
+jobs:
+  build_msys2:
+    name: ${{ matrix.conf.name }}
+    runs-on: windows-latest
+    if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier,shermp', github.actor) == false
+
+    strategy:
+      matrix:
+        conf:
+          - name: GCC (MinGW) x86
+            toolchain: ""
+            arch: i686
+            sys: MINGW32
+            max_warnings: 1
+          - name: GCC (MinGW) x86_64
+            toolchain: ""
+            arch: x86_64
+            sys: MINGW64
+            max_warnings: 1
+          # - name: Clang x86
+          #   toolchain: clang-
+          #   arch: i686
+          #   sys: CLANG32
+          #   max_warnings: 19
+          - name: Clang x86_64
+            toolchain: clang-
+            arch: x86_64
+            sys: CLANG64
+            max_warnings: 5
+          - name: GCC +tests
+            toolchain: ""
+            arch: x86_64
+            sys: MINGW64
+            run_tests: true
+            max_warnings: -0
+          - name: GCC +debugger
+            toolchain: ""
+            arch: x86_64
+            sys: MINGW64
+            max_warnings: 3
+            build_flags: -Denable_debugger=normal
+    
+    defaults:
+      run:
+        shell: msys2 {0}
+    
+    steps:
+      - name: Disable git line ending conversion
+        shell: powershell
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{matrix.conf.sys}}
+          update: true
+          install: >-
+            git
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-meson
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-gcc
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-ccache
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-pkgconf
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-python
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-ntldd
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-ncurses
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-glib2
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-fluidsynth
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-munt-mt32emu
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-libpng
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-libslirp
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-opusfile
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-SDL2
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-SDL2_net
+            mingw-w64-${{matrix.conf.toolchain}}${{matrix.conf.arch}}-zlib
+      
+      - name:  Prepare compiler cache
+        id:    prep-ccache
+        run: |
+          mkdir -p "${CCACHE_DIR}"
+          echo "::set-output name=dir::$(cygpath -w $CCACHE_DIR)"
+          echo "::set-output name=today::$(date -I)"
+          echo "::set-output name=yesterday::$(date --date=yesterday -I)"
+          echo "::set-output name=name_hash::$(echo '${{ matrix.conf.name }}' | shasum | cut -b-8)"
+
+      - uses:  actions/cache@v2
+        id:    cache-ccache
+        with:
+          path: ${{ steps.prep-ccache.outputs.dir }}
+          key:  ccache-msys2-${{ matrix.conf.sys }}-${{ steps.prep-ccache.outputs.name_hash }}-${{ steps.prep-ccache.outputs.today }}-2
+          restore-keys: |
+            ccache-msys2-${{ matrix.conf.sys }}-${{ steps.prep-ccache.outputs.name_hash }}-${{ steps.prep-ccache.outputs.yesterday }}-2
+
+      - name:  Cache subprojects
+        uses:  actions/cache@v2
+        with:
+          path: subprojects/packagecache
+          key:  subprojects-${{ hashFiles('subprojects/*.wrap') }}
+
+      - name: Log environment
+        run:  ./scripts/log-env.sh
+
+      - name: Setup build
+        run: |
+          meson setup ${{ matrix.conf.build_flags }} build
+      
+      - name: Build
+        run: |
+          set -xo pipefail
+          ninja -C build |& tee build.log
+          ccache -s
+      
+      - name: Run tests
+        if:   matrix.conf.run_tests
+        run:  meson test -C build --print-errorlogs
+
+      - name: Summarize warnings
+        if:   matrix.conf.run_tests != true
+        env:
+          MAX_WARNINGS: ${{ matrix.conf.max_warnings }}
+        run:  python ./scripts/count-warnings.py -lf build.log
+
+  build_msys2_release:
+    name: ${{ matrix.conf.name }} Release
+    runs-on: windows-latest
+    if: github.event_name != 'pull_request' || contains('dreamer,kcgen,ant-222,Wengier,shermp', github.actor) == false
+    
+    strategy:
+      matrix:
+        conf:
+          - name: GCC (MinGW) x86
+            arch: i686
+            sys: MINGW32
+          - name: GCC (MinGW) x86_64
+            arch: x86_64
+            sys: MINGW64
+    
+    defaults:
+      run:
+        shell: msys2 {0}
+   
+    steps:
+      - name: Disable git line ending conversion
+        shell: powershell
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Checkout repository and submodules
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{matrix.conf.sys}}
+          update: true
+          install: >-
+            git
+            mingw-w64-${{matrix.conf.arch}}-meson
+            mingw-w64-${{matrix.conf.arch}}-gcc
+            mingw-w64-${{matrix.conf.arch}}-ccache
+            mingw-w64-${{matrix.conf.arch}}-pkgconf
+            mingw-w64-${{matrix.conf.arch}}-ntldd
+            mingw-w64-${{matrix.conf.arch}}-ncurses
+            mingw-w64-${{matrix.conf.arch}}-glib2
+            mingw-w64-${{matrix.conf.arch}}-fluidsynth
+            mingw-w64-${{matrix.conf.arch}}-munt-mt32emu
+            mingw-w64-${{matrix.conf.arch}}-libpng
+            mingw-w64-${{matrix.conf.arch}}-libslirp
+            mingw-w64-${{matrix.conf.arch}}-opusfile
+            mingw-w64-${{matrix.conf.arch}}-SDL2
+            mingw-w64-${{matrix.conf.arch}}-SDL2_net
+            mingw-w64-${{matrix.conf.arch}}-zlib
+      
+      - name:  Prepare compiler cache
+        id:    prep-ccache
+        run: |
+          mkdir -p "${CCACHE_DIR}"
+          echo "::set-output name=dir::$(cygpath -w $CCACHE_DIR)"
+          echo "::set-output name=today::$(date -I)"
+          echo "::set-output name=yesterday::$(date --date=yesterday -I)"
+
+      - uses:  actions/cache@v2
+        id:    cache-ccache
+        with:
+          path: ${{ steps.prep-ccache.outputs.dir }}
+          key:  ccache-msys2-${{matrix.conf.sys}}-release-${{ steps.prep-ccache.outputs.today }}-2
+          restore-keys: |
+            ccache-msys2-${{matrix.conf.sys}}-release-${{ steps.prep-ccache.outputs.yesterday }}-2
+
+      - name:  Cache subprojects
+        uses:  actions/cache@v2
+        with:
+          path: subprojects/packagecache
+          key:  subprojects-${{ hashFiles('subprojects/*.wrap') }}-1
+      
+      - name: Log environment
+        run:  ./scripts/log-env.sh
+
+      - name: Inject version string
+        run: |
+          set -x
+          git fetch --prune --unshallow
+          git fetch --tags --force
+          export VERSION=$(git describe --abbrev=0)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      
+      - name: Inject package name
+        run: |
+          set -x
+          echo "PKG_RELEASE=dosbox-staging-windows-msys2-${{ matrix.conf.arch }}-${{ env.VERSION }}" >> $GITHUB_ENV
+           
+      - name: Setup release build
+        run: meson setup $BUILD_FLAGS $BUILD_RELEASE_DIR
+
+      - name: Setup debugger build
+        run: meson setup $BUILD_FLAGS -Denable_debugger=normal $BUILD_DEBUGGER_DIR
+      
+      - name: Build release
+        run: ninja -C $BUILD_RELEASE_DIR
+      
+      - name: Build debugger
+        run: ninja -C $BUILD_DEBUGGER_DIR
+            
+      - name: Package
+        run: |
+          # Package the debug build to bring in required dependencies such as ncurses
+          ./scripts/create-package.sh \
+            -p msys2 \
+            "$BUILD_DEBUGGER_DIR" \
+            "$PKG_RELEASE"
+          mv "${PKG_RELEASE}/dosbox.exe" "${PKG_RELEASE}/dosbox_with_debugger.exe"
+          install -DT "${BUILD_RELEASE_DIR}/dosbox.exe" "${PKG_RELEASE}/dosbox.exe"
+      
+      - name: Windows Defender AV Scan
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dosboxDir = "${{ github.workspace }}\${{ env.PKG_RELEASE }}"
+          & 'C:\Program Files\Windows Defender\MpCmdRun.exe' -Scan -ScanType 3 -DisableRemediation -File $dosboxDir
+          if( $LASTEXITCODE -ne 0 ) {
+              Get-Content -Path $env:TEMP\MpCmdRun.log
+              Throw "Exit $LASTEXITCODE : Windows Defender found an issue"
+          }
+
+      - name: Upload package
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.PKG_RELEASE }}
+          path: ${{ env.PKG_RELEASE }}
+
+  # This job exists only to publish an artifact with version info when building
+  # from main branch, so snapshot build version will be visible on:
+  # https://dosbox-staging.github.io/downloads/devel/
+  #
+  publish_additional_artifacts:
+    name: Publish additional artifacts
+    needs: build_msys2_release
+    runs-on: windows-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v2
+      - name: Generate changelog
+        shell: bash
+        run: |
+          set +x
+          git fetch --unshallow
+          git fetch --tags --force
+          VERSION=$(git describe --abbrev=4)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          NEWEST_TAG=$(git describe --abbrev=0)
+          git log "$NEWEST_TAG..HEAD" > changelog-$VERSION.txt
+      - uses: actions/upload-artifact@v2
+        with:
+          # Keep exactly this artifact name; it's being used to propagate
+          # version info via GitHub REST API
+          name: changelog-${{ env.VERSION }}.txt
+          path: changelog-${{ env.VERSION }}.txt

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -25,6 +25,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "compiler.h"
 #include "regs.h"
 #include "callback.h"
 #include "dos_system.h"
@@ -33,6 +34,7 @@
 #include "support.h"
 #include "bios_disk.h"
 #include "cpu.h"
+#include "string_utils.h"
 
 #define MSCDEX_LOG LOG(LOG_MISC,LOG_ERROR)
 //#define MSCDEX_LOG
@@ -60,7 +62,7 @@ static Bitu MSCDEX_Strategy_Handler(void);
 static Bitu MSCDEX_Interrupt_Handler(void);
 static MountType MSCDEX_GetMountType(const char *path);
 
-class DOS_DeviceHeader : public MemStruct {
+class DOS_DeviceHeader final : public MemStruct {
 public:
 	DOS_DeviceHeader(PhysPt ptr) { pt = ptr; }
 
@@ -202,11 +204,11 @@ private:
 	} TDriveInfo;
 
 	Bit16u            defaultBufSeg;
-	TDriveInfo        dinfo[MSCDEX_MAX_DRIVES];
-	CDROM_Interface * cdrom[MSCDEX_MAX_DRIVES];
 	
 public:
 	Bit16u rootDriverHeaderSeg;
+	TDriveInfo        dinfo[MSCDEX_MAX_DRIVES];
+	CDROM_Interface * cdrom[MSCDEX_MAX_DRIVES];
 
 	bool ChannelControl(Bit8u subUnit, TCtrl ctrl);
 	bool GetChannelControl(Bit8u subUnit, TCtrl &ctrl);
@@ -215,8 +217,8 @@ public:
 CMscdex::CMscdex()
 	: numDrives(0),
 	  defaultBufSeg(0),
-	  cdrom{nullptr},
-	  rootDriverHeaderSeg(0)
+	  rootDriverHeaderSeg(0),
+	  cdrom{nullptr}
 {
 	memset(dinfo, 0, sizeof(dinfo));
 }
@@ -308,7 +310,7 @@ int CMscdex::AddDrive(Bit16u _drive, char* physicalPath, Bit8u& subUnit)
 		break;
 	case MountType::DIRECTORY:
 		LOG(LOG_MISC,LOG_NORMAL)("MSCDEX: Mounting directory as cdrom: %s", physicalPath);
-		LOG(LOG_MISC,LOG_NORMAL)("MSCDEX: You wont have full MSCDEX support!");
+		LOG(LOG_MISC, LOG_NORMAL)("MSCDEX: You won't have full MSCDEX support!");
 		cdrom[numDrives] = new CDROM_Interface_Fake;
 		result = 5;
 		break;
@@ -693,7 +695,7 @@ bool CMscdex::GetDirectoryEntry(Bit16u drive, bool copyFlag, PhysPt pathname, Ph
 	char* searchPos = searchName;
 
 	//strip of tailing . (XCOM APOCALYPSE)
-	size_t searchlen = strlen(searchName);
+	size_t searchlen = safe_strlen(searchName);
 	if (searchlen > 1 && strcmp(searchName,".."))
 		if (searchName[searchlen-1] =='.')  searchName[searchlen-1] = 0;
 
@@ -740,7 +742,7 @@ bool CMscdex::GetDirectoryEntry(Bit16u drive, bool copyFlag, PhysPt pathname, Ph
 			char* separator = strchr(entryName,';');
 			if (separator) *separator = 0;
 			// strip trailing period
-			size_t entrylen = strlen(entryName);
+			size_t entrylen = safe_strlen(entryName);
 			if (entrylen>0 && entryName[entrylen-1]=='.') entryName[entrylen-1] = 0;
 
 			if (strcmp(entryName,useName)==0) {
@@ -908,6 +910,25 @@ bool CMscdex::GetChannelControl(Bit8u subUnit, TCtrl& ctrl) {
 
 static CMscdex* mscdex = 0;
 static PhysPt curReqheaderPtr = 0;
+
+bool GetMSCDEXDrive(unsigned char drive_letter,CDROM_Interface **_cdrom) {
+	Bitu i;
+
+	if (mscdex == NULL) {
+		if (_cdrom) *_cdrom = NULL;
+		return false;
+	}
+
+	for (i=0;i < MSCDEX_MAX_DRIVES;i++) {
+		if (mscdex->cdrom[i] == NULL) continue;
+		if (mscdex->dinfo[i].drive == drive_letter) {
+			if (_cdrom) *_cdrom = mscdex->cdrom[i];
+			return true;
+		}
+	}
+
+	return false;
+}
 
 static Bit16u MSCDEX_IOCTL_Input(PhysPt buffer,Bit8u drive_unit) {
 	Bit8u ioctl_fct = mem_readb(buffer);
@@ -1165,12 +1186,8 @@ static bool MSCDEX_Handler(void) {
 			}
 			reg_al = 0xff;
 			return true;
-		} else {
-			LOG(LOG_MISC,LOG_ERROR)("NETWORK REDIRECTOR USED!!!");
-			reg_ax = 0x49;//NETWERK SOFTWARE NOT INSTALLED
-			CALLBACK_SCF(true);
-			return true;
-		}
+		} else
+			return false;
 	}
 
 	if (reg_ah!=0x15) return false;		// not handled here, continue chain
@@ -1275,7 +1292,7 @@ static bool MSCDEX_Handler(void) {
 	return true;
 }
 
-class device_MSCDEX : public DOS_Device {
+class device_MSCDEX final : public DOS_Device {
 public:
 	device_MSCDEX() { SetName("MSCD001"); }
 	bool Read (Bit8u * /*data*/,Bit16u * /*size*/) { return false;}

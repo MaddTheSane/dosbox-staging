@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,8 +16,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
 #include "dosbox.h"
+
 #if C_FPU
 
 static void FPU_FLD_16(PhysPt addr) {
@@ -73,12 +73,12 @@ static void FPU_FNINIT_DH(void){
 
 static void FPU_FSTENV_DH(PhysPt addr){
 	if(!cpu.code.big) {
-		mem_writew(addr+0,(Bit16u)dyn_dh_fpu.cw);
+		mem_writew(addr+0,dyn_dh_fpu.cw);
 		mem_writew(addr+2,(Bit16u)dyn_dh_fpu.temp.m2);
 		mem_writew(addr+4,dyn_dh_fpu.temp.m3);
 	} else { 
 		mem_writed(addr+0,dyn_dh_fpu.temp.m1);
-		mem_writew(addr+0,(Bit16u)dyn_dh_fpu.cw);
+		mem_writew(addr+0,dyn_dh_fpu.cw);
 		mem_writed(addr+4,dyn_dh_fpu.temp.m2);
 		mem_writed(addr+8,dyn_dh_fpu.temp.m3);
 	}
@@ -101,7 +101,7 @@ static void FPU_FLDENV_DH(PhysPt addr){
 
 static void FPU_FSAVE_DH(PhysPt addr){
 	if (!cpu.code.big) {
-		mem_writew(addr,(Bit16u)dyn_dh_fpu.cw);
+		mem_writew(addr,dyn_dh_fpu.cw);
 		addr+=2;
 		mem_writeb(addr++,dyn_dh_fpu.temp_state[0x04]);
 		mem_writeb(addr++,dyn_dh_fpu.temp_state[0x05]);
@@ -117,7 +117,7 @@ static void FPU_FSAVE_DH(PhysPt addr){
 		mem_writeb(addr++,dyn_dh_fpu.temp_state[0x19]);
 		for(Bitu i=28;i<108;i++) mem_writeb(addr++,dyn_dh_fpu.temp_state[i]);
 	} else {
-		mem_writew(addr,(Bit16u)dyn_dh_fpu.cw);
+		mem_writew(addr,dyn_dh_fpu.cw);
 		addr+=2;
 		for(Bitu i=2;i<108;i++) mem_writeb(addr++,dyn_dh_fpu.temp_state[i]);
 	}
@@ -188,9 +188,6 @@ static void dh_fpu_esc1(){
 			FPU_LOG_WARN(1,true,group,sub);
 			break;
 		case 0x02: /* FST float*/
-			dh_fpu_mem(0xd9);
-			gen_call_function((void*)&FPU_FST_32,"%Drd",DREG(EA));
-			break;
 		case 0x03: /* FSTP float*/
 			dh_fpu_mem(0xd9);
 			gen_call_function((void*)&FPU_FST_32,"%Drd",DREG(EA));
@@ -273,9 +270,6 @@ static void dh_fpu_esc3(){
 			FPU_LOG_WARN(3, true, 1, sub);
 			break;
 		case 0x02:	/* FIST */
-			dh_fpu_mem(0xdb);
-			gen_call_function((void*)&FPU_FST_32,"%Drd",DREG(EA));
-			break;
 		case 0x03:	/* FISTP */
 			dh_fpu_mem(0xdb);
 			gen_call_function((void*)&FPU_FST_32,"%Drd",DREG(EA));
@@ -325,9 +319,6 @@ static void dh_fpu_esc5(){
 			FPU_LOG_WARN(5,true,1,sub);
 			break;
 		case 0x02:   /* FST double real*/
-			dh_fpu_mem(0xdd);
-			gen_call_function((void*)&FPU_FST_64,"%Drd",DREG(EA));
-			break;
 		case 0x03:	/* FSTP double real*/
 			dh_fpu_mem(0xdd);
 			gen_call_function((void*)&FPU_FST_64,"%Drd",DREG(EA));
@@ -371,13 +362,7 @@ static void dh_fpu_esc7(){
 	if (decode.modrm.val >= 0xc0) { 
 		switch (group){
 		case 0x00: /* FFREEP STi*/
-			cache_addb(0xdf);
-			cache_addb(decode.modrm.val);
-			break;
 		case 0x01: /* FXCH STi*/
-			cache_addb(0xdf);
-			cache_addb(decode.modrm.val);
-			break;
 		case 0x02:  /* FSTP STi*/
 		case 0x03:  /* FSTP STi*/
 			cache_addb(0xdf);
@@ -411,9 +396,6 @@ static void dh_fpu_esc7(){
 			FPU_LOG_WARN(7,true,1,sub);
 			break;
 		case 0x02:   /* FIST Bit16s */
-			dh_fpu_mem(0xdf);
-			gen_call_function((void*)&FPU_FST_16,"%Drd",DREG(EA));
-			break;
 		case 0x03:	/* FISTP Bit16s */
 			dh_fpu_mem(0xdf);
 			gen_call_function((void*)&FPU_FST_16,"%Drd",DREG(EA));
@@ -441,4 +423,4 @@ static void dh_fpu_esc7(){
 	}
 }
 
-#endif
+#endif // C_FPU

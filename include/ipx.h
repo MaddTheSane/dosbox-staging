@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -69,7 +69,7 @@
 #endif
 
 // For Uint8 type
-#include <SDL_net.h>
+#include "SDL_net.h"
 
 struct PackedIP {
 	Uint32 host;
@@ -121,7 +121,10 @@ public:
 	Bitu SerialNumber;
 #endif
 
-	ECBClass(Bit16u segment, Bit16u offset);
+	ECBClass(uint16_t segment, uint16_t offset);
+	ECBClass(const ECBClass &) = delete;            // prevent copying
+	ECBClass &operator=(const ECBClass &) = delete; // prevent assignment
+
 	Bit16u getSocket(void);
 
 	Bit8u getInUseFlag(void);

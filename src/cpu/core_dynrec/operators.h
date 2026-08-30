@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -85,7 +85,7 @@ static void DRC_CALL_CONV dynrec_cmp_byte(Bit8u op1,Bit8u op2) {
 }
 
 static void DRC_CALL_CONV dynrec_cmp_byte_simple(Bit8u op1,Bit8u op2) DRC_FC;
-static void DRC_CALL_CONV dynrec_cmp_byte_simple(Bit8u op1,Bit8u op2) {
+static void DRC_CALL_CONV dynrec_cmp_byte_simple([[maybe_unused]] Bit8u op1,[[maybe_unused]] Bit8u op2) {
 }
 
 static Bit8u DRC_CALL_CONV dynrec_xor_byte(Bit8u op1,Bit8u op2) DRC_FC;
@@ -139,7 +139,7 @@ static void DRC_CALL_CONV dynrec_test_byte(Bit8u op1,Bit8u op2) {
 }
 
 static void DRC_CALL_CONV dynrec_test_byte_simple(Bit8u op1,Bit8u op2) DRC_FC;
-static void DRC_CALL_CONV dynrec_test_byte_simple(Bit8u op1,Bit8u op2) {
+static void DRC_CALL_CONV dynrec_test_byte_simple([[maybe_unused]] Bit8u op1,[[maybe_unused]] Bit8u op2) {
 }
 
 static Bit16u DRC_CALL_CONV dynrec_add_word(Bit16u op1,Bit16u op2) DRC_FC;
@@ -209,7 +209,7 @@ static void DRC_CALL_CONV dynrec_cmp_word(Bit16u op1,Bit16u op2) {
 }
 
 static void DRC_CALL_CONV dynrec_cmp_word_simple(Bit16u op1,Bit16u op2) DRC_FC;
-static void DRC_CALL_CONV dynrec_cmp_word_simple(Bit16u op1,Bit16u op2) {
+static void DRC_CALL_CONV dynrec_cmp_word_simple([[maybe_unused]] Bit16u op1, [[maybe_unused]] Bit16u op2) {
 }
 
 static Bit16u DRC_CALL_CONV dynrec_xor_word(Bit16u op1,Bit16u op2) DRC_FC;
@@ -263,7 +263,7 @@ static void DRC_CALL_CONV dynrec_test_word(Bit16u op1,Bit16u op2) {
 }
 
 static void DRC_CALL_CONV dynrec_test_word_simple(Bit16u op1,Bit16u op2) DRC_FC;
-static void DRC_CALL_CONV dynrec_test_word_simple(Bit16u op1,Bit16u op2) {
+static void DRC_CALL_CONV dynrec_test_word_simple([[maybe_unused]] Bit16u op1, [[maybe_unused]] Bit16u op2) {
 }
 
 static Bit32u DRC_CALL_CONV dynrec_add_dword(Bit32u op1,Bit32u op2) DRC_FC;
@@ -333,7 +333,7 @@ static void DRC_CALL_CONV dynrec_cmp_dword(Bit32u op1,Bit32u op2) {
 }
 
 static void DRC_CALL_CONV dynrec_cmp_dword_simple(Bit32u op1,Bit32u op2) DRC_FC;
-static void DRC_CALL_CONV dynrec_cmp_dword_simple(Bit32u op1,Bit32u op2) {
+static void DRC_CALL_CONV dynrec_cmp_dword_simple([[maybe_unused]] Bit32u op1, [[maybe_unused]] Bit32u op2) {
 }
 
 static Bit32u DRC_CALL_CONV dynrec_xor_dword(Bit32u op1,Bit32u op2) DRC_FC;
@@ -387,7 +387,7 @@ static void DRC_CALL_CONV dynrec_test_dword(Bit32u op1,Bit32u op2) {
 }
 
 static void DRC_CALL_CONV dynrec_test_dword_simple(Bit32u op1,Bit32u op2) DRC_FC;
-static void DRC_CALL_CONV dynrec_test_dword_simple(Bit32u op1,Bit32u op2) {
+static void DRC_CALL_CONV dynrec_test_dword_simple([[maybe_unused]] Bit32u op1, [[maybe_unused]] Bit32u op2) {
 }
 
 
@@ -796,9 +796,10 @@ static Bit8u DRC_CALL_CONV dynrec_rcr_byte(Bit8u op1,Bit8u op2) {
 		Bit8u cf=(Bit8u)FillFlags()&0x1;
 		lf_var1b=op1;
 		lf_var2b=op2%9;
-	 	lf_resb=(lf_var1b >> lf_var2b) | (cf << (8-lf_var2b)) | (lf_var1b << (9-lf_var2b));					\
-		SETFLAGBIT(CF,(lf_var1b >> (lf_var2b - 1)) & 1);
-		SETFLAGBIT(OF,(lf_resb ^ (lf_resb<<1)) & 0x80);
+		lf_resb = (lf_var1b >> lf_var2b) | (cf << (8 - lf_var2b)) |
+		          (lf_var1b << (9 - lf_var2b));
+		SETFLAGBIT(CF, (lf_var1b >> lf_var2b_minus_one()) & 1);
+		SETFLAGBIT(OF, (lf_resb ^ (lf_resb << 1)) & 0x80);
 		return lf_resb;
 	} else return op1;
 }
@@ -928,7 +929,7 @@ static Bit16u DRC_CALL_CONV dynrec_rcr_word(Bit16u op1,Bit8u op2) {
 		lf_var1w=op1;
 		lf_var2b=op2%17;
 	 	lf_resw=(lf_var1w >> lf_var2b) | (cf << (16-lf_var2b)) | (lf_var1w << (17-lf_var2b));
-		SETFLAGBIT(CF,(lf_var1w >> (lf_var2b - 1)) & 1);
+		SETFLAGBIT(CF, (lf_var1w >> lf_var2b_minus_one()) & 1);
 		SETFLAGBIT(OF,(lf_resw ^ (lf_resw<<1)) & 0x8000);
 		return lf_resw;
 	} else return op1;
@@ -1052,7 +1053,7 @@ static Bit32u DRC_CALL_CONV dynrec_rcr_dword(Bit32u op1,Bit8u op2) {
 		} else {
  			lf_resd=(lf_var1d >> lf_var2b) | (cf << (32-lf_var2b)) | (lf_var1d << (33-lf_var2b));
 		}
-		SETFLAGBIT(CF,(lf_var1d >> (lf_var2b - 1)) & 1);
+		SETFLAGBIT(CF, (lf_var1d >> lf_var2b_minus_one()) & 1);
 		SETFLAGBIT(OF,(lf_resd ^ (lf_resd<<1)) & 0x80000000);
 		return lf_resd;
 	} else return op1;
@@ -1298,20 +1299,20 @@ static Bit32u DRC_CALL_CONV dynrec_dshr_dword_simple(Bit32u op1,Bit32u op2,Bit8u
 
 static void dyn_dpshift_word_gencall(bool left) {
 	if (left) {
-		DRC_PTR_SIZE_IM proc_addr=gen_call_function_R3((void*)&dynrec_dshl_word,FC_OP3);
+		const Bit8u* proc_addr=gen_call_function_R3((void*)&dynrec_dshl_word,FC_OP3);
 		InvalidateFlagsPartially((void*)&dynrec_dshl_word_simple,proc_addr,t_DSHLw);
 	} else {
-		DRC_PTR_SIZE_IM proc_addr=gen_call_function_R3((void*)&dynrec_dshr_word,FC_OP3);
+		const Bit8u* proc_addr=gen_call_function_R3((void*)&dynrec_dshr_word,FC_OP3);
 		InvalidateFlagsPartially((void*)&dynrec_dshr_word_simple,proc_addr,t_DSHRw);
 	}
 }
 
 static void dyn_dpshift_dword_gencall(bool left) {
 	if (left) {
-		DRC_PTR_SIZE_IM proc_addr=gen_call_function_R3((void*)&dynrec_dshl_dword,FC_OP3);
+		const Bit8u* proc_addr=gen_call_function_R3((void*)&dynrec_dshl_dword,FC_OP3);
 		InvalidateFlagsPartially((void*)&dynrec_dshl_dword_simple,proc_addr,t_DSHLd);
 	} else {
-		DRC_PTR_SIZE_IM proc_addr=gen_call_function_R3((void*)&dynrec_dshr_dword,FC_OP3);
+		const Bit8u* proc_addr=gen_call_function_R3((void*)&dynrec_dshr_dword,FC_OP3);
 		InvalidateFlagsPartially((void*)&dynrec_dshr_dword_simple,proc_addr,t_DSHRd);
 	}
 }
@@ -1993,4 +1994,46 @@ static Bit32u DRC_CALL_CONV dynrec_pop_dword(void) {
 	Bit32u val=mem_readd(SegPhys(ss) + (reg_esp & cpu.stack.mask));
 	reg_esp=(reg_esp&cpu.stack.notmask)|((reg_esp+4)&cpu.stack.mask);
 	return val;
+}
+
+static bool DRC_CALL_CONV dynrec_io_writeB(Bitu port) DRC_FC;
+static bool DRC_CALL_CONV dynrec_io_writeB(Bitu port) {
+	bool ex = CPU_IO_Exception(port,1);
+	if (!ex) IO_WriteB(port,reg_al);
+	return ex;
+}
+
+static bool DRC_CALL_CONV dynrec_io_writeW(Bitu port) DRC_FC;
+static bool DRC_CALL_CONV dynrec_io_writeW(Bitu port) {
+	bool ex = CPU_IO_Exception(port,2);
+	if (!ex) IO_WriteW(port,reg_ax);
+	return ex;
+}
+
+static bool DRC_CALL_CONV dynrec_io_writeD(Bitu port) DRC_FC;
+static bool DRC_CALL_CONV dynrec_io_writeD(Bitu port) {
+	bool ex = CPU_IO_Exception(port,4);
+	if (!ex) IO_WriteD(port,reg_eax);
+	return ex;
+}
+
+static bool DRC_CALL_CONV dynrec_io_readB(Bitu port) DRC_FC;
+static bool DRC_CALL_CONV dynrec_io_readB(Bitu port) {
+	bool ex = CPU_IO_Exception(port,1);
+	if (!ex) reg_al = (Bit8u)IO_ReadB(port);
+	return ex;
+}
+
+static bool DRC_CALL_CONV dynrec_io_readW(Bitu port) DRC_FC;
+static bool DRC_CALL_CONV dynrec_io_readW(Bitu port) {
+	bool ex = CPU_IO_Exception(port,2);
+	if (!ex) reg_ax = (Bit16u)IO_ReadW(port);
+	return ex;
+}
+
+static bool DRC_CALL_CONV dynrec_io_readD(Bitu port) DRC_FC;
+static bool DRC_CALL_CONV dynrec_io_readD(Bitu port) {
+	bool ex = CPU_IO_Exception(port,4);
+	if (!ex) reg_eax = (Bit32u)IO_ReadD(port);
+	return ex;
 }

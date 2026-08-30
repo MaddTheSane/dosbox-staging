@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,14 +16,13 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "dos_inc.h"
 
-#include "dosbox.h"
+#include <list>
+
 #include "callback.h"
 #include "mem.h"
 #include "regs.h"
-#include "dos_inc.h"
-#include <list>
-
 
 static Bitu call_int2f,call_int2a;
 
@@ -187,6 +186,15 @@ static bool DOS_MultiplexFunctions(void) {
 	case 0x1689:	/*  Kernel IDLE CALL */
 	case 0x168f:	/*  Close awareness crap */
 	   /* Removing warning */
+		return true;
+	case 0x1a00: // ANSI.SYS installation check (MS-DOS 4.0 or higher)
+		/* Our console device emulates ANSI.SYS, so respond like it's
+		   installed.
+		   See: http://www.delorie.com/djgpp/doc/rbinter/id/71/46.html
+		   Reported behavior was confirmed with ANSI.SYS loaded on a
+		   Windows 95 MS-DOS boot disk, result AX=1AFF
+		*/
+		reg_al = 0xFF;
 		return true;
 	case 0x4a01:	/* Query free hma space */
 	case 0x4a02:	/* ALLOCATE HMA SPACE */

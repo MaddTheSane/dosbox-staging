@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -24,15 +24,20 @@
 #define gfx(blah) vga.gfx.blah
 static bool index9warned=false;
 
-static void write_p3ce(Bitu port,Bitu val,Bitu iolen) {
-	gfx(index)=val & 0x0f;
+static void write_p3ce(io_port_t, io_val_t value, io_width_t)
+{
+	const auto val = check_cast<uint8_t>(value);
+	gfx(index) = val & 0x0f;
 }
 
-static Bitu read_p3ce(Bitu port,Bitu iolen) {
+static uint8_t read_p3ce(io_port_t, io_width_t)
+{
 	return gfx(index);
 }
 
-static void write_p3cf(Bitu port,Bitu val,Bitu iolen) {
+static void write_p3cf(io_port_t, io_val_t value, io_width_t)
+{
+	const auto val = check_cast<uint8_t>(value);
 	switch (gfx(index)) {
 	case 0:	/* Set/Reset Register */
 		gfx(set_reset)=val & 0x0f;
@@ -177,7 +182,7 @@ static void write_p3cf(Bitu port,Bitu val,Bitu iolen) {
 		break;
 	default:
 		if (svga.write_p3cf) {
-			svga.write_p3cf(gfx(index), val, iolen);
+			svga.write_p3cf(gfx(index), val, io_width_t::byte);
 			break;
 		}
 		if (gfx(index) == 9 && !index9warned) {
@@ -190,7 +195,8 @@ static void write_p3cf(Bitu port,Bitu val,Bitu iolen) {
 	}
 }
 
-static Bitu read_p3cf(Bitu port,Bitu iolen) {
+static uint8_t read_p3cf(io_port_t port, io_width_t)
+{
 	switch (gfx(index)) {
 	case 0:	/* Set/Reset Register */
 		return gfx(set_reset);
@@ -212,22 +218,20 @@ static Bitu read_p3cf(Bitu port,Bitu iolen) {
 		return gfx(bit_mask);
 	default:
 		if (svga.read_p3cf)
-			return svga.read_p3cf(gfx(index), iolen);
+			return svga.read_p3cf(gfx(index), io_width_t::byte);
 		LOG(LOG_VGAMISC,LOG_NORMAL)("Reading from illegal index %2X in port %4X",static_cast<Bit32u>(gfx(index)),port);
 		break;
 	}
 	return 0;	/* Compiler happy */
 }
 
-
-
 void VGA_SetupGFX(void) {
 	if (IS_EGAVGA_ARCH) {
-		IO_RegisterWriteHandler(0x3ce,write_p3ce,IO_MB);
-		IO_RegisterWriteHandler(0x3cf,write_p3cf,IO_MB);
+		IO_RegisterWriteHandler(0x3ce, write_p3ce, io_width_t::byte);
+		IO_RegisterWriteHandler(0x3cf, write_p3cf, io_width_t::byte);
 		if (IS_VGA_ARCH) {
-			IO_RegisterReadHandler(0x3ce,read_p3ce,IO_MB);
-			IO_RegisterReadHandler(0x3cf,read_p3cf,IO_MB);
+			IO_RegisterReadHandler(0x3ce, read_p3ce, io_width_t::byte);
+			IO_RegisterReadHandler(0x3cf, read_p3cf, io_width_t::byte);
 		}
 	}
 }

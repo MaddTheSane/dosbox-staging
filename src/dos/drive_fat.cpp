@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,19 +16,19 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "drives.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#include "dosbox.h"
-#include "dos_inc.h"
-#include "drives.h"
-#include "support.h"
-#include "cross.h"
-#include "bios.h"
 #include "bios_disk.h"
+#include "bios.h"
+#include "cross.h"
+#include "dos_inc.h"
+#include "string_utils.h"
+#include "support.h"
 
 #define IMGTYPE_FLOPPY 0
 #define IMGTYPE_ISO    1
@@ -38,7 +38,7 @@
 #define FAT16		   1
 #define FAT32		   2
 
-class fatFile : public DOS_File {
+class fatFile final : public DOS_File {
 public:
 	fatFile(const char* name, Bit32u startCluster, Bit32u fileLen, fatDrive *useDrive);
 	fatFile(const fatFile&) = delete; // prevent copy
@@ -426,7 +426,10 @@ bool fatDrive::getEntryName(char *fullname, char *entname) {
 		findFile = findDir;
 		findDir = strtok(NULL,"\\");
 	}
-	strncpy(entname, findFile, DOS_NAMELENGTH_ASCII);
+
+	assert(entname);
+	entname[0] = '\0';
+	strncat(entname, findFile, DOS_NAMELENGTH_ASCII - 1);
 	return true;
 }
 
@@ -584,7 +587,7 @@ Bit32u fatDrive::getAbsoluteSectFromChain(Bit32u startClustNum, Bit32u logicalSe
 			//LOG_MSG("End of cluster chain reached before end of logical sector seek!");
 			if (skipClust == 1 && fattype == FAT12) {
 				//break;
-				LOG(LOG_DOSMISC,LOG_ERROR)("End of cluster chain reached, but maybe good afterall ?");
+				LOG(LOG_DOSMISC, LOG_ERROR)("End of cluster chain reached, but maybe good after all ?");
 			}
 			return 0;
 		}
@@ -709,11 +712,13 @@ fatDrive::fatDrive(const char *sysFilename,
                    Bit32u cylsector,
                    Bit32u headscyl,
                    Bit32u cylinders,
-                   Bit32u startSector)
+                   Bit32u startSector,
+                   bool roflag)
 	: loadedDisk(nullptr),
 	  created_successfully(true),
 	  bootbuffer{{0}, {0}, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0}, 0, 0},
 	  absolute(false),
+	  readonly(roflag),
 	  fattype(0),
 	  CountOfClusters(0),
 	  partSectOff(0),
@@ -723,6 +728,9 @@ fatDrive::fatDrive(const char *sysFilename,
 	  fatSectBuffer{0},
 	  curFatSect(0)
 {
+	//--Added 2009-10-25 by Alun Bestor to allow Boxer to track the system path for DOSBox drives
+	safe_strcpy(systempath, sysFilename);
+	//--End of modifications
 	FILE *diskfile;
 	Bit32u filesize;
 	bool is_hdd;
@@ -733,12 +741,10 @@ fatDrive::fatDrive(const char *sysFilename,
 		imgDTAPtr = RealMake(imgDTASeg, 0);
 		imgDTA    = new DOS_DTA(imgDTAPtr);
 	}
-
-	diskfile = fopen_wrap(sysFilename, "rb+");
-	if (!diskfile) {
-		created_successfully = false;
+	diskfile = fopen_wrap_ro_fallback(sysFilename, readonly);
+	created_successfully = (diskfile != nullptr);
+	if (!created_successfully)
 		return;
-	}
 	fseek(diskfile, 0L, SEEK_END);
 	filesize = (Bit32u)ftell(diskfile) / 1024L;
 	is_hdd = (filesize > 2880);
@@ -752,7 +758,15 @@ fatDrive::fatDrive(const char *sysFilename,
 
 		loadedDisk->Read_Sector(0,0,1,&mbrData);
 
-		if(mbrData.magic1!= 0x55 ||	mbrData.magic2!= 0xaa) LOG_MSG("Possibly invalid partition table in disk image.");
+		if(mbrData.magic1!= 0x55 ||	mbrData.magic2!= 0xaa)
+        {
+            LOG_MSG("Possibly invalid partition table in disk image.");
+			
+            //--Added 2011-07-22 by Alun Bestor to bail out of reading invalid images
+            created_successfully = false;
+            return;
+            //--End of modifications
+        }
 
 		startSector = 63;
 		int m;
@@ -851,6 +865,11 @@ fatDrive::fatDrive(const char *sysFilename,
 	if ((bootbuffer.magic1 != 0x55) || (bootbuffer.magic2 != 0xaa)) {
 		/* Not a FAT filesystem */
 		LOG_MSG("Loaded image has no valid magicnumbers at the end!");
+		
+        //--Added 2011-07-22 by Alun Bestor to bail out of reading invalid images
+		created_successfully = false;
+		return;
+        //--End of modifications
 	}
 
 	/* Sanity checks */
@@ -968,6 +987,10 @@ Bit8u fatDrive::GetMediaByte(void) {
 
 // name can be a full DOS path with filename, up-to DOS_PATHLENGTH in length
 bool fatDrive::FileCreate(DOS_File **file, char *name, Bit16u attributes) {
+	if (readonly) {
+		DOS_SetError(DOSERR_ACCESS_DENIED);
+		return false;
+	}
 	direntry fileEntry;
 	Bit32u dirClust, subEntry;
 	char dirName[DOS_NAMELENGTH_ASCII];
@@ -1014,8 +1037,10 @@ bool fatDrive::FileCreate(DOS_File **file, char *name, Bit16u attributes) {
 bool fatDrive::FileExists(const char *name) {
 	direntry fileEntry;
 	Bit32u dummy1, dummy2;
-	if(!getFileDirEntry(name, &fileEntry, &dummy1, &dummy2)) return false;
-	return true;
+	Bit16u save_errorcode = dos.errorcode;
+	bool found = getFileDirEntry(name, &fileEntry, &dummy1, &dummy2);
+	dos.errorcode = save_errorcode;
+	return found;
 }
 
 bool fatDrive::FileOpen(DOS_File **file, char *name, Bit32u flags) {
@@ -1039,11 +1064,29 @@ bool fatDrive::FileStat(const char * /*name*/, FileStat_Block *const /*stat_bloc
 }
 
 bool fatDrive::FileUnlink(char * name) {
+	if (readonly) {
+		DOS_SetError(DOSERR_ACCESS_DENIED);
+		return false;
+	}
 	direntry fileEntry;
 	Bit32u dirClust, subEntry;
 
-	if(!getFileDirEntry(name, &fileEntry, &dirClust, &subEntry)) return false;
+	if(!getFileDirEntry(name, &fileEntry, &dirClust, &subEntry)) {
+		DOS_SetError(DOSERR_FILE_NOT_FOUND);
+		return false;
+	}
+/*
+	Technically correct, but maybe an unwanted obstruction, so inactive for now.
 
+	if(fileEntry.attrib & (DOS_ATTR_SYSTEM | DOS_ATTR_HIDDEN)) {
+		DOS_SetError(DOSERR_FILE_NOT_FOUND);
+		return false;
+	}
+	if(fileEntry.attrib & DOS_ATTR_READ_ONLY) {
+		DOS_SetError(DOSERR_ACCESS_DENIED);
+		return false;
+	}
+*/
 	fileEntry.entryname[0] = 0xe5;
 	directoryChange(dirClust, &fileEntry, subEntry);
 
@@ -1078,7 +1121,11 @@ bool fatDrive::FindFirst(char *_dir, DOS_DTA &dta,bool /*fcb_findfirst*/) {
 }
 
 char* removeTrailingSpaces(char* str, const size_t max_len) {
-	char* end = str + strnlen(str, max_len);
+	const auto str_len = strnlen(str, max_len);
+	if (str_len == 0)
+		return str;
+
+	char* end = str + str_len;
 	while((*--end == ' ') && (end > str)) {
 		/* do nothing; break on while criteria */
 	}
@@ -1358,6 +1405,10 @@ void fatDrive::zeroOutCluster(Bit32u clustNumber) {
 }
 
 bool fatDrive::MakeDir(char *dir) {
+	if (readonly) {
+		DOS_SetError(DOSERR_ACCESS_DENIED);
+		return false;
+	}
 	Bit32u dummyClust, dirClust;
 	direntry tmpentry;
 	char dirName[DOS_NAMELENGTH_ASCII];
@@ -1410,6 +1461,10 @@ bool fatDrive::MakeDir(char *dir) {
 }
 
 bool fatDrive::RemoveDir(char *dir) {
+	if (readonly) {
+		DOS_SetError(DOSERR_ACCESS_DENIED);
+		return false;
+	}
 	Bit32u dummyClust, dirClust;
 	direntry tmpentry;
 	char dirName[DOS_NAMELENGTH_ASCII];
@@ -1463,6 +1518,10 @@ bool fatDrive::RemoveDir(char *dir) {
 }
 
 bool fatDrive::Rename(char * oldname, char * newname) {
+	if (readonly) {
+		DOS_SetError(DOSERR_ACCESS_DENIED);
+		return false;
+	}
 	direntry fileEntry1;
 	Bit32u dirClust1, subEntry1;
 	if(!getFileDirEntry(oldname, &fileEntry1, &dirClust1, &subEntry1)) return false;
@@ -1505,4 +1564,3 @@ bool fatDrive::TestDir(char *dir) {
 	Bit32u dummyClust;
 	return getDirClustNum(dir, &dummyClust, false);
 }
-

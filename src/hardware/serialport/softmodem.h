@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,15 +16,16 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
 #ifndef DOSBOX_SERIALMODEM_H
 #define DOSBOX_SERIALMODEM_H
+
+#include "dosbox.h"
+
+#if C_MODEM
 
 #include <vector>
 #include <memory>
 
-#include "dosbox.h"
-#if C_MODEM
 #include "serialport.h"
 #include "misc_util.h"
 
@@ -40,6 +41,10 @@
 #define MODEM_RX_POLLING SERIAL_BASE_EVENT_COUNT + 2
 #define MODEM_RING_EVENT SERIAL_BASE_EVENT_COUNT + 3
 #define SERIAL_MODEM_EVENT_COUNT SERIAL_BASE_EVENT_COUNT+3
+
+#define MODEM_TICKRATE 1000 // Ticks per second
+#define MODEM_TICKTIME (1000 / MODEM_TICKRATE) // Tick interval in milliseconds
+#define MODEM_RINGINTERVAL (3000 / MODEM_TICKTIME)
 
 
 enum ResTypes {
@@ -58,6 +63,7 @@ enum ResTypes {
 #define TEL_SERVER 1
 
 bool MODEM_ReadPhonebook(const std::string &filename);
+void MODEM_ClearPhonebook();
 
 class CFifo {
 public:
@@ -168,7 +174,7 @@ private:
 #define MREG_DTR_DELAY 25
 
 
-class CSerialModem : public CSerial {
+class CSerialModem final : public CSerial {
 public:
 	CSerialModem(const uint8_t port_idx, CommandLine *cmd);
 	~CSerialModem();
@@ -191,7 +197,7 @@ public:
 
 	void TelnetEmulation(uint8_t *data, uint32_t size);
 
-	//TODO
+	void Echo(uint8_t ch);
 	void Timer2();
 	void handleUpperEvent(uint16_t type);
 
@@ -211,14 +217,19 @@ public:
 	std::unique_ptr<CFifo> tqueue;
 
 protected:
-	char cmdbuf[255] = {0};
+	// The AT command line can consist of a 99-character command sequence
+	// including the AT prefix followed by "D<phone/hostname>", where the
+	// hostname can reach a length of up to 253 characters.
+	// AT<97-chars>D<253-chars> is a string of up to 353 characters plus a
+	// null.
+	char cmdbuf[354] = {0};
 	bool commandmode = false; // true: interpret input as commands
 	bool echo = false;        // local echo on or off
 	bool oldDTRstate = false;
 	bool ringing = false;
 	bool numericresponse = false; // true: send control response as number.
 	                              // false: send text (i.e. NO DIALTONE)
-	bool telnetmode = false; // Default to direct null modem connection;
+	bool telnet_mode = false; // Default to direct null modem connection;
 	                         // Telnet mode interprets IAC
 	bool connected = false;
 	uint32_t doresponse = 0;
@@ -234,9 +245,10 @@ protected:
 	uint8_t tmpbuf[MODEM_BUFFER_QUEUE_SIZE] = {0};
 	uint16_t listenport = 23; // 23 is the default telnet TCP/IP port
 	uint8_t reg[SREGS] = {0};
-	std::unique_ptr<TCPServerSocket> serversocket = nullptr;
-	std::unique_ptr<TCPClientSocket> clientsocket = nullptr;
-	std::unique_ptr<TCPClientSocket> waitingclientsocket = nullptr;
+	SocketTypesE socketType = SOCKET_TYPE_TCP;
+	std::unique_ptr<NETServerSocket> serversocket = nullptr;
+	std::unique_ptr<NETClientSocket> clientsocket = nullptr;
+	std::unique_ptr<NETClientSocket> waitingclientsocket = nullptr;
 
 	struct {
 		bool binary[2] = {false};
@@ -250,12 +262,14 @@ protected:
 
 	struct {
 		bool active = false;
-		double f1 = 0.0f;
-		double f2 = 0.0f;
+		double f1 = 0.0;
+		double f2 = 0.0;
 		uint32_t len = 0;
 		uint32_t pos = 0;
 		char str[256] = {0};
 	} dial;
 };
-#endif
+
+#endif // C_MODEM
+
 #endif

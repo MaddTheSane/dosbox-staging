@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,12 +16,12 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "cpu.h"
 
 #include <assert.h>
 #include <sstream>
 #include <stddef.h>
-#include "dosbox.h"
-#include "cpu.h"
+
 #include "memory.h"
 #include "debug.h"
 #include "mapper.h"
@@ -31,7 +31,6 @@
 #include "lazyflags.h"
 #include "support.h"
 
-Bitu DEBUG_EnableDebugger(void);
 extern void GFX_SetTitle(Bit32s cycles ,int frameskip,bool paused);
 
 #if 1
@@ -44,9 +43,9 @@ extern void GFX_SetTitle(Bit32s cycles ,int frameskip,bool paused);
 #endif
 #endif
 
-CPU_Regs cpu_regs;
-CPUBlock cpu;
-Segments Segs;
+CPU_Regs cpu_regs = {};
+CPUBlock cpu = {};
+Segments Segs = {};
 
 Bit32s CPU_Cycles = 0;
 Bit32s CPU_CycleLeft = 3000;
@@ -60,6 +59,7 @@ Bit64s CPU_IODelayRemoved = 0;
 CPU_Decoder * cpudecoder;
 bool CPU_CycleAutoAdjust = false;
 bool CPU_SkipCycleAutoAdjust = false;
+bool CPU_AllowSpeedMods = false;
 Bitu CPU_AutoDetermineMode = 0;
 
 Bitu CPU_ArchitectureType = CPU_ARCHTYPE_MIXED;
@@ -168,15 +168,29 @@ PhysPt SelBase(Bitu sel) {
 	}
 }
 
-
-void CPU_SetFlags(Bitu word,Bitu mask) {
-	mask|=CPU_extflags_toggle;	// ID-flag and AC-flag can be toggled on CPUID-supporting CPUs
+void CPU_SetFlags(const uint32_t word, uint32_t mask)
+{
+	mask |= CPU_extflags_toggle; // ID-flag and AC-flag can be toggled on
+	                             // CPUID-supporting CPUs
 	reg_flags=(reg_flags & ~mask)|(word & mask)|2;
 	cpu.direction=1-((reg_flags & FLAG_DF) >> 9);
 }
 
-bool CPU_PrepareException(Bitu which,Bitu error) {
-	cpu.exception.which=which;
+void CPU_SetFlagsd(const uint32_t word)
+{
+	const auto mask = cpu.cpl ? FMASK_NORMAL : FMASK_ALL;
+	CPU_SetFlags(word, mask);
+}
+
+void CPU_SetFlagsw(const uint32_t word)
+{
+	const auto mask = (cpu.cpl ? FMASK_NORMAL : FMASK_ALL) & 0xffff;
+	CPU_SetFlags(word, mask);
+}
+
+bool CPU_PrepareException(Bitu which, Bitu error)
+{
+	cpu.exception.which = which;
 	cpu.exception.error=error;
 	return true;
 }
@@ -382,14 +396,18 @@ bool CPU_SwitchTask(Bitu new_tss_selector,TSwitchType tstype,Bitu old_eip) {
 		new_ldt=mem_readw(new_tss.base+offsetof(TSS_32,ldt));
 	} else {
 		E_Exit("286 task switch");
+		/*
+		Dead code after exit
+		--------------------
 		new_cr3=0;
 		new_eip=0;
 		new_eflags=0;
 		new_eax=0;	new_ecx=0;	new_edx=0;	new_ebx=0;
 		new_esp=0;	new_ebp=0;	new_edi=0;	new_esi=0;
 
-		new_es=0;	new_cs=0;	new_ss=0;	new_ds=0;	new_fs=0;	new_gs=0;
-		new_ldt=0;
+		new_es=0;	new_cs=0;	new_ss=0;	new_ds=0;
+		new_fs=0;	new_gs=0; new_ldt=0;
+		*/
 	}
 
 	/* Check if we need to clear busy bit of old TASK */
@@ -426,11 +444,9 @@ bool CPU_SwitchTask(Bitu new_tss_selector,TSwitchType tstype,Bitu old_eip) {
 
 	/* Setup a back link to the old TSS in new TSS */
 	if (tstype==TSwitch_CALL_INT) {
-		if (new_tss.is386) {
-			mem_writed(new_tss.base+offsetof(TSS_32,back),cpu_tss.selector);
-		} else {
-			mem_writew(new_tss.base+offsetof(TSS_16,back),cpu_tss.selector);
-		}
+		assert(new_tss.is386);
+		mem_writed(new_tss.base + offsetof(TSS_32, back), cpu_tss.selector);
+
 		/* And make the new task's eflag have the nested task bit */
 		new_eflags|=FLAG_NT;
 	}
@@ -455,22 +471,17 @@ bool CPU_SwitchTask(Bitu new_tss_selector,TSwitchType tstype,Bitu old_eip) {
 		PAGING_SetDirBase(new_cr3);
 
 		/* Load new context */
-		if (new_tss.is386) {
-			reg_eip=new_eip;
-			CPU_SetFlags(new_eflags,FMASK_ALL | FLAG_VM);
-			reg_eax=new_eax;
-			reg_ecx=new_ecx;
-			reg_edx=new_edx;
-			reg_ebx=new_ebx;
-			reg_esp=new_esp;
-			reg_ebp=new_ebp;
-			reg_edi=new_edi;
-			reg_esi=new_esi;
-
-//			new_cs=mem_readw(new_tss.base+offsetof(TSS_32,cs));
-		} else {
-			E_Exit("286 task switch");
-		}
+		assert(new_tss.is386);
+		reg_eip = new_eip;
+		CPU_SetFlags(new_eflags, FMASK_ALL | FLAG_VM);
+		reg_eax = new_eax;
+		reg_ecx = new_ecx;
+		reg_edx = new_edx;
+		reg_ebx = new_ebx;
+		reg_esp = new_esp;
+		reg_ebp = new_ebp;
+		reg_edi = new_edi;
+		reg_esi = new_esi;
 	}
 	/* Load the new selectors */
 	if (reg_flags & FLAG_VM) {
@@ -500,8 +511,7 @@ doconforming:
 			cpu.code.big=cs_desc.Big()>0;
 			Segs.val[cs]=new_cs;
 			break;
-		default:
-			E_Exit("Task switch CS Type %" sBitfs(u),cs_desc.Type());
+		default: E_Exit("Task switch CS Type 0x%x", cs_desc.Type());
 		}
 	}
 	CPU_SetSegGeneral(es,new_es);
@@ -538,6 +548,11 @@ doexception:
 	return CPU_PrepareException(EXCEPTION_GP,0);
 }
 
+void CPU_DebugException(Bit32u triggers,Bitu oldeip) {
+	cpu.drx[6] = (cpu.drx[6] & 0xFFFF1FF0) | triggers;
+	CPU_Interrupt(EXCEPTION_DB,CPU_INT_EXCEPTION,oldeip);
+}
+
 void CPU_Exception(Bitu which,Bitu error ) {
 //	LOG_MSG("Exception %d error %x",which,error);
 	cpu.exception.error=error;
@@ -546,6 +561,10 @@ void CPU_Exception(Bitu which,Bitu error ) {
 
 Bit8u lastint;
 void CPU_Interrupt(Bitu num,Bitu type,Bitu oldeip) {
+	if (num == EXCEPTION_DB && (type&CPU_INT_EXCEPTION) == 0) {
+		CPU_DebugException(0,oldeip); // DR6 bits need updating
+		return;
+	}
 	lastint=num;
 	FillFlags();
 #if C_DEBUG
@@ -591,7 +610,7 @@ void CPU_Interrupt(Bitu num,Bitu type,Bitu oldeip) {
 		Descriptor gate;
 		if (!cpu.idt.GetDescriptor(num<<3,gate)) {
 			// zone66
-			CPU_Exception(EXCEPTION_GP,num*8+2+(type&CPU_INT_SOFTWARE)?0:1);
+			CPU_Exception(EXCEPTION_GP,num*8+2+((type&CPU_INT_SOFTWARE)?0:1));
 			return;
 		}
 
@@ -608,7 +627,7 @@ void CPU_Interrupt(Bitu num,Bitu type,Bitu oldeip) {
 			{
 				CPU_CHECK_COND(!gate.saved.seg.p,
 					"INT:Gate segment not present",
-					EXCEPTION_NP,num*8+2+(type&CPU_INT_SOFTWARE)?0:1)
+					EXCEPTION_NP,num*8+2+((type&CPU_INT_SOFTWARE)?0:1))
 
 				Descriptor cs_desc;
 				Bitu gate_sel=gate.GetSelector();
@@ -618,12 +637,12 @@ void CPU_Interrupt(Bitu num,Bitu type,Bitu oldeip) {
 					EXCEPTION_GP,(type&CPU_INT_SOFTWARE)?0:1)
 				CPU_CHECK_COND(!cpu.gdt.GetDescriptor(gate_sel,cs_desc),
 					"INT:Gate with CS beyond limit",
-					EXCEPTION_GP,(gate_sel & 0xfffc)+(type&CPU_INT_SOFTWARE)?0:1)
+					EXCEPTION_GP,(gate_sel & 0xfffc)+((type&CPU_INT_SOFTWARE)?0:1))
 
 				Bitu cs_dpl=cs_desc.DPL();
 				CPU_CHECK_COND(cs_dpl>cpu.cpl,
 					"Interrupt to higher privilege",
-					EXCEPTION_GP,(gate_sel & 0xfffc)+(type&CPU_INT_SOFTWARE)?0:1)
+					EXCEPTION_GP,(gate_sel & 0xfffc)+((type&CPU_INT_SOFTWARE)?0:1))
 				switch (cs_desc.Type()) {
 				case DESC_CODE_N_NC_A:	case DESC_CODE_N_NC_NA:
 				case DESC_CODE_R_NC_A:	case DESC_CODE_R_NC_NA:
@@ -631,7 +650,7 @@ void CPU_Interrupt(Bitu num,Bitu type,Bitu oldeip) {
 						/* Prepare for gate to inner level */
 						CPU_CHECK_COND(!cs_desc.saved.seg.p,
 							"INT:Inner level:CS segment not present",
-							EXCEPTION_NP,(gate_sel & 0xfffc)+(type&CPU_INT_SOFTWARE)?0:1)
+							EXCEPTION_NP,(gate_sel & 0xfffc)+((type&CPU_INT_SOFTWARE)?0:1))
 						CPU_CHECK_COND((reg_flags & FLAG_VM) && (cs_dpl!=0),
 							"V86 interrupt calling codesegment with DPL>0",
 							EXCEPTION_GP,gate_sel & 0xfffc)
@@ -647,10 +666,10 @@ void CPU_Interrupt(Bitu num,Bitu type,Bitu oldeip) {
 						Descriptor n_ss_desc;
 						CPU_CHECK_COND(!cpu.gdt.GetDescriptor(n_ss,n_ss_desc),
 							"INT:Gate with SS beyond limit",
-							EXCEPTION_TS,(n_ss & 0xfffc)+(type&CPU_INT_SOFTWARE)?0:1)
+							EXCEPTION_TS,(n_ss & 0xfffc)+((type&CPU_INT_SOFTWARE)?0:1))
 						CPU_CHECK_COND(((n_ss & 3)!=cs_dpl) || (n_ss_desc.DPL()!=cs_dpl),
 							"INT:Inner level with CS_DPL!=SS_DPL and SS_RPL",
-							EXCEPTION_TS,(n_ss & 0xfffc)+(type&CPU_INT_SOFTWARE)?0:1)
+							EXCEPTION_TS,(n_ss & 0xfffc)+((type&CPU_INT_SOFTWARE)?0:1))
 
 						// check if stack segment is a writable data segment
 						switch (n_ss_desc.Type()) {
@@ -662,7 +681,7 @@ void CPU_Interrupt(Bitu num,Bitu type,Bitu oldeip) {
 						}
 						CPU_CHECK_COND(!n_ss_desc.saved.seg.p,
 							"INT:Inner level with nonpresent SS",
-							EXCEPTION_SS,(n_ss & 0xfffc)+(type&CPU_INT_SOFTWARE)?0:1)
+							EXCEPTION_SS,(n_ss & 0xfffc)+((type&CPU_INT_SOFTWARE)?0:1))
 
 						// commit point
 						Segs.phys[ss]=n_ss_desc.GetBase();
@@ -699,12 +718,13 @@ void CPU_Interrupt(Bitu num,Bitu type,Bitu oldeip) {
 					} 
 					if (cs_dpl!=cpu.cpl)
 						E_Exit("Non-conforming intra privilege INT with DPL!=CPL");
+					[[fallthrough]];
 				case DESC_CODE_N_C_A:	case DESC_CODE_N_C_NA:
 				case DESC_CODE_R_C_A:	case DESC_CODE_R_C_NA:
 					/* Prepare stack for gate to same priviledge */
 					CPU_CHECK_COND(!cs_desc.saved.seg.p,
 							"INT:Same level:CS segment not present",
-						EXCEPTION_NP,(gate_sel & 0xfffc)+(type&CPU_INT_SOFTWARE)?0:1)
+						EXCEPTION_NP,(gate_sel & 0xfffc)+((type&CPU_INT_SOFTWARE)?0:1))
 					if ((reg_flags & FLAG_VM) && (cs_dpl<cpu.cpl))
 						E_Exit("V86 interrupt doesn't change to pl0");	// or #GP(cs_sel)
 
@@ -723,8 +743,9 @@ do_interrupt:
 					}
 					break;		
 				default:
-					E_Exit("INT:Gate Selector points to illegal descriptor with type %" sBitfs(x),cs_desc.Type());
-				}
+				        E_Exit("INT:Gate Selector points to illegal descriptor with type 0x%x",
+				               cs_desc.Type());
+			        }
 
 				Segs.val[cs]=(gate_sel&0xfffc) | cpu.cpl;
 				Segs.phys[cs]=cs_desc.GetBase();
@@ -743,7 +764,7 @@ do_interrupt:
 		case DESC_TASK_GATE:
 			CPU_CHECK_COND(!gate.saved.seg.p,
 				"INT:Gate segment not present",
-				EXCEPTION_NP,num*8+2+(type&CPU_INT_SOFTWARE)?0:1)
+				EXCEPTION_NP,num*8+2+((type&CPU_INT_SOFTWARE)?0:1))
 
 			CPU_SwitchTask(gate.GetSelector(),TSwitch_CALL_INT,oldeip);
 			if (type & CPU_INT_HAS_ERROR) {
@@ -753,7 +774,8 @@ do_interrupt:
 			}
 			return;
 		default:
-			E_Exit("Illegal descriptor type %" sBitfs(X) " for int %" sBitfs(X),gate.Type(),num);
+			E_Exit("Illegal descriptor type 0x%x for int %" sBitfs(X),
+			       gate.Type(), num);
 		}
 	}
 	assert(1);
@@ -900,7 +922,8 @@ void CPU_IRET(bool use32,Bitu oldeip) {
 				EXCEPTION_GP,n_cs_sel & 0xfffc)
 			break;
 		default:
-			E_Exit("IRET:Illegal descriptor type %" sBitfs(X), n_cs_desc.Type());
+			E_Exit("IRET:Illegal descriptor type 0x%x",
+			       n_cs_desc.Type());
 		}
 		CPU_CHECK_COND(!n_cs_desc.saved.seg.p,
 			"IRET with nonpresent code segment",
@@ -1057,7 +1080,7 @@ CODE_jmp:
 			CPU_SwitchTask(selector,TSwitch_JMP,oldeip);
 			break;
 		default:
-			E_Exit("JMP Illegal descriptor type %" sBitfs(X),desc.Type());
+			E_Exit("JMP Illegal descriptor type 0x%x", desc.Type());
 		}
 	}
 	assert(1);
@@ -1249,6 +1272,7 @@ call_code:
 						break;		
 					} else if (n_cs_dpl > cpu.cpl)
 						E_Exit("CALL:GATE:CS DPL>CPL");		// or #GP(sel)
+					[[fallthrough]];
 				case DESC_CODE_N_C_A:case DESC_CODE_N_C_NA:
 				case DESC_CODE_R_C_A:case DESC_CODE_R_C_NA:
 					// zrdx extender
@@ -1293,14 +1317,14 @@ call_code:
 			CPU_Exception(EXCEPTION_GP,selector & 0xfffc);
 			return;
 		default:
-			E_Exit("CALL:Descriptor type %" sBitfs(x) " unsupported",call.Type());
+			E_Exit("CALL:Descriptor type 0x%x unsupported", call.Type());
 		}
 	}
 	assert(1);
 }
 
 
-void CPU_RET(bool use32,Bitu bytes,Bitu oldeip) {
+void CPU_RET(bool use32,Bitu bytes, [[maybe_unused]] Bitu oldeip) {
 	if (!cpu.pmode || (reg_flags & FLAG_VM)) {
 		Bitu new_ip,new_cs;
 		if (!use32) {
@@ -1351,7 +1375,8 @@ void CPU_RET(bool use32,Bitu bytes,Bitu oldeip) {
 					EXCEPTION_GP,selector & 0xfffc)
 				break;
 			default:
-				E_Exit("RET from illegal descriptor type %" sBitfs(X),desc.Type());
+				E_Exit("RET from illegal descriptor type 0x%x",
+				       desc.Type());
 			}
 RET_same_level:
 			if (!desc.saved.seg.p) {
@@ -1396,7 +1421,8 @@ RET_same_level:
 					EXCEPTION_GP,selector & 0xfffc)
 				break;
 			default:
-				E_Exit("RET from illegal descriptor type %" sBitfs(X),desc.Type());		// or #GP(selector)
+				E_Exit("RET from illegal descriptor type 0x%x",
+				       desc.Type()); // or #GP(selector)
 			}
 
 			CPU_CHECK_COND(!desc.saved.seg.p,
@@ -1470,7 +1496,6 @@ RET_same_level:
 		LOG(LOG_CPU,LOG_NORMAL)("Prot ret %X:%X",selector,offset);
 		return;
 	}
-	assert(1);
 }
 
 
@@ -1778,6 +1803,7 @@ void CPU_LAR(Bitu selector,Bitu & ar) {
 				case DESC_CODE_R_NC_A:		case DESC_CODE_R_NC_NA:
 					if (desc.DPL()<cpu.cpl || desc.DPL()<rpl)
 						break;
+					[[fallthrough]];
 
 				case DESC_CODE_N_C_A:	case DESC_CODE_N_C_NA:
 				case DESC_CODE_R_C_A:	case DESC_CODE_R_C_NA:
@@ -1815,7 +1841,7 @@ void CPU_LSL(Bitu selector,Bitu & limit) {
 				case DESC_CODE_R_NC_A:		case DESC_CODE_R_NC_NA:
 					if (desc.DPL()<cpu.cpl || desc.DPL()<rpl)
 						break;
-
+					[[fallthrough]];
 				case DESC_CODE_N_C_A:	case DESC_CODE_N_C_NA:
 				case DESC_CODE_R_C_A:	case DESC_CODE_R_C_NA:
 					limit=desc.GetLimit();
@@ -2000,18 +2026,31 @@ bool CPU_CPUID(void) {
 		reg_edx='i' | ('n' << 8) | ('e' << 16) | ('I'<< 24); 
 		reg_ecx='n' | ('t' << 8) | ('e' << 16) | ('l'<< 24); 
 		break;
-	case 1:	/* get processor type/family/model/stepping and feature flags */
-		if ((CPU_ArchitectureType==CPU_ARCHTYPE_486NEWSLOW) ||
-			(CPU_ArchitectureType==CPU_ARCHTYPE_MIXED)) {
-			reg_eax=0x402;		/* intel 486dx */
-			reg_ebx=0;			/* Not Supported */
-			reg_ecx=0;			/* No features */
-			reg_edx=0x00000001;	/* FPU */
-		} else if (CPU_ArchitectureType==CPU_ARCHTYPE_PENTIUMSLOW) {
-			reg_eax=0x513;		/* intel pentium */
-			reg_ebx=0;			/* Not Supported */
-			reg_ecx=0;			/* No features */
-			reg_edx=0x00000011;	/* FPU+TimeStamp/RDTSC */
+	case 1: // Get processor type/family/model/stepping and feature flags
+		if ((CPU_ArchitectureType == CPU_ARCHTYPE_486NEWSLOW) ||
+		    (CPU_ArchitectureType == CPU_ARCHTYPE_MIXED)) {
+#if (C_FPU)
+			reg_eax = 0x402; // Intel 486DX
+			reg_edx = 0x1;   // FPU
+#else
+			reg_eax = 0x422; // Intel 486SX
+			reg_edx = 0x0;   // no FPU
+#endif
+			reg_ebx = 0;     // Not supported
+			reg_ecx = 0;     // No features
+		} else if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUMSLOW) {
+#if (C_FPU)
+			reg_eax = 0x517; // Intel Pentium P5 60/66 MHz D1-step
+			reg_edx = 0x11;  // FPU + Time Stamp Counter (RDTSC)
+#else
+			// All Pentiums had FPU built-in, so when FPU is
+			// disabled, we pretend to have early Pentium model with
+			// FDIV bug present.
+			reg_eax = 0x513; // Intel Pentium P5 60/66 MHz B1-step
+			reg_edx = 0x10;  // Time Stamp Counter (RDTSC)
+#endif
+			reg_ebx = 0;     // Not supported
+			reg_ecx = 0;     // No features
 		} else {
 			return false;
 		}
@@ -2091,9 +2130,11 @@ static void CPU_CycleIncrease(bool pressed) {
 	} else {
 		Bit32s old_cycles=CPU_CycleMax;
 		if (CPU_CycleUp < 100) {
-			CPU_CycleMax = (Bit32s)(CPU_CycleMax * (1 + (float)CPU_CycleUp / 100.0));
+			CPU_CycleMax = (Bit32s)(CPU_CycleMax *
+			                        (1 + static_cast<float>(CPU_CycleUp) /
+			                                     100.0f));
 		} else {
-			CPU_CycleMax = (Bit32s)(CPU_CycleMax + CPU_CycleUp);
+			CPU_CycleMax = CPU_CycleMax + CPU_CycleUp;
 		}
 	    
 		CPU_CycleLeft=0;CPU_Cycles=0;
@@ -2118,9 +2159,11 @@ static void CPU_CycleDecrease(bool pressed) {
 		GFX_SetTitle(CPU_CyclePercUsed,-1,false);
 	} else {
 		if (CPU_CycleDown < 100) {
-			CPU_CycleMax = (Bit32s)(CPU_CycleMax / (1 + (float)CPU_CycleDown / 100.0));
+			CPU_CycleMax = (Bit32s)(CPU_CycleMax /
+			                        (1 + static_cast<float>(CPU_CycleDown) /
+			                                     100.0f));
 		} else {
-			CPU_CycleMax = (Bit32s)(CPU_CycleMax - CPU_CycleDown);
+			CPU_CycleMax = CPU_CycleMax - CPU_CycleDown;
 		}
 		CPU_CycleLeft=0;CPU_Cycles=0;
 		if (CPU_CycleMax <= 0) CPU_CycleMax=1;
@@ -2143,8 +2186,8 @@ void CPU_Disable_SkipAutoAdjust(void) {
 }
 
 
-extern Bit32s ticksDone;
-extern Bit32u ticksScheduled;
+extern int ticksDone;
+extern int ticksScheduled;
 
 void CPU_Reset_AutoAdjust(void) {
 	CPU_IODelayRemoved = 0;
@@ -2152,7 +2195,7 @@ void CPU_Reset_AutoAdjust(void) {
 	ticksScheduled = 0;
 }
 
-class CPU: public Module_base {
+class CPU final : public Module_base {
 private:
 	static bool inited;
 public:
@@ -2210,9 +2253,11 @@ public:
 #elif (C_DYNREC)
 		CPU_Core_Dynrec_Init();
 #endif
-		MAPPER_AddHandler(CPU_CycleDecrease,MK_f11,MMOD1,"cycledown","Dec Cycles");
-		MAPPER_AddHandler(CPU_CycleIncrease,MK_f12,MMOD1,"cycleup"  ,"Inc Cycles");
-		Change_Config(configuration);	
+		MAPPER_AddHandler(CPU_CycleDecrease, SDL_SCANCODE_F11,
+		                  PRIMARY_MOD, "cycledown", "Dec Cycles");
+		MAPPER_AddHandler(CPU_CycleIncrease, SDL_SCANCODE_F12,
+		                  PRIMARY_MOD, "cycleup", "Inc Cycles");
+		Change_Config(configuration);
 		CPU_JMP(false,0,0,0);					//Setup the first cpu core
 	}
 
@@ -2242,7 +2287,8 @@ public:
 						int percval=0;
 						std::istringstream stream(str);
 						stream >> percval;
-						if ((percval>0) && (percval<=105)) CPU_CyclePercUsed=(Bit32s)percval;
+						if ((percval > 0) && (percval <= 105))
+							CPU_CyclePercUsed = percval;
 					} else if (str=="limit") {
 						cmdnum++;
 						if (cmd.FindCommand(cmdnum,str)) {
@@ -2267,7 +2313,9 @@ public:
 							int percval=0;
 							std::istringstream stream(str);
 							stream >> percval;
-							if ((percval>0) && (percval<=105)) CPU_CyclePercUsed=(Bit32s)percval;
+							if ((percval > 0) &&
+							    (percval <= 105))
+								CPU_CyclePercUsed = percval;
 						} else if (str=="limit") {
 							cmdnum++;
 							if (cmd.FindCommand(cmdnum,str)) {
@@ -2281,8 +2329,8 @@ public:
 							std::istringstream stream(str);
 							stream >> rmdval;
 							if (rmdval>0) {
-								CPU_CycleMax=(Bit32s)rmdval;
-								CPU_OldCycleMax=(Bit32s)rmdval;
+								CPU_CycleMax = rmdval;
+								CPU_OldCycleMax = rmdval;
 							}
 						}
 					}
@@ -2292,12 +2340,13 @@ public:
 				int rmdval=0;
 				std::istringstream stream(str);
 				stream >> rmdval;
-				CPU_CycleMax=(Bit32s)rmdval;
+				CPU_CycleMax = rmdval;
 			} else {
 				std::istringstream stream(type);
 				int rmdval=0;
 				stream >> rmdval;
-				if(rmdval) CPU_CycleMax=(Bit32s)rmdval;
+				if (rmdval)
+					CPU_CycleMax = rmdval;
 			}
 			CPU_CycleAutoAdjust=false;
 		}
@@ -2360,7 +2409,7 @@ public:
 		} else if (cputype == "386_slow") {
 			CPU_ArchitectureType = CPU_ARCHTYPE_386SLOW;
 		} else if (cputype == "486_slow") {
-			CPU_ArchitectureType = CPU_ARCHTYPE_486NEWSLOW;
+			CPU_ArchitectureType = CPU_ARCHTYPE_486OLDSLOW;
 		} else if (cputype == "486_prefetch") {
 			CPU_ArchitectureType = CPU_ARCHTYPE_486NEWSLOW;
 			if (core == "normal") {
@@ -2393,7 +2442,7 @@ public:
 
 static CPU * test;
 
-void CPU_ShutDown(Section* sec) {
+void CPU_ShutDown([[maybe_unused]] Section* sec) {
 #if (C_DYNAMIC_X86)
 	CPU_Core_Dyn_X86_Cache_Close();
 #elif (C_DYNREC)

@@ -1,7 +1,8 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -22,6 +23,8 @@
 #define DOSBOX_MIDI_COREAUDIO_H
 
 #include "midi_handler.h"
+
+#if C_COREAUDIO
 
 #include <AudioToolbox/AUGraph.h>
 #include <CoreServices/CoreServices.h>
@@ -59,7 +62,7 @@ do {                                                                \
 #   endif
 #endif
 
-class MidiHandler_coreaudio : public MidiHandler {
+class MidiHandler_coreaudio final : public MidiHandler {
 private:
 	AUGraph m_auGraph;
 	AudioUnit m_synth;
@@ -191,6 +194,7 @@ public:
 	void Close() override
 	{
 		if (m_auGraph) {
+			HaltSequence();
 			AUGraphStop(m_auGraph);
 			DisposeAUGraph(m_auGraph);
 			m_auGraph = 0;
@@ -211,5 +215,7 @@ public:
 #undef RequireNoErr
 
 MidiHandler_coreaudio Midi_coreaudio;
+
+#endif // C_COREAUDIO
 
 #endif

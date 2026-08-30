@@ -2,6 +2,38 @@
     "version": 1,
     "warnings": [
         {
+            "CodeCurrent": 88293181,
+            "CodeNext": 6447,
+            "CodePrev": 2507819856,
+            "ErrorCode": "V522",
+            "FileName": "loguru.cpp",
+            "Message": "There might be dereferencing of a potential null pointer 'with_newline'. Check lines: _, _."
+        },
+        {
+            "CodeCurrent": 647877999,
+            "CodeNext": 3897,
+            "CodePrev": 1189980955,
+            "ErrorCode": "V769",
+            "FileName": "loguru.cpp",
+            "Message": "The 'file_path' pointer in the 'file_path + _' expression could be nullptr. In such case, resulting value will be senseless and it should not be used. Check lines: _, _."
+        },
+        {
+            "CodeCurrent": 381112897,
+            "CodeNext": 1022144702,
+            "CodePrev": 0,
+            "ErrorCode": "V1051",
+            "FileName": "loguru.cpp",
+            "Message": "Consider checking for misprints. It's possible that the 'thread_id' should be checked here."
+        },
+        {
+            "CodeCurrent": 0,
+            "CodeNext": 0,
+            "CodePrev": 0,
+            "ErrorCode": "Renew",
+            "FileName": " ",
+            "Message": "Your license will expire in _ days. Click 'Renew' to learn more or contact us at support@viva_.com."
+        },
+        {
             "CodeCurrent": 99146737,
             "CodeNext": 3299936121,
             "CodePrev": 2974951853,
@@ -128,6 +160,30 @@
             "ErrorCode": "V547",
             "FileName": "dr_mp3.h",
             "Message": "Expression is always false."
+        },
+        { 
+            "CodeCurrent": 377054001,
+            "CodeNext": 22638955,
+            "CodePrev": 4151901932,
+            "ErrorCode": "V547",
+            "FileName": "dr_wav.h",
+            "Message": "Expression 'cap > (_UL)' is always false."
+        },
+        {
+            "CodeCurrent": 1596023591,
+            "CodeNext": 1249513261,
+            "CodePrev": 4081771348,
+            "ErrorCode": "V547",
+            "FileName": "dr_wav.h",
+            "Message": "Expression 'bytesToRead > (_UL)' is always false."
+        },
+        {
+            "CodeCurrent": 1849716353,
+            "CodeNext": 11359373,
+            "CodePrev": 2663124891,
+            "ErrorCode": "V1051",
+            "FileName": "dr_wav.h",
+            "Message": "Consider checking for misprints. It's possible that the 'sampleCountFromFactChunk' should be used inside 'drwav__seek_forward' function."
         },
         {
             "CodeCurrent": 3210175261,

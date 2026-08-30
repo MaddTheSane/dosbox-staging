@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 
-# Copyright (C) 2020 Kevin Croft <krcroft@gmail.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Copyright (C) 2020-2021  kcgen <kcgen@users.noreply.github.com>
 
 """
 Count the number of issues found in an PVS-Studio report.
@@ -30,7 +31,7 @@ def parse_issues(filename):
     """
     cwd = os.getcwd()
     issues = collections.defaultdict(int)
-    with open(filename) as csvfile:
+    with open(filename, encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
             sourcefile = os.path.realpath(row['FilePath'])

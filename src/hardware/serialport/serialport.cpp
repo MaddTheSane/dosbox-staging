@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,17 +16,20 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
-#include <string.h>
-#include <ctype.h>
-
 #include "dosbox.h"
+
+#include <algorithm>
+#include <cstdarg>
+#include <ctype.h>
+#include <string.h>
+#include <tuple>
 
 #include "inout.h"
 #include "pic.h"
 #include "setup.h"
 #include "bios.h"					// SetComPorts(..)
 #include "callback.h"				// CALLBACK_Idle
+#include "string_utils.h"
 
 #include "serialport.h"
 #include "directserial.h"
@@ -97,10 +100,10 @@ device_COM::~device_COM() {
 // COM1 - COM4 objects
 CSerial *serialports[SERIAL_MAX_PORTS] = {nullptr};
 
-static Bitu SERIAL_Read (Bitu port, Bitu iolen) {
-	(void)iolen; // unused, but required for API compliance
+static uint8_t SERIAL_Read(io_port_t port, io_width_t)
+{
 	uint32_t i = 0;
-	uint32_t retval = 0;
+	uint8_t retval = 0;
 	uint8_t offset_type = static_cast<uint8_t>(port) & 0x7;
 	switch(port&0xff8) {
 		case 0x3f8: i=0; break;
@@ -135,9 +138,11 @@ static Bitu SERIAL_Read (Bitu port, Bitu iolen) {
 		                        dbgtext[offset_type]);
 	}
 #endif
-	return static_cast<Bitu>(retval);
+	return retval;
 }
-static void SERIAL_Write (Bitu port, Bitu val, Bitu) {
+static void SERIAL_Write(io_port_t port, io_val_t value, io_width_t)
+{
+	const auto val = check_cast<uint8_t>(value);
 	uint32_t i;
 	const uint8_t offset_type = static_cast<uint8_t>(port) & 0x7;
 	switch(port&0xff8) {
@@ -183,13 +188,13 @@ void CSerial::log_ser(bool active, char const* format,...) {
 		// copied from DEBUG_SHOWMSG
 		char buf[512];
 		buf[0]=0;
-		sprintf(buf,"%12.3f [% 7u] ",PIC_FullIndex(), SDL_GetTicks());
+		sprintf(buf, "%12.3f [% 7d] ", PIC_FullIndex(), static_cast<int>(GetTicks()));
 		va_list msg;
 		va_start(msg,format);
 		vsprintf(buf+strlen(buf),format,msg);
 		va_end(msg);
 		// Add newline if not present
-		const uint32_t len = strlen(buf);
+		const uint32_t len = safe_strlen(buf);
 		if(buf[len-1]!='\n') strcat(buf,"\r\n");
 		fputs(buf,debugfp);
 	}
@@ -215,15 +220,18 @@ void CSerial::changeLineProperties() {
 	updatePortConfig (baud_divider, LCR);
 }
 
-static void Serial_EventHandler(Bitu val) {
+static void Serial_EventHandler(uint32_t val)
+{
 	const uint32_t serclassid = val & 0x3;
-	if(serialports[serclassid]!=0)
-		serialports[serclassid]->handleEvent(val>>2);
+	if (serialports[serclassid] != 0) {
+		const auto event_type = static_cast<uint16_t>(val >> 2);
+		serialports[serclassid]->handleEvent(event_type);
+	}
 }
 
 void CSerial::setEvent(uint16_t type, float duration)
 {
-	PIC_AddEvent(Serial_EventHandler, duration,
+	PIC_AddEvent(Serial_EventHandler, static_cast<double>(duration),
 	             static_cast<Bitu>((type << 2) | port_index));
 }
 
@@ -402,17 +410,17 @@ void CSerial::receiveByteEx(uint8_t data, uint8_t error)
 			// error and FIFO inactive
 			rise (ERROR_PRIORITY);
 			LSR |= error;
-		};
+		}
         if(error&LSR_PARITY_ERROR_MASK) {
 			parityErrors++;
-		};
+		}
 		if(error&LSR_OVERRUN_ERROR_MASK) {
 			overrunErrors++;
 			if(!GETFLAG(IF)) overrunIF0++;
 #if SERIAL_DEBUG
 			log_ser(dbg_serialtraffic,"rx overrun (IF=%d)", GETFLAG(IF)>0);
 #endif
-		};
+		}
 		if(error&LSR_FRAMING_ERROR_MASK) {
 			framingErrors++;
 		}
@@ -1002,6 +1010,57 @@ void CSerial::setCTS (bool value) {
 	//else no change
 }
 
+static constexpr std::tuple<uint8_t, uint8_t> baud_to_regs(uint32_t baud_rate)
+{
+	// Cap the lower-bound to 300 baud. Although the first 1950s modem
+	// offered 110 baud, by the time DOS was available 8-bit ISA modems
+	// offered at least 300 and even 1200 baud.
+	baud_rate = std::max(300u, baud_rate);
+
+	constexpr auto max_baud = 115200u;
+	const auto delay_ratio = static_cast<uint16_t>(max_baud / baud_rate);
+
+	const uint8_t transmit_reg = delay_ratio & 0xff;  // bottom byte
+	const uint8_t interrupt_reg = delay_ratio >> 8;   // top byte
+	return std::make_tuple(transmit_reg, interrupt_reg);
+}
+
+static uint8_t line_control_to_reg(const uint8_t data_bits,
+                                   const char parity_type,
+                                   const uint8_t stop_bits)
+{
+	uint8_t reg = 0;
+
+	switch (data_bits) {
+	case 5: reg |= LCR_DATABITS_5; break;
+	case 6: reg |= LCR_DATABITS_6; break;
+	case 7: reg |= LCR_DATABITS_7; break;
+	default: reg |= LCR_DATABITS_8; break;
+	}
+
+	// Explanation of the parity types:
+	// - Odd: If an odd number of 1s in the data then parity bit is 1
+	// - Even: If an even number of 1s in the data then parity bit is 1
+	// - Mark: the parity bit is expected to always be 1
+	// - Space: the parity bit is expected to always be 0
+	// - None: no parity bit is present or transmitted, which is the default
+	assert(isupper(parity_type));
+	switch (parity_type) {
+	case 'O': reg |= LCR_PARITY_ODD; break;
+	case 'E': reg |= LCR_PARITY_EVEN; break;
+	case 'M': reg |= LCR_PARITY_MARK; break;
+	case 'S': reg |= LCR_PARITY_SPACE; break;
+	default: reg |= LCR_PARITY_NONE; break;
+	}
+
+	if (stop_bits <= 1)
+		reg |= LCR_STOPBITS_1;
+	else
+		reg |= LCR_STOPBITS_MORE_THAN_1;
+
+	return reg;
+}
+
 /*****************************************************************************/
 /* Initialisation                                                           **/
 /*****************************************************************************/
@@ -1010,12 +1069,11 @@ void CSerial::Init_Registers () {
 	irq_active=false;
 	waiting_interrupts = 0x0;
 
-	uint32_t initbps = 9600;
-	uint8_t bytesize = 8;
-	char parity = 'N';
-
-	uint8_t lcrresult = 0;
-	uint16_t baudresult = 0;
+	// Initialize at 9600 baud, 8-N-1 (data, parity, stop)
+	const auto line_reg = line_control_to_reg(8, 'N', 1);
+	constexpr auto baud_spec = baud_to_regs(9600);
+	constexpr uint8_t transmit_reg = std::get<0>(baud_spec);
+	constexpr uint8_t interrupt_reg = std::get<1>(baud_spec);
 
 	IER = 0;
 	ISR = 0x1;
@@ -1046,52 +1104,11 @@ void CSerial::Init_Registers () {
 
 	baud_divider=0x0;
 
-	// make lcr: byte size, parity, stopbits, baudrate
-
-	if (bytesize == 5)
-		lcrresult |= LCR_DATABITS_5;
-	else if (bytesize == 6)
-		lcrresult |= LCR_DATABITS_6;
-	else if (bytesize == 7)
-		lcrresult |= LCR_DATABITS_7;
-	else
-		lcrresult |= LCR_DATABITS_8;
-
-	switch(parity)
-	{
-	case 'N':
-	case 'n':
-		lcrresult |= LCR_PARITY_NONE;
-		break;
-	case 'O':
-	case 'o':
-		lcrresult |= LCR_PARITY_ODD;
-		break;
-	case 'E':
-	case 'e':
-		lcrresult |= LCR_PARITY_EVEN;
-		break;
-	case 'M':
-	case 'm':
-		lcrresult |= LCR_PARITY_MARK;
-		break;
-	case 'S':
-	case 's':
-		lcrresult |= LCR_PARITY_SPACE;
-		break;
-	}
-
-	// baudrate
-	if (initbps > 0)
-		baudresult = (uint16_t)(115200 / initbps);
-	else
-		baudresult = 12;			// = 9600 baud
-
 	Write_MCR (0);
 	Write_LCR (LCR_DIVISOR_Enable_MASK);
-	Write_THR((uint8_t)baudresult & 0xff);
-	Write_IER((uint8_t)(baudresult >> 8));
-	Write_LCR(lcrresult);
+	Write_THR(transmit_reg);
+	Write_IER(interrupt_reg);
+	Write_LCR(line_reg);
 	updateMSR();
 	Read_MSR();
 	PIC_DeActivateIRQ(irq);
@@ -1103,8 +1120,10 @@ CSerial::CSerial(const uint8_t port_idx, CommandLine *cmd)
 	const uint16_t base = serial_baseaddr[port_index];
 
 	irq = serial_defaultirq[port_index];
-	getUintFromString("irq:", irq, cmd);
-	if (irq < 2 || irq > 15)
+
+	const bool configured = getUintFromString("irq:", irq, cmd);
+	// Only change the port's IRQ if it's outside the conflict range
+	if (configured && (irq < 2 || irq > 15))
 		irq = serial_defaultirq[port_index];
 
 #if SERIAL_DEBUG
@@ -1159,9 +1178,9 @@ CSerial::CSerial(const uint8_t port_idx, CommandLine *cmd)
 	overrunIF0=0;
 	breakErrors=0;
 
-	for (uint32_t i = 0; i <= 7; i++) {
-		WriteHandler[i].Install (i + base, SERIAL_Write, IO_MB);
-		ReadHandler[i].Install(i + base, SERIAL_Read, IO_MB);
+	for (uint8_t i = 0; i < SERIAL_IO_HANDLERS; ++i) {
+		WriteHandler[i].Install(i + base, SERIAL_Write, io_width_t::byte);
+		ReadHandler[i].Install(i + base, SERIAL_Read, io_width_t::byte);
 	}
 }
 
@@ -1176,77 +1195,98 @@ bool CSerial::getUintFromString(const char *name, uint32_t &data, CommandLine *c
 
 CSerial::~CSerial() {
 	DOS_DelDevice(mydosdevice);
-	for (uint32_t i = 0; i <= SERIAL_BASE_EVENT_COUNT; i++)
+	for (uint16_t i = 0; i <= SERIAL_BASE_EVENT_COUNT; i++)
 		removeEvent(i);
+
+	// Free the fifos and devices
+	delete(errorfifo);
+	errorfifo = nullptr;
+	delete(rxfifo);
+	rxfifo = nullptr;
+	delete(txfifo);
+	txfifo = nullptr;
+
+	// Uninstall the IO handlers
+	for (uint32_t i = 0; i < SERIAL_IO_HANDLERS; ++i) {
+		WriteHandler[i].Uninstall();
+		ReadHandler[i].Uninstall();
+	}
+}
+
+static bool idle(const double start, const uint32_t timeout)
+{
+	CALLBACK_Idle();
+	return PIC_FullIndex() - start > timeout;
 }
 
 bool CSerial::Getchar(uint8_t *data, uint8_t *lsr, bool wait_dsr, uint32_t timeout)
 {
-	const double starttime = PIC_FullIndex();
-	// wait for DSR on
-	if(wait_dsr) {
-		while((!(Read_MSR()&0x20))&&(starttime>PIC_FullIndex()-timeout))
-			CALLBACK_Idle();
-		if(!(starttime>PIC_FullIndex()-timeout)) {
-#if SERIAL_DEBUG
-			log_ser(dbg_aux,"Getchar status timeout: MSR 0x%x",Read_MSR());
-#endif
-			return false;
-		}
+	const auto starttime = PIC_FullIndex();
+	bool timed_out = false;
+
+	// Wait until we're ready to receive (or we've timed out)
+	const uint32_t ready_flag = (wait_dsr ? MSR_DSR_MASK : 0x0);
+	while ((Read_MSR() & ready_flag) != ready_flag && !timed_out)
+		timed_out = idle(starttime, timeout);
+
+	// wait for a byte to arrive (or we've timed out)
+	*lsr = static_cast<uint8_t>(Read_LSR());
+	while (!(*lsr & LSR_RX_DATA_READY_MASK) && !timed_out) {
+		timed_out = idle(starttime, timeout);
+		*lsr = static_cast<uint8_t>(Read_LSR());
 	}
-	// wait for a byte to arrive
-	while((!((*lsr=Read_LSR())&0x1))&&(starttime>PIC_FullIndex()-timeout))
-		CALLBACK_Idle();
-	
-	if(!(starttime>PIC_FullIndex()-timeout)) {
+
+	if (timed_out) {
 #if SERIAL_DEBUG
 		log_ser(dbg_aux,"Getchar data timeout: MSR 0x%x",Read_MSR());
 #endif
 		return false;
 	}
-	*data=Read_RHR();
 
+	*data = static_cast<uint8_t>(Read_RHR());
 #if SERIAL_DEBUG
 	log_ser(dbg_aux,"Getchar read 0x%x",*data);
 #endif
 	return true;
 }
 
+/*
+Three criteria need to be met before we can send the next character to the
+receiver:
+- our transfer queue needs to be empty (Tx hold high)
+- the receiver says it's ready (DSR high), provided DSR was enabled
+- the receiver says we are clear to send (CTS high), provided CTS was enabled
+*/
 bool CSerial::Putchar(uint8_t data, bool wait_dsr, bool wait_cts, uint32_t timeout)
 {
-	const double starttime = PIC_FullIndex();
-	// wait for it to become empty
-	while(!(Read_LSR()&0x20)) {
-		CALLBACK_Idle();
-	}
-	// wait for DSR+CTS on
-	if(wait_dsr||wait_cts) {
-		if(wait_dsr||wait_cts) {
-			while(((Read_MSR()&0x30)!=0x30)&&(starttime>PIC_FullIndex()-timeout))
-				CALLBACK_Idle();
-		} else if(wait_dsr) {
-			while(!(Read_MSR()&0x20)&&(starttime>PIC_FullIndex()-timeout))
-				CALLBACK_Idle();
-		} else if(wait_cts) {
-			while(!(Read_MSR()&0x10)&&(starttime>PIC_FullIndex()-timeout))
-				CALLBACK_Idle();
-		} 
-		if(!(starttime>PIC_FullIndex()-timeout)) {
-#if SERIAL_DEBUG
-			log_ser(dbg_aux,"Putchar timeout: MSR 0x%x",Read_MSR());
-#endif
-			return false;
-		}
-	}
-	Write_THR(data);
+	const auto start_time = PIC_FullIndex();
+	bool timed_out = false;
 
+	// Wait until our transfer queue is empty (or we've timed out)
+	while (!(Read_LSR() & LSR_TX_HOLDING_EMPTY_MASK) && !timed_out)
+		timed_out = idle(start_time, timeout);
+
+	// Wait until the receiver is ready (or we've timed out)
+	const uint32_t ready_flags = (wait_dsr ? MSR_DSR_MASK : 0x0) |
+	                             (wait_cts ? MSR_CTS_MASK : 0x0);
+	while ((Read_MSR() & ready_flags) != ready_flags && !timed_out)
+		timed_out = idle(start_time, timeout);
+
+	if (timed_out) {
 #if SERIAL_DEBUG
-	log_ser(dbg_aux,"Putchar 0x%x",data);
-#endif 
+		log_ser(dbg_aux, "Putchar timeout: MSR 0x%x", Read_MSR());
+#endif
+		return false;
+	}
+
+	Write_THR(data);
+#if SERIAL_DEBUG
+	log_ser(dbg_aux, "Putchar 0x%x", data);
+#endif
 	return true;
 }
 
-class SERIALPORTS:public Module_base {
+class SERIALPORTS final : public Module_base {
 public:
 	SERIALPORTS (Section * configuration):Module_base (configuration) {
 		uint16_t biosParameter[SERIAL_MAX_PORTS] = {0};
@@ -1260,7 +1300,7 @@ public:
 		char s_property[] = "serialx";
 		for (uint8_t i = 0; i < SERIAL_MAX_PORTS; ++i) {
 			// get the configuration property
-			s_property[6] = '1' + i;
+			s_property[6] = '1' + static_cast<char>(i);
 			Prop_multival* p = section->Get_multival(s_property);
 			std::string type = p->GetSection()->Get_string("type");
 			CommandLine cmd(0,p->GetSection()->Get_string("parameters"));
@@ -1268,10 +1308,14 @@ public:
 			// detect the type
 			if (type=="dummy") {
 				serialports[i] = new CSerialDummy (i, &cmd);
+				serialports[i]->serialType = SERIAL_PORT_TYPE::DUMMY;
+				cmd.GetStringRemain(serialports[i]->commandLineString);
 			}
-#ifdef DIRECTSERIAL_AVAILIBLE
+#ifdef C_DIRECTSERIAL
 			else if (type=="directserial") {
 				serialports[i] = new CDirectSerial (i, &cmd);
+				serialports[i]->serialType = SERIAL_PORT_TYPE::DIRECT_SERIAL;
+				cmd.GetStringRemain(serialports[i]->commandLineString);
 				if (!serialports[i]->InstallationSuccessful)  {
 					// serial port name was wrong or already in use
 					delete serialports[i];
@@ -1282,6 +1326,8 @@ public:
 #if C_MODEM
 			else if(type=="modem") {
 				serialports[i] = new CSerialModem (i, &cmd);
+				serialports[i]->serialType = SERIAL_PORT_TYPE::MODEM;
+				cmd.GetStringRemain(serialports[i]->commandLineString);
 				if (!serialports[i]->InstallationSuccessful)  {
 					delete serialports[i];
 					serialports[i] = NULL;
@@ -1289,6 +1335,8 @@ public:
 			}
 			else if(type=="nullmodem") {
 				serialports[i] = new CNullModem (i, &cmd);
+				serialports[i]->serialType = SERIAL_PORT_TYPE::NULL_MODEM;
+				cmd.GetStringRemain(serialports[i]->commandLineString);
 				if (!serialports[i]->InstallationSuccessful)  {
 					delete serialports[i];
 					serialports[i] = NULL;
@@ -1307,16 +1355,21 @@ public:
 		BIOS_SetComPorts (biosParameter);
 	}
 
-	~SERIALPORTS () {
-		for (uint8_t i = 0; i < SERIAL_MAX_PORTS; ++i)
+	~SERIALPORTS()
+	{
+		for (uint8_t i = 0; i < SERIAL_MAX_PORTS; ++i) {
 			if (serialports[i]) {
 				delete serialports[i];
 				serialports[i] = 0;
 			}
+		}
+#if C_MODEM
+		MODEM_ClearPhonebook();
+#endif
 	}
 };
 
-static SERIALPORTS *testSerialPortsBaseclass;
+static SERIALPORTS *testSerialPortsBaseclass = nullptr;
 
 void SERIAL_Destroy(Section *sec)
 {
@@ -1326,8 +1379,7 @@ void SERIAL_Destroy(Section *sec)
 }
 
 void SERIAL_Init (Section * sec) {
-	// should never happen
-	if (testSerialPortsBaseclass) delete testSerialPortsBaseclass;
+	delete testSerialPortsBaseclass;
 	testSerialPortsBaseclass = new SERIALPORTS (sec);
 	sec->AddDestroyFunction (&SERIAL_Destroy, true);
 }

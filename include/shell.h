@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,20 +16,19 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
 #ifndef DOSBOX_SHELL_H
 #define DOSBOX_SHELL_H
 
-#include <ctype.h>
-#ifndef DOSBOX_DOSBOX_H
 #include "dosbox.h"
-#endif
+
+#include <cctype>
+#include <list>
+#include <memory>
+#include <string>
+
 #ifndef DOSBOX_PROGRAMS_H
 #include "programs.h"
 #endif
-
-#include <string>
-#include <list>
 
 #define CMD_MAXLINE 4096
 #define CMD_MAXCMDS 20
@@ -42,6 +41,10 @@ class DOS_Shell;
 extern DOS_Shell * first_shell;
 
 
+//--Added 2013-09-22 by Alun Bestor to let Boxer talk to the currently active shell
+extern DOS_Shell * currentShell;
+//--End of modifications
+
 class BatchFile {
 public:
 	BatchFile(DOS_Shell * host,char const* const resolved_name,char const* const entered_name, char const * const cmd_line);
@@ -50,41 +53,50 @@ public:
 	virtual ~BatchFile();
 	virtual bool ReadLine(char * line);
 	bool Goto(char * where);
-	void Shift(void);
-	Bit16u file_handle;
-	Bit32u location;
-	bool echo;
-	DOS_Shell * shell;
-	BatchFile * prev;
-	CommandLine * cmd;
-	std::string filename;
+	void Shift();
+	uint16_t file_handle = 0;
+	uint32_t location = 0;
+	bool echo = false;
+	DOS_Shell *shell = nullptr;
+	std::shared_ptr<BatchFile> prev = {}; // shared with Shell.bf
+	CommandLine *cmd = nullptr;
+	std::string filename{};
 };
 
 class AutoexecEditor;
 class DOS_Shell : public Program {
 private:
-	friend class AutoexecEditor;
-	std::list<std::string> l_history, l_completion;
+	enum class HELP_LIST { ALL, COMMON };
+	void PrintHelpForCommands(HELP_LIST requested_list);
 
-	char *completion_start;
-	Bit16u completion_index;
-	
+	friend class AutoexecEditor;
+	std::list<std::string> l_history{};
+	std::list<std::string> l_completion{};
+
+	char *completion_start = nullptr;
+	uint16_t completion_index = 0;
+	bool exit_cmd_called = false;
+
 public:
 
 	DOS_Shell();
+	~DOS_Shell() override;
 	DOS_Shell(const DOS_Shell&) = delete; // prevent copy
 	DOS_Shell& operator=(const DOS_Shell&) = delete; // prevent assignment
-	void Run(void);
-	void RunInternal(void); //for command /C
-/* A load of subfunctions */
+	void Run() override;
+	void RunInternal(); // for command /C
+	/* A load of subfunctions */
 	void ParseLine(char * line);
 	Bitu GetRedirection(char *s, char **ifn, char **ofn,bool * append);
 	void InputCommand(char * line);
+	void ProcessCmdLineEnvVarStitution(char *line);
 	void ShowPrompt();
 	void DoCommand(char * cmd);
 	bool Execute(char * name,char * args);
 	/* Checks if it matches a hardware-property */
 	bool CheckConfig(char* cmd_in,char*line);
+	/* Internal utilities for testing */
+	virtual bool execute_shell_cmd(char *name, char *arguments);
 
 	/* Some internal used functions */
 	const char *Which(const char *name) const;
@@ -109,7 +121,7 @@ public:
 	void CMD_REM(char * args);
 	void CMD_RENAME(char * args);
 	void CMD_CALL(char * args);
-	void SyntaxError(void);
+	void SyntaxError();
 	void CMD_PAUSE(char * args);
 	void CMD_SUBST(char* args);
 	void CMD_LOADHIGH(char* args);
@@ -120,18 +132,17 @@ public:
 	void CMD_VER(char * args);
 	void CMD_LS(char *args);
 	/* The shell's variables */
-	Bit16u input_handle;
-	BatchFile * bf;
-	bool echo;
-	bool exit_flag;
-	bool call;
+	uint16_t input_handle = 0;
+	std::shared_ptr<BatchFile> bf = {}; // shared with BatchFile.prev
+	bool echo = false;
+	bool call = false;
 };
 
 struct SHELL_Cmd {
-	const char * name;								/* Command name*/
-	Bit32u flags;									/* Flags about the command */
-	void (DOS_Shell::*handler)(char * args);		/* Handler for this command */
-	const char * help;								/* String with command help */
+	uint32_t flags = 0;                               // Flags about the command
+	void (DOS_Shell::*handler)(char *args) = nullptr; // Handler for this command
+	const char *help = nullptr;                       // String with command help
+	const char *long_help = nullptr;                  // String with long help (optional)
 };
 
 /* Object to manage lines in the autoexec.bat The lines get removed from
@@ -139,18 +150,16 @@ struct SHELL_Cmd {
  * as well if the line set a a variable */
 class AutoexecObject{
 private:
-	bool installed;
-	std::string buf;
+	bool installed = false;
+	std::string buf = {};
+
 public:
-	AutoexecObject()
-		: installed(false),
-		  buf("")
-	{}
 	void Install(std::string const &in);
 	void InstallBefore(std::string const &in);
+	const std::string &GetLine() const { return buf; }
 	~AutoexecObject();
 private:
-	void CreateAutoexec(void);
+	void CreateAutoexec();
 };
 
 #endif

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -19,20 +19,78 @@
 #ifndef DOSBOX_TIMER_H
 #define DOSBOX_TIMER_H
 
+#include <cassert>
+
+#include <chrono>
+#include <limits>
+#include <thread>
+
 /* underlying clock rate in HZ */
-#include <SDL.h>
 
-#define PIT_TICK_RATE 1193182
+constexpr int PIT_TICK_RATE = 1193182;
 
-#define GetTicks() SDL_GetTicks()
+// Short-hand unit conversions
+constexpr auto PIT_TICK_RATE_KHZ = static_cast<double>(PIT_TICK_RATE) / 1000.0;
+// The rate at which a repeating event occurs is the frequency, measured in Hertz.
+
+// The inverse of frequency is the time between events, called 'period'.
+// In this case, we want the period of every 1000 PIT tick events.
+constexpr auto PERIOD_OF_1K_PIT_TICKS = 1000.0 / static_cast<double>(PIT_TICK_RATE);
 
 typedef void (*TIMER_TickHandler)(void);
 
-/* Register a function that gets called everytime if 1 or more ticks pass */
+/* Register a function that gets called every time if 1 or more ticks pass */
 void TIMER_AddTickHandler(TIMER_TickHandler handler);
 void TIMER_DelTickHandler(TIMER_TickHandler handler);
 
 /* This will add 1 milliscond to all timers */
 void TIMER_AddTick(void);
+
+extern const std::chrono::steady_clock::time_point system_start_time;
+
+static inline int64_t GetTicks()
+{
+	return std::chrono::duration_cast<std::chrono::milliseconds>(
+	               std::chrono::steady_clock::now() - system_start_time)
+	        .count();
+}
+
+static inline int64_t GetTicksUs()
+{
+	return std::chrono::duration_cast<std::chrono::microseconds>(
+	               std::chrono::steady_clock::now() - system_start_time)
+	        .count();
+}
+
+static inline int GetTicksDiff(const int64_t new_ticks, const int64_t old_ticks)
+{
+	assert(new_ticks >= old_ticks);
+	assert((new_ticks - old_ticks) <= std::numeric_limits<int>::max());
+	return static_cast<int>(new_ticks - old_ticks);
+}
+
+static inline int GetTicksSince(const int64_t old_ticks)
+{
+	const auto now = GetTicks();
+	assert((now - old_ticks) <= std::numeric_limits<int>::max());
+	return GetTicksDiff(now, old_ticks);
+}
+
+static inline int GetTicksUsSince(const int64_t old_ticks)
+{
+	const auto now = GetTicksUs();
+	assert((now - old_ticks) <= std::numeric_limits<int>::max());
+	return GetTicksDiff(now, old_ticks);
+}
+
+static inline void Delay(const int milliseconds)
+{
+	std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+}
+
+static inline void DelayUs(const int microseconds)
+{
+	std::this_thread::sleep_for(std::chrono::microseconds(microseconds));
+}
 
 #endif

@@ -11,7 +11,7 @@ endif
 .rc.o:
 	$(WINDRES) -o $@ $<
 
-dosbox_SOURCES = dosbox.cpp $(ico_stuff)
+dosbox_SOURCES = dosbox.cpp $(ico_stuff) main.cpp
 dosbox_LDADD = cpu/libcpu.a \
                debug/libdebug.a \
                dos/libdos.a \
@@ -29,4 +29,4 @@ dosbox_LDADD = cpu/libcpu.a \
                misc/libmisc.a \
                shell/libshell.a
 
-EXTRA_DIST = winres.rc dosbox.ico
+EXTRA_DIST = winres.rc

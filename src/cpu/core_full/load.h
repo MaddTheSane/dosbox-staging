@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -50,6 +50,7 @@ l_MODRMswitch:
 			break;
 		case M_EbIb:
 			inst_op2_d=Fetchb();
+			[[fallthrough]];
 		case M_Eb:
 			if (inst.rm<0xc0) inst_op1_d=LoadMb(inst.rm_eaa);
 			else inst_op1_d=reg_8(inst.rm_eai);
@@ -62,6 +63,7 @@ l_MODRMswitch:
 		case M_GbEb:
 			if (inst.rm<0xc0) inst_op2_d=LoadMb(inst.rm_eaa);
 			else inst_op2_d=reg_8(inst.rm_eai);
+			[[fallthrough]];
 		case M_Gb:
 			inst_op1_d=reg_8(inst.rm_index);;
 			break;
@@ -77,8 +79,9 @@ l_MODRMswitch:
 			goto l_M_Ewx;
 		case M_EwxIwx:
 			inst_op2_ds=Fetchws();
-l_M_Ewx:		
+			[[fallthrough]];
 		case M_Ewx:
+l_M_Ewx:
 			if (inst.rm<0xc0) inst_op1_ds=(Bit16s)LoadMw(inst.rm_eaa);
 			else inst_op1_ds=(Bit16s)reg_16(inst.rm_eai);
 			break;
@@ -87,7 +90,7 @@ l_M_Ewx:
 			goto l_M_Ew;
 		case M_EwIbx:
 			inst_op2_ds=Fetchbs();
-			goto l_M_Ew;		
+			goto l_M_Ew;
 		case M_EwIw:
 			inst_op2_d=Fetchw();
 			goto l_M_Ew;
@@ -101,17 +104,19 @@ l_M_Ewx:
 			inst_op2_d=reg_16(inst.rm_index);
 			inst.rm_eaa+=((Bit16s)inst_op2_d >> 4) * 2;
 			goto l_M_Ew;
-l_M_EwGw:			
 		case M_EwGw:
+l_M_EwGw:
 			inst_op2_d=reg_16(inst.rm_index);
-l_M_Ew:
+			[[fallthrough]];
 		case M_Ew:
+l_M_Ew:
 			if (inst.rm<0xc0) inst_op1_d=LoadMw(inst.rm_eaa);
 			else inst_op1_d=reg_16(inst.rm_eai);
 			break;
 		case M_GwEw:
 			if (inst.rm<0xc0) inst_op2_d=LoadMw(inst.rm_eaa);
 			else inst_op2_d=reg_16(inst.rm_eai);
+			[[fallthrough]];
 		case M_Gw:
 			inst_op1_d=reg_16(inst.rm_index);;
 			break;
@@ -121,6 +126,7 @@ l_M_Ew:
 			break;
 		case M_EdxGdx:
 			inst_op2_ds=(Bit32s)reg_32(inst.rm_index);
+			[[fallthrough]];
 		case M_Edx:
 			if (inst.rm<0xc0) inst_op1_d=(Bit32s)LoadMd(inst.rm_eaa);
 			else inst_op1_d=(Bit32s)reg_32(inst.rm_eai);
@@ -133,7 +139,7 @@ l_M_Ew:
 			goto l_M_Ed;
 		case M_EdId:
 			inst_op2_d=Fetchd();
-			goto l_M_Ed;			
+			goto l_M_Ed;
 		case M_EdGdCL:
 			inst_imm_d=reg_cl;
 			goto l_M_EdGd;
@@ -144,22 +150,23 @@ l_M_Ew:
 		case M_EdGdIb:
 			inst_imm_d=Fetchb();
 			goto l_M_EdGd;
-l_M_EdGd:
 		case M_EdGd:
+l_M_EdGd:
 			inst_op2_d=reg_32(inst.rm_index);
-l_M_Ed:
+			[[fallthrough]];
 		case M_Ed:
+l_M_Ed:
 			if (inst.rm<0xc0) inst_op1_d=LoadMd(inst.rm_eaa);
 			else inst_op1_d=reg_32(inst.rm_eai);
 			break;
 		case M_GdEd:
 			if (inst.rm<0xc0) inst_op2_d=LoadMd(inst.rm_eaa);
 			else inst_op2_d=reg_32(inst.rm_eai);
+			[[fallthrough]];
 		case M_Gd:
 			inst_op1_d=reg_32(inst.rm_index);
 			break;
-/* Others */		
-
+/* Others */
 		case M_SEG:
 			//TODO Check for limit
 			inst_op1_d=SegValue((SegNames)inst.rm_index);
@@ -175,6 +182,7 @@ l_M_Ed:
 			inst_op2_d=LoadMw(inst.rm_eaa+4);
 			break;
 		case M_EA:
+			if (inst.rm>=0xc0) goto illegalopcode;
 			inst_op1_d=inst.rm_off;
 			break;
 		case M_POPw:
@@ -205,7 +213,7 @@ l_M_Ed:
 		case 0:
 			break;
 		default:
-			LOG(LOG_CPU,LOG_ERROR)("MODRM:Unhandled load %d entry %x",inst.code.extra,inst.entry);
+			LOG(LOG_CPU,LOG_ERROR)("MODRM:Unhandled load %d entry %x",inst.code.extra,static_cast<uint32_t>(inst.entry));
 			break;
 		}
 		break;
@@ -250,16 +258,19 @@ l_M_Ed:
 /* Direct load of registers */
 	case L_REGbIb:
 		inst_op2_d=Fetchb();
+		[[fallthrough]];
 	case L_REGb:
 		inst_op1_d=reg_8(inst.code.extra);
 		break;
 	case L_REGwIw:
 		inst_op2_d=Fetchw();
+		[[fallthrough]];
 	case L_REGw:
 		inst_op1_d=reg_16(inst.code.extra);
 		break;
 	case L_REGdId:
 		inst_op2_d=Fetchd();
+		[[fallthrough]];
 	case L_REGd:
 		inst_op1_d=reg_32(inst.code.extra);
 		break;
@@ -379,17 +390,19 @@ l_M_Ed:
 	case D_XLAT:
 		if (inst.prefix & PREFIX_SEG) {
 			if (inst.prefix & PREFIX_ADDR) {
-				reg_al=LoadMb(inst.seg.base+(Bit32u)(reg_ebx+reg_al));
-			} else {
-				reg_al=LoadMb(inst.seg.base+(Bit16u)(reg_bx+reg_al));
-			}
-		} else {
+			        reg_al = LoadMb(inst.seg.base + (reg_ebx + reg_al));
+		        } else {
+			        reg_al = LoadMb(inst.seg.base +
+			                        (Bit16u)(reg_bx + reg_al));
+		        }
+	        } else {
 			if (inst.prefix & PREFIX_ADDR) {
-				reg_al=LoadMb(SegBase(ds)+(Bit32u)(reg_ebx+reg_al));
-			} else {
-				reg_al=LoadMb(SegBase(ds)+(Bit16u)(reg_bx+reg_al));
-			}
-		}
+			        reg_al = LoadMb(SegBase(ds) + (reg_ebx + reg_al));
+		        } else {
+			        reg_al = LoadMb(SegBase(ds) +
+			                        (Bit16u)(reg_bx + reg_al));
+		        }
+	        }
 		goto nextopcode;
 	case D_CBW:
 		reg_ax=(Bit8s)reg_al;
@@ -505,14 +518,17 @@ l_M_Ed:
 		CPU_SW_Interrupt_NoIOPLCheck(1,GetIP());
 		continue;
 	case D_RDTSC: {
-		if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMSLOW) goto illegalopcode;
-		Bit64s tsc=(Bit64s)(PIC_FullIndex()*(double)(CPU_CycleAutoAdjust?70000:CPU_CycleMax));
-		reg_edx=(Bit32u)(tsc>>32);
-		reg_eax=(Bit32u)(tsc&0xffffffff);
+		if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMSLOW)
+			goto illegalopcode;
+	        Bit64s tsc = (Bit64s)(PIC_FullIndex() *
+	                              static_cast<double>(
+	                                      CPU_CycleAutoAdjust ? 70000 : CPU_CycleMax));
+	        reg_edx = (Bit32u)(tsc >> 32);
+		reg_eax = (Bit32u)(tsc & 0xffffffff);
 		break;
-		}
+	}
 	default:
-		LOG(LOG_CPU,LOG_ERROR)("LOAD:Unhandled code %d opcode %X",inst.code.load,inst.entry);
+		LOG(LOG_CPU, LOG_ERROR)("LOAD:Unhandled code %d opcode %X", inst.code.load, static_cast<uint32_t>(inst.entry));
 		goto illegalopcode;
 }
 

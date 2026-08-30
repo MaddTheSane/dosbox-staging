@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,13 +16,18 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "shell.h"
+
 #include <climits>
 #include <stdlib.h>
 #include <string.h>
 
-#include "shell.h"
+#include "logging.h"
 #include "support.h"
 
+//--Added 2013-09-22 by Alun Bestor to let Boxer track batch files
+#include "BXCoalface.h"
+//--End of modifications
 // Permitted ASCII control characters in batch files
 constexpr uint8_t BACKSPACE = 8;
 constexpr uint8_t CARRIAGE_RETURN = '\r';
@@ -60,8 +65,13 @@ BatchFile::BatchFile(DOS_Shell *host,
 
 BatchFile::~BatchFile() {
 	delete cmd;
-	shell->bf=prev;
-	shell->echo=echo;
+	assert(shell);
+	shell->bf = prev;
+	shell->echo = echo;
+
+    //--Added 2013-09-22 by Alun Bestor to let Boxer track the lifecycle of the batch file
+    boxer_shellDidEndBatchFile(shell, filename.c_str());
+    //--End of modifications
 }
 
 // TODO: Refactor this sprawling function into smaller ones without GOTOs
@@ -69,8 +79,7 @@ bool BatchFile::ReadLine(char * line) {
 	//Open the batchfile and seek to stored postion
 	if (!DOS_OpenFile(filename.c_str(),(DOS_NOT_INHERIT|OPEN_READ),&file_handle)) {
 		LOG(LOG_MISC,LOG_ERROR)("ReadLine Can't open BatchFile %s",filename.c_str());
-		delete this;
-		return false;
+		return false; // Parent deletes this BatchFile on negative return
 	}
 	DOS_SeekFile(file_handle,&(this->location),DOS_SEEK_SET);
 
@@ -78,6 +87,7 @@ bool BatchFile::ReadLine(char * line) {
 	uint8_t data = 0;
 	char val = 0;
 	char temp[CMD_MAXLINE] = "";
+	char temp_cycles_hack[CMD_MAXLINE];
 emptyline:
 	char * cmd_write=temp;
 	do {
@@ -94,8 +104,11 @@ emptyline:
 			 * international ASCII characters that are wrapped when
 			 * char is a signed type
 			 */
-			if (val < 0 || val > UNIT_SEPARATOR ||
-			    val == BACKSPACE || val == ESC || val == TAB) {
+			if (
+#if (CHAR_MIN < 0) // char is signed
+			    val < 0 ||
+#endif
+			    val > UNIT_SEPARATOR || val == BACKSPACE || val == ESC || val == TAB) {
 				// Only add it if room for it (and trailing zero)
 				// in the buffer, but do the check here instead
 				// at the end So we continue reading till EOL/EOF
@@ -103,17 +116,16 @@ emptyline:
 					*cmd_write++ = val;
 				}
 			} else if (val != LINE_FEED && val != CARRIAGE_RETURN) {
-				shell->WriteOut(MSG_Get("SHELL_ILLEGAL_CONTROL_CHARACTER"),
-				                val, val);
+				DEBUG_LOG_MSG("Encountered non-standard character: Dec %03u and Hex %#04x",
+				              val, val);
 			}
 		}
 	} while (val != LINE_FEED && bytes_read);
 	*cmd_write=0;
 	if (!bytes_read && cmd_write == temp) {
-		//Close file and delete bat file
+		// Close the file and delete this BatchFile on return
 		DOS_CloseFile(file_handle);
-		delete this;
-		return false;
+		return false; // Parent deletes this BatchFile on negative return
 	}
 	if (!strlen(temp)) goto emptyline;
 	if (temp[0]==':') goto emptyline;
@@ -123,9 +135,9 @@ emptyline:
 	// Finally it moves the cmd_write pointer ahead by the length copied.
 	auto append_cmd_write = [&cmd_write, &line](const char *src) {
 		const auto src_len = strlen(src);
-		const auto req_len = cmd_write - line + static_cast<int>(src_len);
-		if (req_len < CMD_MAXLINE - 1) {
-			safe_strncpy(cmd_write, src, src_len);
+		const auto req_len = cmd_write - line + static_cast<int>(src_len) + 1;
+		if (src_len && req_len < CMD_MAXLINE) {
+			safe_strncpy(cmd_write, src, req_len);
 			cmd_write += src_len;
 		}
 	};
@@ -155,7 +167,9 @@ emptyline:
 				next -= '0';
 				if (cmd->GetCount()<(unsigned int)next) continue;
 				std::string word;
+#if (CHAR_MIN < 0) // char is signed
 				assert(next >= 0);
+#endif
 				if (!cmd->FindCommand(static_cast<unsigned>(next), word))
 					continue;
 				append_cmd_write(word.c_str());
@@ -163,8 +177,28 @@ emptyline:
 			} else {
 				/* Not a command line number has to be an environment */
 				char * first = strchr(cmd_read,'%');
-				/* No env afterall. Ignore a single % */
-				if (!first) {/* *cmd_write++ = '%';*/continue;}
+				/* No env after all. Ignore a single % */
+				if (!first) {
+					/* *cmd_write++ = '%';*/
+					//check if input contains cycles + max/auto  and that next character is space or empty
+					//If so, don't ignore it. This way cycles can still be set from within batch files
+					char peak = *(cmd_read);
+					if (peak == 0 || peak == ' ' || peak == '\r' || peak == '\n') {
+						strncpy(temp_cycles_hack,temp,cmd_read-temp);
+						temp_cycles_hack[cmd_read-temp] = 0;
+						upcase(temp_cycles_hack);
+						const char* cycles_test_cycles = strstr(temp_cycles_hack,"CYCLES");
+						if (cycles_test_cycles) {
+							const char* cycles_test_max = strstr(cycles_test_cycles,"MAX");
+							const char* cycles_test_auto = strstr(cycles_test_cycles,"AUTO");
+							if ( cycles_test_max  || cycles_test_auto )	{
+								   if (((cmd_write - line) + 1) < (CMD_MAXLINE - 1))
+									   *cmd_write++ = '%';
+							}
+						}
+					}
+					continue;
+				}
 				*first++ = 0;
 				std::string env;
 				if (shell->GetEnvStr(cmd_read,env)) {
@@ -214,14 +248,19 @@ again:
 			// Note: the negative allowance permits high
 			// international ASCII characters that are wrapped when
 			// char is a signed type
-			if (val < 0 || val > UNIT_SEPARATOR) {
+
+			if (
+#if (CHAR_MIN < 0) // char is signed
+			    val < 0 ||
+#endif
+			    val > UNIT_SEPARATOR) {
 				if (cmd_write - cmd_buffer + 1 < CMD_MAXLINE - 1) {
 					*cmd_write++ = val;
 				}
 			} else if (val != BACKSPACE && val != CARRIAGE_RETURN &&
 			           val != ESC && val != LINE_FEED && val != TAB) {
-				shell->WriteOut(MSG_Get("SHELL_ILLEGAL_CONTROL_CHARACTER"),
-				                val, val);
+				DEBUG_LOG_MSG("Encountered non-standard character: Dec %03u and Hex %#04x",
+				              val, val);
 			}
 		}
 	} while (val != LINE_FEED && bytes_read);
@@ -257,6 +296,7 @@ again:
 	return false;
 }
 
-void BatchFile::Shift(void) {
+void BatchFile::Shift()
+{
 	cmd->Shift(1);
 }

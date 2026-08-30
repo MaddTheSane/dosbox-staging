@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -153,7 +153,7 @@
 			Bitu which=(rm >> 3) & 7;
 			if (rm < 0xc0 ) {
 				rm |= 0xc0;
-				LOG(LOG_CPU,LOG_ERROR)("MOV XXX,CR%u with non-register",which);
+				LOG(LOG_CPU,LOG_ERROR)("MOV XXX,CR%u with non-register", static_cast<uint32_t>(which));
 			}
 			GetEArd;
 			Bit32u crx_value;
@@ -167,7 +167,7 @@
 			Bitu which=(rm >> 3) & 7;
 			if (rm < 0xc0 ) {
 				rm |= 0xc0;
-				LOG(LOG_CPU,LOG_ERROR)("MOV XXX,DR%u with non-register",which);
+				LOG(LOG_CPU,LOG_ERROR)("MOV XXX,DR%u with non-register", static_cast<uint32_t>(which));
 			}
 			GetEArd;
 			Bit32u drx_value;
@@ -181,7 +181,7 @@
 			Bitu which=(rm >> 3) & 7;
 			if (rm < 0xc0 ) {
 				rm |= 0xc0;
-				LOG(LOG_CPU,LOG_ERROR)("MOV XXX,CR%u with non-register",which);
+				LOG(LOG_CPU,LOG_ERROR)("MOV XXX,CR%u with non-register", static_cast<uint32_t>(which));
 			}
 			GetEArd;
 			if (CPU_WRITE_CRX(which,*eard)) RUNEXCEPTION();
@@ -193,7 +193,7 @@
 			Bitu which=(rm >> 3) & 7;
 			if (rm < 0xc0 ) {
 				rm |= 0xc0;
-				LOG(LOG_CPU,LOG_ERROR)("MOV DR%u,XXX with non-register",which);
+				LOG(LOG_CPU,LOG_ERROR)("MOV DR%u,XXX with non-register", static_cast<uint32_t>(which));
 			}
 			GetEArd;
 			if (CPU_WRITE_DRX(which,*eard)) RUNEXCEPTION();
@@ -205,7 +205,7 @@
 			Bitu which=(rm >> 3) & 7;
 			if (rm < 0xc0 ) {
 				rm |= 0xc0;
-				LOG(LOG_CPU,LOG_ERROR)("MOV XXX,TR%u with non-register",which);
+				LOG(LOG_CPU,LOG_ERROR)("MOV XXX,TR%u with non-register", static_cast<uint32_t>(which));
 			}
 			GetEArd;
 			Bit32u trx_value;
@@ -219,7 +219,7 @@
 			Bitu which=(rm >> 3) & 7;
 			if (rm < 0xc0 ) {
 				rm |= 0xc0;
-				LOG(LOG_CPU,LOG_ERROR)("MOV TR%u,XXX with non-register",which);
+				LOG(LOG_CPU,LOG_ERROR)("MOV TR%u,XXX with non-register", static_cast<uint32_t>(which));
 			}
 			GetEArd;
 			if (CPU_WRITE_TRX(which,*eard)) RUNEXCEPTION();
@@ -227,16 +227,21 @@
 		break;
 	CASE_0F_B(0x31)												/* RDTSC */
 		{
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMSLOW) goto illegal_opcode;
+			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMSLOW)
+				goto illegal_opcode;
 			/* Use a fixed number when in auto cycles mode as else the reported value changes constantly */
-			Bit64s tsc=(Bit64s)(PIC_FullIndex()*(double) (CPU_CycleAutoAdjust?70000:CPU_CycleMax));
-			reg_edx=(Bit32u)(tsc>>32);
-			reg_eax=(Bit32u)(tsc&0xffffffff);
+	                Bit64s tsc = (Bit64s)(PIC_FullIndex() *
+	                                      static_cast<double>(CPU_CycleAutoAdjust
+	                                                                  ? 70000
+	                                                                  : CPU_CycleMax));
+	                reg_edx = (Bit32u)(tsc >> 32);
+			reg_eax = (Bit32u)(tsc & 0xffffffff);
 		}
 		break;
-	CASE_0F_W(0x80)												/* JO */
-		JumpCond16_w(TFLG_O);break;
-	CASE_0F_W(0x81)												/* JNO */
+	CASE_0F_W(0x80) /* JO */
+		JumpCond16_w(TFLG_O);
+		break;
+	CASE_0F_W(0x81) /* JNO */
 		JumpCond16_w(TFLG_NO);break;
 	CASE_0F_W(0x82)												/* JB */
 		JumpCond16_w(TFLG_B);break;
@@ -316,6 +321,7 @@
 				SETFLAGBIT(CF,(*earw & mask));
 			} else {
 				GetEAa;eaa+=(((Bit16s)*rmrw)>>4)*2;
+				if (!TEST_PREFIX_ADDR) FixEA16;
 				Bit16u old=LoadMw(eaa);
 				SETFLAGBIT(CF,(old & mask));
 			}
@@ -342,6 +348,7 @@
 				*earw|=mask;
 			} else {
 				GetEAa;eaa+=(((Bit16s)*rmrw)>>4)*2;
+				if (!TEST_PREFIX_ADDR) FixEA16;
 				Bit16u old=LoadMw(eaa);
 				SETFLAGBIT(CF,(old & mask));
 				SaveMw(eaa,old | mask);
@@ -433,6 +440,7 @@
 				*earw&= ~mask;
 			} else {
 				GetEAa;eaa+=(((Bit16s)*rmrw)>>4)*2;
+				if (!TEST_PREFIX_ADDR) FixEA16;
 				Bit16u old=LoadMw(eaa);
 				SETFLAGBIT(CF,(old & mask));
 				SaveMw(eaa,old & ~mask);
@@ -526,6 +534,7 @@
 				*earw^=mask;
 			} else {
 				GetEAa;eaa+=(((Bit16s)*rmrw)>>4)*2;
+				if (!TEST_PREFIX_ADDR) FixEA16;
 				Bit16u old=LoadMw(eaa);
 				SETFLAGBIT(CF,(old & mask));
 				SaveMw(eaa,old ^ mask);

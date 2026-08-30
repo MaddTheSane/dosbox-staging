@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -36,6 +36,12 @@ CNullModem::CNullModem(const uint8_t port_idx, CommandLine *cmd)
 	tx_gather = 12;
 	uint32_t bool_temp = 0;
 
+	// enet: Setting to 1 enables enet on the port, otherwise TCP.
+	if (getUintFromString("sock:", bool_temp, cmd)) {
+		if (bool_temp == 1) {
+			socketType = SOCKET_TYPE_ENET;
+		}
+	}
 	// usedtr: The nullmodem will
 	// 1) when it is client connect to the server not immediately but
 	//    as soon as a modem-aware application is started (DTR is switched on).
@@ -82,23 +88,21 @@ CNullModem::CNullModem(const uint8_t port_idx, CommandLine *cmd)
 	// socket inheritance (client-alike)
 	if (getUintFromString("inhsocket:", bool_temp, cmd)) {
 #ifdef NATIVESOCKETS
-		if (Netwrapper_GetCapabilities()&NETWRAPPER_TCP_NATIVESOCKET) {
-			if (bool_temp==1) {
-				int sock;
-				if (control->cmdline->FindInt("-socket",sock,true)) {
-					dtrrespect=false;
-					transparent=true;
-					LOG_MSG("SERIAL: Port %" PRIu8 " inheritance "
-					        "socket handle: %d",
-					        GetPortNumber(), sock);
-					if (!ClientConnect(new TCPClientSocket(sock)))
-						return;
-				} else {
-					LOG_MSG("SERIAL: Port %" PRIu8 " missing "
-					        "\"-socket\" parameter.",
-					        GetPortNumber());
+		if (bool_temp == 1) {
+			int sock;
+			if (control->cmdline->FindInt("-socket", sock, true)) {
+				dtrrespect = false;
+				transparent = true;
+				LOG_MSG("SERIAL: Port %" PRIu8 " inheritance "
+				        "socket handle: %d",
+				        GetPortNumber(), sock);
+				if (!ClientConnect(new TCPClientSocket(sock)))
 					return;
-				}
+			} else {
+				LOG_MSG("SERIAL: Port %" PRIu8 " missing "
+				        "\"-socket\" parameter.",
+				        GetPortNumber());
+				return;
 			}
 		} else {
 			LOG_MSG("SERIAL: Port %" PRIu8 " socket inheritance not "
@@ -128,8 +132,9 @@ CNullModem::CNullModem(const uint8_t port_idx, CommandLine *cmd)
 				setEvent(SERIAL_NULLMODEM_DTR_EVENT, 50);
 				LOG_MSG("SERIAL: Port %" PRIu8 " waiting for DTR ...",
 				        GetPortNumber());
-			} else if (!ClientConnect(new TCPClientSocket((char *)hostnamebuffer,
-			                                              clientport))) {
+			} else if (!ClientConnect(NETClientSocket::NETClientFactory(
+			                   socketType, (char *)hostnamebuffer,
+			                   clientport))) {
 				return;
 			}
 		} else {
@@ -192,8 +197,9 @@ SocketState CNullModem::readChar(uint8_t &val)
 	return SocketState::Good;
 }
 
-bool CNullModem::ClientConnect(TCPClientSocket* newsocket) {
-	uint8_t peernamebuf[16];
+bool CNullModem::ClientConnect(NETClientSocket *newsocket)
+{
+	char peernamebuf[INET_ADDRSTRLEN];
 	clientsocket = newsocket;
  
 	if (!clientsocket->isopen) {
@@ -216,11 +222,12 @@ bool CNullModem::ClientConnect(TCPClientSocket* newsocket) {
 
 bool CNullModem::ServerListen() {
 	// Start the server listen port.
-	serversocket = new TCPServerSocket(serverport);
+	serversocket = NETServerSocket::NETServerFactory(socketType, serverport);
 	if (!serversocket->isopen) return false;
 	LOG_MSG("SERIAL: Port %" PRIu8 " nullmodem server waiting for connection on "
-	        "TCP port %" PRIu16 " ...",
-	        GetPortNumber(), serverport);
+	        "%s port %" PRIu16 " ...",
+	        GetPortNumber(),
+	        (socketType == SOCKET_TYPE_ENET ? "ENet" : "TCP"), serverport);
 	setEvent(SERIAL_SERVER_POLLING_EVENT, 50);
 	setCD(false);
 	return true;
@@ -231,7 +238,7 @@ bool CNullModem::ServerConnect() {
 	clientsocket=serversocket->Accept();
 	if (!clientsocket) return false;
 
-	uint8_t peeripbuf[16];
+	char peeripbuf[INET_ADDRSTRLEN];
 	clientsocket->GetRemoteAddressString(peeripbuf);
 	LOG_MSG("SERIAL: Port %" PRIu8 " a client (%s) has connected.",
 	        GetPortNumber(), peeripbuf);
@@ -265,8 +272,9 @@ void CNullModem::Disconnect() {
 	setCD(false);
 	
 	if (serverport) {
-		serversocket = new TCPServerSocket(serverport);
-		if (serversocket->isopen) 
+		serversocket = NETServerSocket::NETServerFactory(socketType,
+		                                                 serverport);
+		if (serversocket->isopen)
 			setEvent(SERIAL_SERVER_POLLING_EVENT, 50);
 		else delete serversocket;
 	} else if (dtrrespect) {
@@ -419,8 +427,9 @@ void CNullModem::handleUpperEvent(uint16_t type)
 		case SERIAL_NULLMODEM_DTR_EVENT: {
 			if ((!DTR_delta) && getDTR()) {
 				// DTR went positive. Try to connect.
-			        if (ClientConnect(new TCPClientSocket((char *)hostnamebuffer,
-			                                              clientport)))
+			        if (ClientConnect(NETClientSocket::NETClientFactory(
+			                    socketType, (char *)hostnamebuffer,
+			                    clientport)))
 				        break; // no more DTR wait event when
 				               // connected
 		        }

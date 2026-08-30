@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,13 +16,13 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
 #ifndef DOSBOX_CPU_H
 #define DOSBOX_CPU_H
 
-#ifndef DOSBOX_DOSBOX_H
-#include "dosbox.h" 
-#endif
+#include "dosbox.h"
+
+#include "support.h"
+
 #ifndef DOSBOX_REGS_H
 #include "regs.h"
 #endif
@@ -57,6 +57,7 @@ extern Bit32s CPU_CycleLimit;
 extern Bit64s CPU_IODelayRemoved;
 extern bool CPU_CycleAutoAdjust;
 extern bool CPU_SkipCycleAutoAdjust;
+extern bool CPU_AllowSpeedMods;
 extern Bitu CPU_AutoDetermineMode;
 
 extern Bitu CPU_ArchitectureType;
@@ -144,18 +145,19 @@ void CPU_ENTER(bool use32,Bitu bytes,Bitu level);
 #define CPU_INT_NOIOPLCHECK		0x8
 
 void CPU_Interrupt(Bitu num,Bitu type,Bitu oldeip);
-static INLINE void CPU_HW_Interrupt(Bitu num) {
+static inline void CPU_HW_Interrupt(Bitu num) {
 	CPU_Interrupt(num,0,reg_eip);
 }
-static INLINE void CPU_SW_Interrupt(Bitu num,Bitu oldeip) {
+static inline void CPU_SW_Interrupt(Bitu num,Bitu oldeip) {
 	CPU_Interrupt(num,CPU_INT_SOFTWARE,oldeip);
 }
-static INLINE void CPU_SW_Interrupt_NoIOPLCheck(Bitu num,Bitu oldeip) {
+static inline void CPU_SW_Interrupt_NoIOPLCheck(Bitu num,Bitu oldeip) {
 	CPU_Interrupt(num,CPU_INT_SOFTWARE|CPU_INT_NOIOPLCHECK,oldeip);
 }
 
 bool CPU_PrepareException(Bitu which,Bitu error);
 void CPU_Exception(Bitu which,Bitu error=0);
+void CPU_DebugException(Bit32u triggers,Bitu oldeip);
 
 bool CPU_SetSegGeneral(SegNames seg,Bitu value);
 bool CPU_PopSeg(SegNames seg,bool use32);
@@ -166,9 +168,7 @@ Bitu CPU_Pop32(void);
 void CPU_Push16(Bitu value);
 void CPU_Push32(Bitu value);
 
-void CPU_SetFlags(Bitu word,Bitu mask);
-
-
+#define EXCEPTION_DB			1
 #define EXCEPTION_UD			6
 #define EXCEPTION_TS			10
 #define EXCEPTION_NP			11
@@ -183,6 +183,14 @@ void CPU_SetFlags(Bitu word,Bitu mask);
 #define CR0_FPUPRESENT			0x00000010
 #define CR0_PAGING				0x80000000
 
+// reasons for triggering a debug exception
+#define DBINT_BP0               0x00000001
+#define DBINT_BP1               0x00000002
+#define DBINT_BP2               0x00000004
+#define DBINT_BP3               0x00000008
+#define DBINT_GD                0x00002000
+#define DBINT_STEP              0x00004000
+#define DBINT_TASKSWITCH        0x00008000
 
 // *********************************************************************
 // Descriptor
@@ -331,32 +339,57 @@ public:
 	void Load(PhysPt address);
 	void Save(PhysPt address);
 
-	PhysPt GetBase (void) { 
-		return (saved.seg.base_24_31<<24) | (saved.seg.base_16_23<<16) | saved.seg.base_0_15; 
+	PhysPt GetBase()
+	{
+		const auto base = (saved.seg.base_24_31  << 24) |
+		                  (saved.seg.base_16_23 << 16) |
+		                   saved.seg.base_0_15;
+		return static_cast<PhysPt>(base);
 	}
-	Bitu GetLimit (void) {
-		Bitu limit = (saved.seg.limit_16_19<<16) | saved.seg.limit_0_15;
-		if (saved.seg.g)	return (limit<<12) | 0xFFF;
-		return limit;
+
+	uint32_t GetLimit()
+	{
+		const auto limit_16_19 = check_cast<uint8_t>(saved.seg.limit_16_19); // 4 bits
+		const auto limit_0_15 = check_cast<uint16_t>(saved.seg.limit_0_15); // 16 bits
+		const auto limit = (limit_16_19 << 16) | limit_0_15;
+		if (saved.seg.g)
+			return static_cast<uint32_t>((limit << 12) | 0xFFF);
+		return static_cast<uint32_t>(limit);
 	}
-	Bitu GetOffset(void) {
-		return (saved.gate.offset_16_31 << 16) | saved.gate.offset_0_15;
+
+	uint32_t GetOffset()
+	{
+		const auto offset_16_31 = check_cast<uint16_t>(saved.gate.offset_16_31); // 16 bits
+		const auto offset_0_15 = check_cast<uint16_t>(saved.gate.offset_0_15); // 16 bits
+		const auto offset = (offset_16_31 << 16) | offset_0_15;
+		return static_cast<uint32_t>(offset);
 	}
-	Bitu GetSelector(void) {
-		return saved.gate.selector;
+
+	uint16_t GetSelector()
+	{
+		return check_cast<uint16_t>(saved.gate.selector); // 16 bit
 	}
-	Bitu Type(void) {
-		return saved.seg.type;
+
+	uint8_t Type()
+	{
+		return check_cast<uint8_t>(saved.seg.type); // 5 bits
 	}
-	Bitu Conforming(void) {
-		return saved.seg.type & 8;
+
+	uint8_t Conforming()
+	{
+		return check_cast<uint8_t>(saved.seg.type & 8); // 5 bit
 	}
-	Bitu DPL(void) {
-		return saved.seg.dpl;
+
+	uint8_t DPL()
+	{
+		return check_cast<uint8_t>(saved.seg.dpl); // 2 bit
 	}
-	Bitu Big(void) {
-		return saved.seg.big;
+
+	uint8_t Big()
+	{
+		return check_cast<uint8_t>(saved.seg.big); // 1 bit
 	}
+
 public:
 	union {
 		uint32_t fill[2];
@@ -373,9 +406,10 @@ public:
 	void	SetLimit		(Bitu _limit)	{ table_limit= _limit;	}
 
 	bool GetDescriptor	(Bitu selector, Descriptor& desc) {
-		selector&=~7;
+		selector &= ~7ul;
+		const auto nonbitu_selector = check_cast<PhysPt>(selector);
 		if (selector>=table_limit) return false;
-		desc.Load(table_base+(selector));
+		desc.Load(table_base + nonbitu_selector);
 		return true;
 	}
 protected:
@@ -383,29 +417,31 @@ protected:
 	Bitu table_limit;
 };
 
-class GDTDescriptorTable : public DescriptorTable {
+class GDTDescriptorTable final : public DescriptorTable {
 public:
 	bool GetDescriptor(Bitu selector, Descriptor& desc) {
-		Bitu address=selector & ~7;
+		Bitu address = selector & ~7ul;
+		const auto nonbitu_address = check_cast<PhysPt>(address);
 		if (selector & 4) {
 			if (address>=ldt_limit) return false;
-			desc.Load(ldt_base+address);
+			desc.Load(ldt_base + nonbitu_address);
 			return true;
 		} else {
 			if (address>=table_limit) return false;
-			desc.Load(table_base+address);
+			desc.Load(table_base + nonbitu_address);
 			return true;
 		}
 	}
 	bool SetDescriptor(Bitu selector, Descriptor& desc) {
-		Bitu address=selector & ~7;
+		Bitu address = selector & ~7ul;
+		const auto nonbitu_address = check_cast<PhysPt>(address);
 		if (selector & 4) {
 			if (address>=ldt_limit) return false;
-			desc.Save(ldt_base+address);
+			desc.Save(ldt_base + nonbitu_address);
 			return true;
 		} else {
 			if (address>=table_limit) return false;
-			desc.Save(table_base+address);
+			desc.Save(table_base + nonbitu_address);
 			return true;
 		}
 	} 
@@ -434,7 +470,7 @@ private:
 	Bitu ldt_value;
 };
 
-class TSS_Descriptor : public Descriptor {
+class TSS_Descriptor final : public Descriptor {
 public:
 	Bitu IsBusy(void) {
 		return saved.seg.type & 2;
@@ -478,15 +514,8 @@ struct CPUBlock {
 
 extern CPUBlock cpu;
 
-static INLINE void CPU_SetFlagsd(Bitu word) {
-	Bitu mask=cpu.cpl ? FMASK_NORMAL : FMASK_ALL;
-	CPU_SetFlags(word,mask);
-}
-
-static INLINE void CPU_SetFlagsw(Bitu word) {
-	Bitu mask=(cpu.cpl ? FMASK_NORMAL : FMASK_ALL) & 0xffff;
-	CPU_SetFlags(word,mask);
-}
-
+void CPU_SetFlags(const uint32_t word, uint32_t mask);
+void CPU_SetFlagsd(const uint32_t word);
+void CPU_SetFlagsw(const uint32_t word);
 
 #endif

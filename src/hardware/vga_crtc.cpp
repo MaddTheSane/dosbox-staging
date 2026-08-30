@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -32,23 +32,28 @@
 void VGA_MapMMIO(void);
 void VGA_UnmapMMIO(void);
 
-void vga_write_p3d5(Bitu port,Bitu val,Bitu iolen);
-Bitu DEBUG_EnableDebugger(void);
+void vga_write_p3d5(io_port_t port, io_val_t value, io_width_t);
 
-void vga_write_p3d4(Bitu port,Bitu val,Bitu iolen) {
-	crtc(index)=val;
+void vga_write_p3d4(io_port_t, io_val_t value, io_width_t)
+{
+	const auto val = check_cast<uint8_t>(value);
+	crtc(index) = val;
 }
 
-Bitu vga_read_p3d4(Bitu port,Bitu iolen) {
+uint8_t vga_read_p3d4(io_port_t, io_width_t)
+{
 	return crtc(index);
 }
 
-void vga_write_p3d5(Bitu port,Bitu val,Bitu iolen) {
-//	if (crtc(index)>0x18) LOG_MSG("VGA CRCT write %X to reg %X",val,crtc(index));
-	switch(crtc(index)) {
-	case 0x00:	/* Horizontal Total Register */
-		if (crtc(read_only)) break;
-		crtc(horizontal_total)=val;
+void vga_write_p3d5(io_port_t, io_val_t value, io_width_t)
+{
+	const auto val = check_cast<uint8_t>(value);
+	//	if (crtc(index) > 0x18) LOG_MSG("VGA CRCT write %" sBitfs(X) " to reg %X",val,crtc(index));
+	switch (crtc(index)) {
+	case 0x00: /* Horizontal Total Register */
+		if (crtc(read_only))
+			break;
+		crtc(horizontal_total) = val;
 		/* 	0-7  Horizontal Total Character Clocks-5 */
 		break;
 	case 0x01:	/* Horizontal Display End Register */
@@ -90,12 +95,12 @@ void vga_write_p3d5(Bitu port,Bitu val,Bitu iolen) {
 			5-6	Number of character clocks to delay start of display after Horizontal
 				Retrace.
 			7	bit 5 of the End Horizontal Blanking count (See 3d4h index 3 bit 0-4)
-		*/	
+		*/
 		break;
 	case 0x06: /* Vertical Total Register */
 		if (crtc(read_only)) break;
 		if (val != crtc(vertical_total)) {
-			crtc(vertical_total)=val;	
+			crtc(vertical_total)=val;
 			VGA_StartResize();
 		}
 		/*	0-7	Lower 8 bits of the Vertical Total. Bit 8 is found in 3d4h index 7
@@ -214,7 +219,7 @@ void vga_write_p3d5(Bitu port,Bitu val,Bitu iolen) {
 		break;
 	case 0x10:	/* Vertical Retrace Start Register */
 		crtc(vertical_retrace_start)=val;
-		/*	
+		/*
 			0-7	Lower 8 bits of Vertical Retrace Start. Vertical Retrace starts when
 			the line counter reaches this value. Bit 8 is found in 3d4h index 7
 			bit 2. Bit 9 is found in 3d4h index 7 bit 7.
@@ -222,7 +227,7 @@ void vga_write_p3d5(Bitu port,Bitu val,Bitu iolen) {
 		break;
 	case 0x11:	/* Vertical Retrace End Register */
 		crtc(vertical_retrace_end)=val;
-		
+
 		if (IS_EGAVGA_ARCH && !(val & 0x10)) {
 			vga.draw.vret_triggered=false;
 			if (GCC_UNLIKELY(machine==MCH_EGA)) PIC_DeActivateIRQ(9);
@@ -294,7 +299,7 @@ void vga_write_p3d5(Bitu port,Bitu val,Bitu iolen) {
 			crtc(start_vertical_blanking)=val;
 			VGA_StartResize();
 		}
-		/* 
+		/*
 			0-7	Lower 8 bits of Vertical Blank Start. Vertical blanking starts when
 				the line counter reaches this value. Bit 8 is found in 3d4h index 7
 				bit 3.
@@ -359,7 +364,7 @@ void vga_write_p3d5(Bitu port,Bitu val,Bitu iolen) {
 		break;
 	default:
 		if (svga.write_p3d5) {
-			svga.write_p3d5(crtc(index), val, iolen);
+			svga.write_p3d5(crtc(index), val, io_width_t::byte);
 		} else {
 			LOG(LOG_VGAMISC,LOG_NORMAL)("VGA:CRTC:Write to unknown index %X",crtc(index));
 		}
@@ -367,53 +372,32 @@ void vga_write_p3d5(Bitu port,Bitu val,Bitu iolen) {
 	}
 }
 
-Bitu vga_read_p3d5(Bitu port,Bitu iolen) {
-//	LOG_MSG("VGA CRCT read from reg %X",crtc(index));
-	switch(crtc(index)) {
-	case 0x00:	/* Horizontal Total Register */
-		return crtc(horizontal_total);
-	case 0x01:	/* Horizontal Display End Register */
-		return crtc(horizontal_display_end);
-	case 0x02:	/* Start Horizontal Blanking Register */
-		return crtc(start_horizontal_blanking);
-	case 0x03:	/* End Horizontal Blanking Register */
-		return crtc(end_horizontal_blanking);
-	case 0x04:	/* Start Horizontal Retrace Register */
-		return crtc(start_horizontal_retrace);
-	case 0x05:	/* End Horizontal Retrace Register */
-		return crtc(end_horizontal_retrace);
-	case 0x06: /* Vertical Total Register */
-		return crtc(vertical_total);	
-	case 0x07:	/* Overflow Register */
-		return crtc(overflow);
-	case 0x08:	/* Preset Row Scan Register */
-		return crtc(preset_row_scan);
-	case 0x09: /* Maximum Scan Line Register */
-		return crtc(maximum_scan_line);
-	case 0x0A:	/* Cursor Start Register */
-		return crtc(cursor_start);
-	case 0x0B:	/* Cursor End Register */
-		return crtc(cursor_end);
-	case 0x0C:	/* Start Address High Register */
-		return crtc(start_address_high);
-	case 0x0D:	/* Start Address Low Register */
-		return crtc(start_address_low);
-	case 0x0E:	/*Cursor Location High Register */
-		return crtc(cursor_location_high);
-	case 0x0F:	/* Cursor Location Low Register */
-		return crtc(cursor_location_low);
-	case 0x10:	/* Vertical Retrace Start Register */
-		return crtc(vertical_retrace_start);
-	case 0x11:	/* Vertical Retrace End Register */
-		return crtc(vertical_retrace_end);
-	case 0x12:	/* Vertical Display End Register */
-		return crtc(vertical_display_end);
-	case 0x13:	/* Offset register */
-		return crtc(offset);
-	case 0x14:	/* Underline Location Register */
-		return crtc(underline_location);
-	case 0x15:	/* Start Vertical Blank Register */
-		return crtc(start_vertical_blanking);
+uint8_t vga_read_p3d5(io_port_t, io_width_t)
+{
+	//	LOG_MSG("VGA CRCT read from reg %X",crtc(index));
+	switch (crtc(index)) {
+	case 0x00: /* Horizontal Total Register */ return crtc(horizontal_total);
+	case 0x01: /* Horizontal Display End Register */ return crtc(horizontal_display_end);
+	case 0x02: /* Start Horizontal Blanking Register */ return crtc(start_horizontal_blanking);
+	case 0x03: /* End Horizontal Blanking Register */ return crtc(end_horizontal_blanking);
+	case 0x04: /* Start Horizontal Retrace Register */ return crtc(start_horizontal_retrace);
+	case 0x05: /* End Horizontal Retrace Register */ return crtc(end_horizontal_retrace);
+	case 0x06: /* Vertical Total Register */ return crtc(vertical_total);
+	case 0x07: /* Overflow Register */ return crtc(overflow);
+	case 0x08: /* Preset Row Scan Register */ return crtc(preset_row_scan);
+	case 0x09: /* Maximum Scan Line Register */ return crtc(maximum_scan_line);
+	case 0x0A: /* Cursor Start Register */ return crtc(cursor_start);
+	case 0x0B: /* Cursor End Register */ return crtc(cursor_end);
+	case 0x0C: /* Start Address High Register */ return crtc(start_address_high);
+	case 0x0D: /* Start Address Low Register */ return crtc(start_address_low);
+	case 0x0E: /*Cursor Location High Register */ return crtc(cursor_location_high);
+	case 0x0F: /* Cursor Location Low Register */ return crtc(cursor_location_low);
+	case 0x10: /* Vertical Retrace Start Register */ return crtc(vertical_retrace_start);
+	case 0x11: /* Vertical Retrace End Register */ return crtc(vertical_retrace_end);
+	case 0x12: /* Vertical Display End Register */ return crtc(vertical_display_end);
+	case 0x13: /* Offset register */ return crtc(offset);
+	case 0x14: /* Underline Location Register */ return crtc(underline_location);
+	case 0x15: /* Start Vertical Blank Register */ return crtc(start_vertical_blanking);
 	case 0x16:	/*  End Vertical Blank Register */
 		return crtc(end_vertical_blanking);
 	case 0x17:	/* Mode Control Register */
@@ -422,14 +406,10 @@ Bitu vga_read_p3d5(Bitu port,Bitu iolen) {
 		return crtc(line_compare);
 	default:
 		if (svga.read_p3d5) {
-			return svga.read_p3d5(crtc(index), iolen);
+			return svga.read_p3d5(crtc(index), io_width_t::byte);
 		} else {
 			LOG(LOG_VGAMISC,LOG_NORMAL)("VGA:CRTC:Read from unknown index %X",crtc(index));
 			return 0x0;
 		}
 	}
 }
-
-
-
-

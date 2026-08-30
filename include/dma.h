@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -54,7 +54,8 @@ public:
 	bool request;
 	DMA_CallBack callback;
 
-	DmaChannel(Bit8u num, bool dma16);
+	DmaChannel(uint8_t num, bool dma16);
+
 	void DoCallBack(DMAEvent event) {
 		if (callback)
 			callback(this, event);
@@ -122,8 +123,8 @@ public:
 			return nullptr;
 	}
 
-	void WriteControllerReg(Bitu reg,Bitu val,Bitu len);
-	Bitu ReadControllerReg(Bitu reg,Bitu len);
+	void WriteControllerReg(io_port_t reg, io_val_t value, io_width_t width);
+	uint16_t ReadControllerReg(io_port_t reg, io_width_t width);
 };
 
 DmaChannel * GetDMAChannel(Bit8u chan);

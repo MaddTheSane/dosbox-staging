@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -18,6 +18,8 @@
 
 #ifndef DOSBOX_BIOS_H
 #define DOSBOX_BIOS_H
+
+#include "dosbox.h"
 
 #define BIOS_BASE_ADDRESS_COM1          0x400
 #define BIOS_BASE_ADDRESS_COM2          0x402
@@ -77,7 +79,7 @@
 #define BIOS_COM3_TIMEOUT               0x47e
 #define BIOS_COM4_TIMEOUT               0x47f
 /* 0x47e is reserved */ //<- why that?
-/* 0x47f-0x4ff is unknow for me */
+/* 0x47f-0x4ff is unknown for me */
 #define BIOS_KEYBOARD_BUFFER_START      0x480
 #define BIOS_KEYBOARD_BUFFER_END        0x482
 
@@ -108,7 +110,7 @@
 #define BIOS_DEFAULT_IRQ0_LOCATION		(RealMake(0xf000,0xfea5))
 #define BIOS_DEFAULT_IRQ1_LOCATION		(RealMake(0xf000,0xe987))
 #define BIOS_DEFAULT_IRQ2_LOCATION		(RealMake(0xf000,0xff55))
-#define BIOS_DEFAULT_RESET_LOCATION		(RealMake(0xf000,0xe05b))
+#define BIOS_DEFAULT_RESET_LOCATION		(RealMake(0xf000,(machine==MCH_PCJR)?0x0043:0xe05b))
 
 /* maximum of scancodes handled by keyboard bios routines */
 #define MAX_SCAN_CODE 0x58
@@ -132,5 +134,6 @@ bool BIOS_AddKeyToBuffer(Bit16u code);
 void INT10_ReloadRomFonts();
 
 void BIOS_SetComPorts (Bit16u baseaddr[]);
+void BIOS_SetLPTPort(Bitu port, Bit16u baseaddr);
 
 #endif

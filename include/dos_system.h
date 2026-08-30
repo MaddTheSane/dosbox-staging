@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -64,6 +64,7 @@ public:
 	          refCtr(0),
 	          open(false),
 	          name(""),
+	          newtime(false),
 	          hdrive(0xff)
 	{}
 
@@ -91,6 +92,10 @@ public:
 	virtual void AddRef() { refCtr++; }
 	virtual Bits RemoveRef() { return --refCtr; }
 	virtual bool UpdateDateTimeFromHost() { return true; }
+	//--Added 2011-11-03 by Alun Bestor to let Boxer inform open file handles
+	//that their physical backing media will be removed.
+	virtual void willBecomeUnavailable() {}
+	//--End of modifications
 	virtual void SetFlagReadOnlyMedium() {}
 
 	void SetDrive(Bit8u drv) { hdrive=drv;}
@@ -102,7 +107,8 @@ public:
 	Bits refCtr;
 	bool open;
 	std::string name;
-/* Some Device Specific Stuff */
+	bool newtime;
+	/* Some Device Specific Stuff */
 private:
 	Bit8u hdrive;
 };
@@ -133,6 +139,7 @@ public:
 	virtual Bit16u	GetInformation(void);
 	virtual bool	ReadFromControlChannel(PhysPt bufptr,Bit16u size,Bit16u * retcode);
 	virtual bool	WriteToControlChannel(PhysPt bufptr,Bit16u size,Bit16u * retcode);
+	virtual uint8_t GetStatus(bool input_flag);
 	void SetDeviceNumber(Bitu num) { devnum=num;}
 private:
 	Bitu devnum;
@@ -140,7 +147,7 @@ private:
 
 class localFile : public DOS_File {
 public:
-	localFile(const char *name, FILE *handle);
+	localFile(const char *name, FILE *handle, const char *basedir);
 	localFile(const localFile &) = delete;            // prevent copying
 	localFile &operator=(const localFile &) = delete; // prevent assignment
 	bool Read(uint8_t *data, uint16_t *size);
@@ -150,9 +157,15 @@ public:
 	uint16_t GetInformation();
 	bool UpdateDateTimeFromHost();
 	void Flush();
+	//--Added 2011-11-03 by Alun Bestor to let Boxer inform open file handles
+	//that their physical backing media will be removed.
+	void willBecomeUnavailable(void);
+	//--End of modifications
 	void SetFlagReadOnlyMedium() { read_only_medium = true; }
+	const char *GetBaseDir() const { return basedir; }
 	FILE *fhandle = nullptr; // todo handle this properly
 private:
+	const char *basedir;
 	long stream_pos = 0;
 	bool ftell_and_check();
 	void fseek_and_check(int whence);
@@ -289,7 +302,7 @@ public:
 	virtual bool FileExists(const char* name)=0;
 	virtual bool FileStat(const char* name, FileStat_Block * const stat_block)=0;
 	virtual Bit8u GetMediaByte(void)=0;
-	virtual void SetDir(const char *path) { safe_strcpy(curdir, path); }
+	virtual void SetDir(const char *path);
 	virtual void EmptyCache() { dirCache.EmptyCache(); }
 	virtual bool isRemote(void)=0;
 	virtual bool isRemovable(void)=0;
@@ -302,6 +315,15 @@ public:
 
 	// Can be overridden for example in iso images
 	virtual const char *GetLabel() { return dirCache.GetLabel(); }
+	virtual void SetLabel(const char *label, bool iscdrom, bool updatable) {};
+
+	//--Added 2009-10-25 by Alun Bestor to access the base system path for a drive
+	char systempath[CROSS_LEN];
+	virtual char * getSystemPath(void);
+
+	//Added 2010-12-11 by Alun Bestor to give Boxer the ability to do directory cache lookups
+	virtual bool getShortName(const char* dirpath, const char*filename, char* shortname) { return false; };
+	//--End of modifications
 
 	DOS_Drive_Cache dirCache;
 

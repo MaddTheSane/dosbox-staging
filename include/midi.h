@@ -1,8 +1,8 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2002-2020  The DOSBox Team
- *  Copyright (C) 2020-2020  The dosbox-staging team
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -28,13 +28,21 @@
 
 class Program;
 
+extern uint8_t MIDI_evt_len[256];
+
+constexpr auto MIDI_SYSEX_SIZE = 8192;
+
 void MIDI_Init(Section *sec);
 bool MIDI_Available();
 void MIDI_ListAll(Program *output_handler);
 void MIDI_RawOutByte(uint8_t data);
 
 #if C_FLUIDSYNTH
-void FLUID_AddConfigSection(Config *conf);
+void FLUID_AddConfigSection(const config_ptr_t &conf);
+#endif
+
+#if C_MT32EMU
+void MT32_AddConfigSection(const config_ptr_t &conf);
 #endif
 
 #endif

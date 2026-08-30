@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,8 +16,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
 #include "dosbox.h"
+
 #if C_DEBUG
 
 #include <string.h>
@@ -42,6 +42,7 @@ using namespace std;
 #include "mixer.h"
 #include "timer.h"
 #include "paging.h"
+#include "string_utils.h"
 #include "support.h"
 #include "shell.h"
 #include "programs.h"
@@ -77,7 +78,7 @@ char* AnalyzeInstruction(char* inst, bool saveSelector);
 Bit32u GetHexValue(char* str, char*& hex);
 
 #if 0
-class DebugPageHandler : public PageHandler {
+class DebugPageHandler final : public PageHandler {
 public:
 	Bitu readb(PhysPt /*addr*/) {
 	}
@@ -134,8 +135,8 @@ static void SetColor(Bitu test) {
 	}
 }
 
-#define MAXCMDLEN 254 
-struct SCodeViewData {	
+#define MAXCMDLEN 254
+struct SCodeViewData {
 	int     cursorPos;
 	Bit16u  firstInstSize;
 	Bit16u  useCS;
@@ -173,7 +174,7 @@ Bit32u PhysMakeProt(Bit16u selector, Bit32u offset)
 	Descriptor desc;
 	if (cpu.gdt.GetDescriptor(selector,desc)) return desc.GetBase()+offset;
 	return 0;
-};
+}
 
 Bit32u GetAddress(Bit16u seg, Bit32u offset)
 {
@@ -205,7 +206,7 @@ bool GetDescriptorInfo(char* selname, char* out1, char* out2)
 	if (cpu.gdt.GetDescriptor(sel,desc)) {
 		switch (desc.Type()) {
 			case DESC_TASK_GATE:
-				sprintf(out1,"%s: s:%08" sBitfs(X) " type:%02X p",selname,desc.GetSelector(),desc.saved.gate.type);
+				sprintf(out1,"%s: s:%08X type:%02X p",selname,desc.GetSelector(),desc.saved.gate.type);
 				sprintf(out2,"    TaskGate   dpl : %01X %1X",desc.saved.gate.dpl,desc.saved.gate.p);
 				return true;
 			case DESC_LDT:
@@ -214,30 +215,30 @@ bool GetDescriptorInfo(char* selname, char* out1, char* out2)
 			case DESC_386_TSS_A:
 			case DESC_386_TSS_B:
 				sprintf(out1,"%s: b:%08X type:%02X pag",selname,desc.GetBase(),desc.saved.seg.type);
-				sprintf(out2,"    l:%08" sBitfs(X) " dpl : %01X %1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.g);
+				sprintf(out2,"    l:%08X dpl : %01X %1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.g);
 				return true;
 			case DESC_286_CALL_GATE:
 			case DESC_386_CALL_GATE:
-				sprintf(out1,"%s: s:%08" sBitfs(X) " type:%02X p params: %02X",selname,desc.GetSelector(),desc.saved.gate.type,desc.saved.gate.paramcount);
-				sprintf(out2,"    o:%08" sBitfs(X) " dpl : %01X %1X",desc.GetOffset(),desc.saved.gate.dpl,desc.saved.gate.p);
+				sprintf(out1,"%s: s:%08X type:%02X p params: %02X",selname,desc.GetSelector(),desc.saved.gate.type,desc.saved.gate.paramcount);
+				sprintf(out2,"    o:%08X dpl : %01X %1X",desc.GetOffset(),desc.saved.gate.dpl,desc.saved.gate.p);
 				return true;
 			case DESC_286_INT_GATE:
 			case DESC_286_TRAP_GATE:
 			case DESC_386_INT_GATE:
 			case DESC_386_TRAP_GATE:
-				sprintf(out1,"%s: s:%08" sBitfs(X) " type:%02X p",selname,desc.GetSelector(),desc.saved.gate.type);
-				sprintf(out2,"    o:%08" sBitfs(X) " dpl : %01X %1X",desc.GetOffset(),desc.saved.gate.dpl,desc.saved.gate.p);
+				sprintf(out1,"%s: s:%08X type:%02X p",selname,desc.GetSelector(),desc.saved.gate.type);
+				sprintf(out2,"    o:%08X dpl : %01X %1X",desc.GetOffset(),desc.saved.gate.dpl,desc.saved.gate.p);
 				return true;
 		}
 		sprintf(out1,"%s: b:%08X type:%02X parbg",selname,desc.GetBase(),desc.saved.seg.type);
-		sprintf(out2,"    l:%08" sBitfs(X) " dpl : %01X %1X%1X%1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.r,desc.saved.seg.big,desc.saved.seg.g);
+		sprintf(out2,"    l:%08X dpl : %01X %1X%1X%1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.r,desc.saved.seg.big,desc.saved.seg.g);
 		return true;
 	} else {
 		strcpy(out1,"                                     ");
 		strcpy(out2,"                                     ");
 	}
 	return false;
-};
+}
 
 /********************/
 /* DebugVar   stuff */
@@ -246,13 +247,19 @@ bool GetDescriptorInfo(char* selname, char* out1, char* out2)
 class CDebugVar
 {
 public:
-	CDebugVar(char* _name, PhysPt _adr) { adr=_adr; safe_strncpy(name,_name,16); hasvalue = false; value = 0; };
-	
-	char*  GetName (void)                 { return name; };
-	PhysPt GetAdr  (void)                 { return adr; };
-	void   SetValue(bool has, Bit16u val) { hasvalue = has; value=val; };
-	Bit16u GetValue(void)                 { return value; };
-	bool   HasValue(void)                 { return hasvalue; };
+	CDebugVar(const char *vname, PhysPt address)
+	        : adr(address),
+	          hasvalue(false),
+	          value(0)
+	{
+		safe_strcpy(name, vname);
+	}
+
+	char*  GetName (void)                 { return name; }
+	PhysPt GetAdr  (void)                 { return adr; }
+	void   SetValue(bool has, Bit16u val) { hasvalue = has; value=val; }
+	Bit16u GetValue(void)                 { return value; }
+	bool   HasValue(void)                 { return hasvalue; }
 
 private:
 	PhysPt  adr;
@@ -260,7 +267,7 @@ private:
 	bool    hasvalue;
 	Bit16u  value;
 
-public: 
+public:
 	static void       InsertVariable(char* name, PhysPt adr);
 	static CDebugVar* FindVar       (PhysPt adr);
 	static void       DeleteAll     ();
@@ -288,25 +295,25 @@ class CBreakpoint
 public:
 
 	CBreakpoint(void);
-	void					SetAddress		(Bit16u seg, Bit32u off)	{ location = GetAddress(seg,off); type = BKPNT_PHYSICAL; segment = seg; offset = off; };
-	void					SetAddress		(PhysPt adr)				{ location = adr; type = BKPNT_PHYSICAL; };
-	void					SetInt			(Bit8u _intNr, Bit16u ah, Bit16u al)	{ intNr = _intNr, ahValue = ah; alValue = al; type = BKPNT_INTERRUPT; };
-	void					SetOnce			(bool _once)				{ once = _once; };
-	void					SetType			(EBreakpoint _type)			{ type = _type; };
-	void					SetValue		(Bit8u value)				{ ahValue = value; };
-	void					SetOther		(Bit8u other)				{ alValue = other; };
+	void					SetAddress		(Bit16u seg, Bit32u off)	{ location = GetAddress(seg,off); type = BKPNT_PHYSICAL; segment = seg; offset = off; }
+	void					SetAddress		(PhysPt adr)				{ location = adr; type = BKPNT_PHYSICAL; }
+	void					SetInt			(Bit8u _intNr, Bit16u ah, Bit16u al)	{ intNr = _intNr, ahValue = ah; alValue = al; type = BKPNT_INTERRUPT; }
+	void					SetOnce			(bool _once)				{ once = _once; }
+	void					SetType			(EBreakpoint _type)			{ type = _type; }
+	void					SetValue		(Bit8u value)				{ ahValue = value; }
+	void					SetOther		(Bit8u other)				{ alValue = other; }
 
-	bool					IsActive		(void)						{ return active; };
+	bool					IsActive		(void)						{ return active; }
 	void					Activate		(bool _active);
 
-	EBreakpoint				GetType			(void)						{ return type; };
-	bool					GetOnce			(void)						{ return once; };
-	PhysPt					GetLocation		(void)						{ return location; };
-	Bit16u					GetSegment		(void)						{ return segment; };
-	Bit32u					GetOffset		(void)						{ return offset; };
-	Bit8u					GetIntNr		(void)						{ return intNr; };
-	Bit16u					GetValue		(void)						{ return ahValue; };
-	Bit16u					GetOther		(void)						{ return alValue; };
+	EBreakpoint GetType() const noexcept { return type; }
+	bool GetOnce() const noexcept { return once; }
+	PhysPt GetLocation() const noexcept { return location; }
+	uint16_t GetSegment() const noexcept { return segment; }
+	uint32_t GetOffset() const noexcept { return offset; }
+	uint8_t GetIntNr() const noexcept { return intNr; }
+	uint16_t GetValue() const noexcept { return ahValue; }
+	uint16_t GetOther() const noexcept { return alValue; }
 
 	// statics
 	static CBreakpoint*		AddBreakpoint		(Bit16u seg, Bit32u off, bool once);
@@ -343,13 +350,16 @@ private:
 	bool		once;
 
 	static std::list<CBreakpoint*>	BPoints;
+#if C_HEAVY_DEBUG
+	friend bool DEBUG_HeavyIsBreakpoint(void);
+#endif
 };
 
 CBreakpoint::CBreakpoint(void):
+type(BKPNT_UNKNOWN),
 location(0),oldData(0xCC),
-active(false),once(false),
 segment(0),offset(0),intNr(0),ahValue(0),alValue(0),
-type(BKPNT_UNKNOWN) { };
+active(false),once(false){ }
 
 void CBreakpoint::Activate(bool _active)
 {
@@ -372,7 +382,7 @@ void CBreakpoint::Activate(bool _active)
 					oldData = 0xCC;
 				} else
 					oldData = bp->oldData;
-			};
+			}
 		} else {
 			if (mem_readb(location) == 0xCC) {
 				if (oldData == 0xCC)
@@ -384,12 +394,12 @@ void CBreakpoint::Activate(bool _active)
 				// If so, remove 0xCC and set old value
 				if (!otherActive)
 					mem_writeb(location, oldData);
-			};
+			}
 		}
 	}
 #endif
 	active = _active;
-};
+}
 
 // Statics
 std::list<CBreakpoint*> CBreakpoint::BPoints;
@@ -401,7 +411,7 @@ CBreakpoint* CBreakpoint::AddBreakpoint(Bit16u seg, Bit32u off, bool once)
 	bp->SetOnce			(once);
 	BPoints.push_front	(bp);
 	return bp;
-};
+}
 
 CBreakpoint* CBreakpoint::AddIntBreakpoint(Bit8u intNum, Bit16u ah, Bit16u al, bool once)
 {
@@ -410,7 +420,7 @@ CBreakpoint* CBreakpoint::AddIntBreakpoint(Bit8u intNum, Bit16u ah, Bit16u al, b
 	bp->SetOnce			(once);
 	BPoints.push_front	(bp);
 	return bp;
-};
+}
 
 CBreakpoint* CBreakpoint::AddMemBreakpoint(Bit16u seg, Bit32u off)
 {
@@ -420,7 +430,7 @@ CBreakpoint* CBreakpoint::AddMemBreakpoint(Bit16u seg, Bit32u off)
 	bp->SetType			(BKPNT_MEMORY);
 	BPoints.push_front	(bp);
 	return bp;
-};
+}
 
 void CBreakpoint::ActivateBreakpoints()
 {
@@ -448,22 +458,22 @@ void CBreakpoint::ActivateBreakpointsExceptAt(PhysPt adr)
 		if (bp->GetType() == BKPNT_PHYSICAL && bp->GetLocation() == adr)
 			continue;
 		bp->Activate(true);
-	};
-};
+	}
+}
 
-bool CBreakpoint::CheckBreakpoint(Bitu seg, Bitu off)
 // Checks if breakpoint is valid and should stop execution
+bool CBreakpoint::CheckBreakpoint(Bitu seg, Bitu off)
 {
 	// Quick exit if there are no breakpoints
 	if (BPoints.empty()) return false;
 
 	// Search matching breakpoint
-	std::list<CBreakpoint*>::iterator i;
-	CBreakpoint* bp;
-	for(i=BPoints.begin(); i != BPoints.end(); ++i) {
-		bp = (*i);
-		if ((bp->GetType()==BKPNT_PHYSICAL) && bp->IsActive() && (bp->GetSegment()==seg) && (bp->GetOffset()==off)) {
-			// Found, 
+	for (auto i = BPoints.begin(); i != BPoints.end(); ++i) {
+		CBreakpoint *bp = (*i);
+
+		if ((bp->GetType() == BKPNT_PHYSICAL) && bp->IsActive() &&
+		    (bp->GetLocation() == GetAddress(seg, off))) {
+			// Found
 			if (bp->GetOnce()) {
 				// delete it, if it should only be used once
 				(BPoints.erase)(i);
@@ -479,7 +489,7 @@ bool CBreakpoint::CheckBreakpoint(Bitu seg, Bitu off)
 				}
 			}
 			return true;
-		} 
+		}
 #if C_HEAVY_DEBUG
 		// Memory breakpoint support
 		else if (bp->IsActive()) {
@@ -504,15 +514,15 @@ bool CBreakpoint::CheckBreakpoint(Bitu seg, Bitu off)
 					DEBUG_ShowMsg("DEBUG: Memory breakpoint %s: %04X:%04X - %02X -> %02X\n",(bp->GetType()==BKPNT_MEMORY_PROT)?"(Prot)":"",bp->GetSegment(),bp->GetOffset(),bp->GetValue(),value);
 					bp->SetValue(value);
 					return true;
-				};		
-			} 		
-		};
+				}
+			}
+		}
 #endif
-	};
+	}
 	return false;
-};
+}
 
-bool CBreakpoint::CheckIntBreakpoint(PhysPt adr, Bit8u intNr, Bit16u ahValue, Bit16u alValue)
+bool CBreakpoint::CheckIntBreakpoint([[maybe_unused]] PhysPt adr, Bit8u intNr, Bit16u ahValue, Bit16u alValue)
 // Checks if interrupt breakpoint is valid and should stop execution
 {
 	if (BPoints.empty()) return false;
@@ -534,12 +544,12 @@ bool CBreakpoint::CheckIntBreakpoint(PhysPt adr, Bit8u intNr, Bit16u ahValue, Bi
 				}
 				return true;
 			}
-		};
-	};
+		}
+	}
 	return false;
-};
+}
 
-void CBreakpoint::DeleteAll() 
+void CBreakpoint::DeleteAll()
 {
 	std::list<CBreakpoint*>::iterator i;
 	CBreakpoint* bp;
@@ -547,12 +557,11 @@ void CBreakpoint::DeleteAll()
 		bp = (*i);
 		bp->Activate(false);
 		delete bp;
-	};
+	}
 	(BPoints.clear)();
-};
+}
 
-
-bool CBreakpoint::DeleteByIndex(Bit16u index) 
+bool CBreakpoint::DeleteByIndex(Bit16u index)
 {
 	// Search matching breakpoint
 	int nr = 0;
@@ -567,9 +576,9 @@ bool CBreakpoint::DeleteByIndex(Bit16u index)
 			return true;
 		}
 		nr++;
-	};
+	}
 	return false;
-};
+}
 
 CBreakpoint* CBreakpoint::FindPhysBreakpoint(Bit16u seg, Bit32u off, bool once)
 {
@@ -629,7 +638,7 @@ bool CBreakpoint::DeleteBreakpoint(Bit16u seg, Bit32u off)
 
 void CBreakpoint::ShowList(void)
 {
-	// iterate list 
+	// iterate list
 	int nr = 0;
 	std::list<CBreakpoint*>::iterator i;
 	for(i=BPoints.begin(); i != BPoints.end(); ++i) {
@@ -646,20 +655,20 @@ void CBreakpoint::ShowList(void)
 			DEBUG_ShowMsg("%02X. BPPM %04X:%08X (%02X)\n",nr,bp->GetSegment(),bp->GetOffset(),bp->GetValue());
 		} else if (bp->GetType()==BKPNT_MEMORY_LINEAR ) {
 			DEBUG_ShowMsg("%02X. BPLM %08X (%02X)\n",nr,bp->GetOffset(),bp->GetValue());
-		};
+		}
 		nr++;
 	}
-};
+}
 
 bool DEBUG_Breakpoint(void)
 {
 	/* First get the physical address and check for a set Breakpoint */
 	if (!CBreakpoint::CheckBreakpoint(SegValue(cs),reg_eip)) return false;
 	// Found. Breakpoint is valid
-	PhysPt where=GetAddress(SegValue(cs),reg_eip);
+	// PhysPt where=GetAddress(SegValue(cs),reg_eip); -- "where" is unused
 	CBreakpoint::DeactivateBreakpoints();	// Deactivate all breakpoints
 	return true;
-};
+}
 
 bool DEBUG_IntBreakpoint(Bit8u intNum)
 {
@@ -669,7 +678,7 @@ bool DEBUG_IntBreakpoint(Bit8u intNum)
 	// Found. Breakpoint is valid
 	CBreakpoint::DeactivateBreakpoints();	// Deactivate all breakpoints
 	return true;
-};
+}
 
 static bool StepOver()
 {
@@ -687,7 +696,7 @@ static bool StepOver()
 		return true;
 	} 
 	return false;
-};
+}
 
 bool DEBUG_ExitLoop(void)
 {
@@ -700,14 +709,14 @@ bool DEBUG_ExitLoop(void)
 		return true;
 	}
 	return false;
-};
+}
 
 /********************/
 /*   Draw windows   */
 /********************/
 
 static void DrawData(void) {
-	
+
 	Bit8u ch;
 	Bit32u add = dataOfs;
 	Bit32u address;
@@ -722,13 +731,20 @@ static void DrawData(void) {
 			mvwprintw (dbg.win_data,y,14+3*x,"%02X",ch);
 			if (showPrintable) {
 				if (ch<32 || !isprint(*reinterpret_cast<unsigned char*>(&ch))) ch='.';
-				mvwprintw (dbg.win_data,y,63+x,"%c",ch);
-			} else mvwaddch(dbg.win_data,y,63+x,ch);
+				mvwaddch (dbg.win_data,y,63+x,ch);
+			} else {
+#ifdef __PDCURSES__
+				mvwaddrawch (dbg.win_data,y,63+x,ch);
+#else
+				if (ch<32) ch='.';
+				mvwaddch (dbg.win_data,y,63+x,ch);
+#endif
+			}
 			add++;
-		};
-	}	
+		}
+	}
 	wrefresh(dbg.win_data);
-};
+}
 
 static void DrawRegisters(void) {
 	/* Main Registers */
@@ -742,7 +758,7 @@ static void DrawRegisters(void) {
 	SetColor(reg_ebp!=oldregs.ebp);oldregs.ebp=reg_ebp;mvwprintw (dbg.win_reg,2,18,"%08X",reg_ebp);
 	SetColor(reg_esp!=oldregs.esp);oldregs.esp=reg_esp;mvwprintw (dbg.win_reg,3,18,"%08X",reg_esp);
 	SetColor(reg_eip!=oldregs.eip);oldregs.eip=reg_eip;mvwprintw (dbg.win_reg,1,42,"%08X",reg_eip);
-	
+
 	SetColor(SegValue(ds)!=oldsegs[ds].val);oldsegs[ds].val=SegValue(ds);mvwprintw (dbg.win_reg,0,31,"%04X",SegValue(ds));
 	SetColor(SegValue(es)!=oldsegs[es].val);oldsegs[es].val=SegValue(es);mvwprintw (dbg.win_reg,0,41,"%04X",SegValue(es));
 	SetColor(SegValue(fs)!=oldsegs[fs].val);oldsegs[fs].val=SegValue(fs);mvwprintw (dbg.win_reg,0,51,"%04X",SegValue(fs));
@@ -780,14 +796,14 @@ static void DrawRegisters(void) {
 
 
 	SetColor(cpu.cpl ^ oldcpucpl);
-	mvwprintw (dbg.win_reg,2,78,"%01X",cpu.cpl);
+	mvwprintw (dbg.win_reg,2,78,"%01" PRIXPTR ,cpu.cpl);
 	oldcpucpl=cpu.cpl;
 
 	if (cpu.pmode) {
 		if (reg_flags & FLAG_VM) mvwprintw(dbg.win_reg,0,76,"VM86");
 		else if (cpu.code.big) mvwprintw(dbg.win_reg,0,76,"Pr32");
 		else mvwprintw(dbg.win_reg,0,76,"Pr16");
-	} else	
+	} else
 		mvwprintw(dbg.win_reg,0,76,"Real");
 
 	// Selector info, if available
@@ -799,24 +815,24 @@ static void DrawRegisters(void) {
 	}
 
 	wattrset(dbg.win_reg,0);
-	mvwprintw(dbg.win_reg,3,60,"%u       ",cycle_count);
+	mvwprintw(dbg.win_reg,3,60,"%" PRIuPTR "       ",cycle_count);
 	wrefresh(dbg.win_reg);
-};
+}
 
 static void DrawCode(void) {
-	bool saveSel; 
+	bool saveSel;
 	Bit32u disEIP = codeViewData.useEIP;
 	PhysPt start  = GetAddress(codeViewData.useCS,codeViewData.useEIP);
 	char dline[200];Bitu size;Bitu c;
 	static char line20[21] = "                    ";
-	
+
 	for (int i=0;i<10;i++) {
 		saveSel = false;
 		if (has_colors()) {
 			if ((codeViewData.useCS==SegValue(cs)) && (disEIP == reg_eip)) {
-				wattrset(dbg.win_code,COLOR_PAIR(PAIR_GREEN_BLACK));			
+				wattrset(dbg.win_code,COLOR_PAIR(PAIR_GREEN_BLACK));
 				if (codeViewData.cursorPos==-1) {
-					codeViewData.cursorPos = i; // Set Cursor 
+					codeViewData.cursorPos = i; // Set Cursor
 				}
 				if (i == codeViewData.cursorPos) {
 					codeViewData.cursorSeg = SegValue(cs);
@@ -824,14 +840,14 @@ static void DrawCode(void) {
 				}
 				saveSel = (i == codeViewData.cursorPos);
 			} else if (i == codeViewData.cursorPos) {
-				wattrset(dbg.win_code,COLOR_PAIR(PAIR_BLACK_GREY));			
+				wattrset(dbg.win_code,COLOR_PAIR(PAIR_BLACK_GREY));
 				codeViewData.cursorSeg = codeViewData.useCS;
 				codeViewData.cursorOfs = disEIP;
 				saveSel = true;
 			} else if (CBreakpoint::IsBreakpoint(codeViewData.useCS, disEIP)) {
-				wattrset(dbg.win_code,COLOR_PAIR(PAIR_GREY_RED));			
+				wattrset(dbg.win_code,COLOR_PAIR(PAIR_GREY_RED));
 			} else {
-				wattrset(dbg.win_code,0);			
+				wattrset(dbg.win_code,0);
 			}
 		}
 
@@ -839,14 +855,14 @@ static void DrawCode(void) {
 		Bitu drawsize=size=DasmI386(dline, start, disEIP, cpu.code.big);
 		bool toolarge = false;
 		mvwprintw(dbg.win_code,i,0,"%04X:%04X  ",codeViewData.useCS,disEIP);
-		
-		if (drawsize>10) { toolarge = true; drawsize = 9; };
+
+		if (drawsize>10) { toolarge = true; drawsize = 9; }
 		for (c=0;c<drawsize;c++) {
 			Bit8u value;
 			if (mem_readb_checked(start+c,&value)) value=0;
 			wprintw(dbg.win_code,"%02X",value);
 		}
-		if (toolarge) { waddstr(dbg.win_code,".."); drawsize++; };
+		if (toolarge) { waddstr(dbg.win_code,".."); drawsize++; }
 		// Spacepad up to 20 characters
 		if(drawsize && (drawsize < 11)) {
 			line20[20 - drawsize*2] = 0;
@@ -858,9 +874,8 @@ static void DrawCode(void) {
 		char* res = empty_res;
 		if (showExtend) res = AnalyzeInstruction(dline, saveSel);
 		// Spacepad it up to 28 characters
-		size_t dline_len = strlen(dline);
-		for (c = dline_len; c < 28; c++)
-			dline[c] = ' ';
+		size_t dline_len = safe_strlen(dline);
+		if (dline_len < 28) memset(dline + dline_len, ' ',28 - dline_len);
 		dline[28] = 0;
 		waddstr(dbg.win_code,dline);
 		// Spacepad it up to 20 characters
@@ -871,7 +886,7 @@ static void DrawCode(void) {
 			waddstr(dbg.win_code,line20);
 			line20[20-res_len] = ' ';
 		} else 	waddstr(dbg.win_code,line20);
-		
+
 		start+=size;
 		disEIP+=size;
 
@@ -880,7 +895,7 @@ static void DrawCode(void) {
 	}
 
 	codeViewData.useEIPlast = disEIP;
-	
+
 	wattrset(dbg.win_code,0);
 	if (!debugging) {
 		if (has_colors()) wattrset(dbg.win_code,COLOR_PAIR(PAIR_GREEN_BLACK));
@@ -888,7 +903,7 @@ static void DrawCode(void) {
 		wclrtoeol(dbg.win_code);
 	} else {
 		//TODO long lines
-		char* dispPtr = codeViewData.inputStr; 
+		char* dispPtr = codeViewData.inputStr;
 		char* curPtr = &codeViewData.inputStr[codeViewData.inputPos];
 		mvwprintw(dbg.win_code,10,0,"%c-> %s%c",
 			(codeViewData.ovrMode?'O':'I'),dispPtr,(*curPtr?' ':'_'));
@@ -896,7 +911,7 @@ static void DrawCode(void) {
 		mvwchgat(dbg.win_code,10,0,3,0,(PAIR_BLACK_GREY),NULL);
 		if (*curPtr) {
 			mvwchgat(dbg.win_code,10,(curPtr-dispPtr+4),1,0,(PAIR_BLACK_GREY),NULL);
- 		} 
+ 		}
 	}
 
 	wattrset(dbg.win_code,0);
@@ -908,14 +923,14 @@ static void SetCodeWinStart()
 	if ((SegValue(cs)==codeViewData.useCS) && (reg_eip>=codeViewData.useEIP) && (reg_eip<=codeViewData.useEIPlast)) {
 		// in valid window - scroll ?
 		if (reg_eip>=codeViewData.useEIPmid) codeViewData.useEIP += codeViewData.firstInstSize;
-		
+
 	} else {
 		// totally out of range.
 		codeViewData.useCS	= SegValue(cs);
 		codeViewData.useEIP	= reg_eip;
 	}
 	codeViewData.cursorPos = -1;	// Recalc Cursor position
-};
+}
 
 /********************/
 /*    User input    */
@@ -950,20 +965,20 @@ Bit32u GetHexValue(char* str, char*& hex)
 	if (strncmp(hex,"ES",2) == 0)  { hex+=2; regval = SegValue(es); } else
 	if (strncmp(hex,"FS",2) == 0)  { hex+=2; regval = SegValue(fs); } else
 	if (strncmp(hex,"GS",2) == 0)  { hex+=2; regval = SegValue(gs); } else
-	if (strncmp(hex,"SS",2) == 0)  { hex+=2; regval = SegValue(ss); };
+	if (strncmp(hex,"SS",2) == 0)  { hex+=2; regval = SegValue(ss); }
 
 	while (*hex) {
 		if      ((*hex >= '0') && (*hex <= '9')) value = (value<<4) + *hex - '0';
-		else if ((*hex >= 'A') && (*hex <= 'F')) value = (value<<4) + *hex - 'A' + 10; 
-		else { 
+		else if ((*hex >= 'A') && (*hex <= 'F')) value = (value<<4) + *hex - 'A' + 10;
+		else {
 			if (*hex == '+') {hex++;return regval + value + GetHexValue(hex,hex); } else
 			if (*hex == '-') {hex++;return regval + value - GetHexValue(hex,hex); }
 			else break; // No valid char
 		}
 		hex++;
-	};
+	}
 	return regval + value;
-};
+}
 
 bool ChangeRegister(char* str)
 {
@@ -1001,9 +1016,9 @@ bool ChangeRegister(char* str)
 	if (strncmp(hex,"ZF",2) == 0)  { hex+=2; SETFLAGBIT(ZF,GetHexValue(hex,hex)); } else
 	if (strncmp(hex,"PF",2) == 0)  { hex+=2; SETFLAGBIT(PF,GetHexValue(hex,hex)); } else
 	if (strncmp(hex,"SF",2) == 0)  { hex+=2; SETFLAGBIT(SF,GetHexValue(hex,hex)); } else
-	{ return false; };
+	{ return false; }
 	return true;
-};
+}
 
 bool ParseCommand(char* str) {
 	char* found = str;
@@ -1026,7 +1041,7 @@ bool ParseCommand(char* str) {
 		Bit32u num = GetHexValue(found,found); found++;
 		SaveMemory(seg,ofs,num);
 		return true;
-	};
+	}
 
 	if (command == "MEMDUMPBIN") { // Dump memory to file binary
 		Bit16u seg = (Bit16u)GetHexValue(found,found); found++;
@@ -1034,57 +1049,57 @@ bool ParseCommand(char* str) {
 		Bit32u num = GetHexValue(found,found); found++;
 		SaveMemoryBin(seg,ofs,num);
 		return true;
-	};
+	}
 
 	if (command == "IV") { // Insert variable
 		Bit16u seg = (Bit16u)GetHexValue(found,found); found++;
 		Bit32u ofs = (Bit16u)GetHexValue(found,found); found++;
 		char name[16];
 		for (int i=0; i<16; i++) {
-			if (found[i] && (found[i]!=' ')) name[i] = found[i]; 
-			else { name[i] = 0; break; };
-		};
+			if (found[i] && (found[i]!=' ')) name[i] = found[i];
+			else { name[i] = 0; break; }
+		}
 		name[15] = 0;
 
 		if(!name[0]) return false;
 		DEBUG_ShowMsg("DEBUG: Created debug var %s at %04X:%04X\n",name,seg,ofs);
 		CDebugVar::InsertVariable(name,GetAddress(seg,ofs));
 		return true;
-	};
+	}
 
 	if (command == "SV") { // Save variables
 		char name[13];
 		for (int i=0; i<12; i++) {
-			if (found[i] && (found[i]!=' ')) name[i] = found[i]; 
-			else { name[i] = 0; break; };
-		};
+			if (found[i] && (found[i]!=' ')) name[i] = found[i];
+			else { name[i] = 0; break; }
+		}
 		name[12] = 0;
 		if(!name[0]) return false;
 		DEBUG_ShowMsg("DEBUG: Variable list save (%s) : %s.\n",name,(CDebugVar::SaveVars(name)?"ok":"failure"));
 		return true;
-	};
+	}
 
 	if (command == "LV") { // load variables
 		char name[13];
 		for (int i=0; i<12; i++) {
-			if (found[i] && (found[i]!=' ')) name[i] = found[i]; 
-			else { name[i] = 0; break; };
-		};
+			if (found[i] && (found[i]!=' ')) name[i] = found[i];
+			else { name[i] = 0; break; }
+		}
 		name[12] = 0;
 		if(!name[0]) return false;
 		DEBUG_ShowMsg("DEBUG: Variable list load (%s) : %s.\n",name,(CDebugVar::LoadVars(name)?"ok":"failure"));
 		return true;
-	};
+	}
 
 	if (command == "ADDLOG") {
 		if(found && *found)	DEBUG_ShowMsg("NOTICE: %s\n",found);
 		return true;
-	};
+	}
 
 	if (command == "SR") { // Set register value
 		DEBUG_ShowMsg("DEBUG: Set Register %s.\n",(ChangeRegister(found)?"success":"failure"));
 		return true;
-	};
+	}
 
 	if (command == "SM") { // Set memory with following values
 		Bit16u seg = (Bit16u)GetHexValue(found,found); found++;
@@ -1098,10 +1113,10 @@ bool ParseCommand(char* str) {
 				mem_writeb_checked(GetAddress(seg,ofs+count),value);
 				count++;
 			}
-		};
+		}
 		DEBUG_ShowMsg("DEBUG: Memory changed.\n");
 		return true;
-	};
+	}
 
 	if (command == "BP") { // Add new breakpoint
 		Bit16u seg = (Bit16u)GetHexValue(found,found);found++; // skip ":"
@@ -1109,7 +1124,7 @@ bool ParseCommand(char* str) {
 		CBreakpoint::AddBreakpoint(seg,ofs,false);
 		DEBUG_ShowMsg("DEBUG: Set breakpoint at %04X:%04X\n",seg,ofs);
 		return true;
-	};
+	}
 
 #if C_HEAVY_DEBUG
 
@@ -1119,7 +1134,7 @@ bool ParseCommand(char* str) {
 		CBreakpoint::AddMemBreakpoint(seg,ofs);
 		DEBUG_ShowMsg("DEBUG: Set memory breakpoint at %04X:%04X\n",seg,ofs);
 		return true;
-	};
+	}
 
 	if (command == "BPPM") { // Add new breakpoint
 		Bit16u seg = (Bit16u)GetHexValue(found,found);found++; // skip ":"
@@ -1130,7 +1145,7 @@ bool ParseCommand(char* str) {
 			DEBUG_ShowMsg("DEBUG: Set prot-mode memory breakpoint at %04X:%08X\n",seg,ofs);
 		}
 		return true;
-	};
+	}
 
 	if (command == "BPLM") { // Add new breakpoint
 		Bit32u ofs = GetHexValue(found,found);
@@ -1138,7 +1153,7 @@ bool ParseCommand(char* str) {
 		if (bp) bp->SetType(BKPNT_MEMORY_LINEAR);
 		DEBUG_ShowMsg("DEBUG: Set linear memory breakpoint at %08X\n",ofs);
 		return true;
-	};
+	}
 
 #endif
 
@@ -1161,26 +1176,26 @@ bool ParseCommand(char* str) {
 			}
 		}
 		return true;
-	};
+	}
 
 	if (command == "BPLIST") {
 		DEBUG_ShowMsg("Breakpoint list:\n");
 		DEBUG_ShowMsg("-------------------------------------------------------------------------\n");
 		CBreakpoint::ShowList();
 		return true;
-	};
+	}
 
 	if (command == "BPDEL") { // Delete Breakpoints
-		Bit8u bpNr	= (Bit8u)GetHexValue(found,found); 
+		Bit8u bpNr	= (Bit8u)GetHexValue(found,found);
 		if ((bpNr==0x00) && (*found=='*')) { // Delete all
-			CBreakpoint::DeleteAll();		
+			CBreakpoint::DeleteAll();
 			DEBUG_ShowMsg("DEBUG: Breakpoints deleted.\n");
-		} else {		
+		} else {
 			// delete single breakpoint
 			DEBUG_ShowMsg("DEBUG: Breakpoint deletion %s.\n",(CBreakpoint::DeleteByIndex(bpNr)?"success":"failure"));
 		}
 		return true;
-	};
+	}
 
 	if (command == "C") { // Set code overview
 		Bit16u codeSeg = (Bit16u)GetHexValue(found,found); found++;
@@ -1190,14 +1205,14 @@ bool ParseCommand(char* str) {
 		codeViewData.useEIP = codeOfs;
 		codeViewData.cursorPos = 0;
 		return true;
-	};
+	}
 
 	if (command == "D") { // Set data overview
 		dataSeg = (Bit16u)GetHexValue(found,found); found++;
 		dataOfs = GetHexValue(found,found);
 		DEBUG_ShowMsg("DEBUG: Set data overview to %04X:%04X\n",dataSeg,dataOfs);
 		return true;
-	};
+	}
 
 #if C_HEAVY_DEBUG
 
@@ -1237,7 +1252,7 @@ bool ParseCommand(char* str) {
 		CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
 		DOSBOX_SetNormalLoop();	
 		return true;
-	};
+	}
 
 #endif
 
@@ -1247,7 +1262,7 @@ bool ParseCommand(char* str) {
 		CPU_HW_Interrupt(intNr);
 		SetCodeWinStart();
 		return true;
-	};
+	}
 
 	if (command == "INT") { // start int.
 		Bit8u intNr = (Bit8u)GetHexValue(found,found);
@@ -1259,7 +1274,7 @@ bool ParseCommand(char* str) {
 		DOSBOX_SetNormalLoop();
 		CPU_HW_Interrupt(intNr);
 		return true;
-	};	
+	}
 
 	if (command == "SELINFO") {
 		while (found[0] == ' ') found++;
@@ -1267,7 +1282,7 @@ bool ParseCommand(char* str) {
 		GetDescriptorInfo(found,out1,out2);
 		DEBUG_ShowMsg("SelectorInfo %s:\n%s\n%s\n",found,out1,out2);
 		return true;
-	};
+	}
 
 	if (command == "DOS") {
 		stream >> command;
@@ -1276,11 +1291,11 @@ bool ParseCommand(char* str) {
 	}
 
 	if (command == "GDT") {LogGDT(); return true;}
-	
+
 	if (command == "LDT") {LogLDT(); return true;}
-	
+
 	if (command == "IDT") {LogIDT(); return true;}
-	
+
 	if (command == "PAGING") {LogPages(found); return true;}
 
 	if (command == "CPU") {LogCPUInfo(); return true;}
@@ -1290,7 +1305,7 @@ bool ParseCommand(char* str) {
 			OutputVecTable(found);
 			return true;
 		}
-	};
+	}
 
 	if (command == "INTHAND") {
 		if (found[0] != 0) {
@@ -1301,18 +1316,18 @@ bool ParseCommand(char* str) {
 			codeViewData.cursorPos = 0;
 			return true;
 		}
-	};
+	}
 
-	if(command == "EXTEND") { //Toggle additional data.	
+	if(command == "EXTEND") { //Toggle additional data.
 		showExtend = !showExtend;
 		return true;
-	};
+	}
 
 	if(command == "TIMERIRQ") { //Start a timer irq
 		DEBUG_RaiseTimerIrq(); 
 		DEBUG_ShowMsg("Debug: Timer Int started.\n");
 		return true;
-	};
+	}
 
 
 #if C_HEAVY_DEBUG
@@ -1320,13 +1335,13 @@ bool ParseCommand(char* str) {
 		logHeavy = !logHeavy;
 		DEBUG_ShowMsg("DEBUG: Heavy cpu logging %s.\n",logHeavy?"on":"off");
 		return true;
-	};
+	}
 
 	if (command == "ZEROPROTECT") { //toggle zero protection
 		zeroProtect = !zeroProtect;
 		DEBUG_ShowMsg("DEBUG: Zero code execution protection %s.\n",zeroProtect?"on":"off");
 		return true;
-	};
+	}
 
 #endif
 	if (command == "HELP" || command == "?") {
@@ -1341,7 +1356,7 @@ bool ParseCommand(char* str) {
 		DEBUG_ShowMsg("BPPM   [selector]:[offset]- Set pmode-memory breakpoint (memory change).\n");
 		DEBUG_ShowMsg("BPLM   [linear address]   - Set linear memory breakpoint (memory change).\n");
 #endif
-		DEBUG_ShowMsg("BPLIST                    - List breakpoints.\n");		
+		DEBUG_ShowMsg("BPLIST                    - List breakpoints.\n");
 		DEBUG_ShowMsg("BPDEL  [bpNr] / *         - Delete breakpoint nr / all.\n");
 		DEBUG_ShowMsg("C / D  [segment]:[offset] - Set code / data view address.\n");
 		DEBUG_ShowMsg("DOS MCBS                  - Show Memory Control Block chain.\n");
@@ -1353,8 +1368,8 @@ bool ParseCommand(char* str) {
 		DEBUG_ShowMsg("ZEROPROTECT               - Enable/Disable zero code execution detection.\n");
 #endif
 		DEBUG_ShowMsg("SR [reg] [value]          - Set register value.\n");
-		DEBUG_ShowMsg("SM [seg]:[off] [val] [.]..- Set memory with following values.\n");	
-	
+		DEBUG_ShowMsg("SM [seg]:[off] [val] [.]..- Set memory with following values.\n");
+
 		DEBUG_ShowMsg("IV [seg]:[off] [name]     - Create var name for memory address.\n");
 		DEBUG_ShowMsg("SV [filename]             - Save var list in file.\n");
 		DEBUG_ShowMsg("LV [filename]             - Load var list from file.\n");
@@ -1389,15 +1404,15 @@ bool ParseCommand(char* str) {
 		DEBUG_ShowMsg("Up/Down                   - Move code view cursor.\n");
 		DEBUG_ShowMsg("Page Up/Down              - Scroll data view.\n");
 		DEBUG_ShowMsg("Home/End                  - Scroll log messages.\n");
-		
+
 		return true;
-	};
+	}
 	return false;
-};
+}
 
 char* AnalyzeInstruction(char* inst, bool saveSelector) {
 	static char result[256];
-	
+
 	char instu[256];
 	char prefix[3];
 	Bit16u seg;
@@ -1422,8 +1437,8 @@ char* AnalyzeInstruction(char* inst, bool saveSelector) {
 			} else {
 				seg = SegValue(ds);
 				strcpy(prefix,"ds");
-			};
-		};
+			}
+		}
 
 		pos++;
 		Bit32u adr = GetHexValue(pos,pos);
@@ -1433,14 +1448,14 @@ char* AnalyzeInstruction(char* inst, bool saveSelector) {
 				adr += GetHexValue(pos,pos);
 			} else if (*pos=='-') {
 				pos++;
-				adr -= GetHexValue(pos,pos); 
-			} else 
+				adr -= GetHexValue(pos,pos);
+			} else
 				pos++;
-		};
+		}
 		Bit32u address = GetAddress(seg,adr);
 		if (!(get_tlb_readhandler(address)->flags & PFLAG_INIT)) {
 			static char outmask[] = "%s:[%04X]=%02X";
-			
+
 			if (cpu.pmode) outmask[6] = '8';
 				switch (DasmLastOperandSize()) {
 				case 8 : {	Bit8u val = mem_readb(address);
@@ -1471,13 +1486,13 @@ char* AnalyzeInstruction(char* inst, bool saveSelector) {
 				pos1++; *pos1 = 0;				// cut after '['
 				strcat(inst,var->GetName());	// add var name
 				strcat(inst,temp);				// add end
-			};
-		};
+			}
+		}
 		// show descriptor info, if available
 		if ((cpu.pmode) && saveSelector) {
 			strcpy(curSelectorName,prefix);
-		};
-	};
+		}
+	}
 	// If it is a callback add additional info
 	pos = strstr(inst,"callback");
 	if (pos) {
@@ -1487,7 +1502,7 @@ char* AnalyzeInstruction(char* inst, bool saveSelector) {
 		if (descr) {
 			strcat(inst,"  ("); strcat(inst,descr); strcat(inst,")");
 		}
-	};
+	}
 	// Must be a jump
 	if (instu[0] == 'J')
 	{
@@ -1567,7 +1582,22 @@ char* AnalyzeInstruction(char* inst, bool saveSelector) {
 		}
 	}
 	return result;
-};
+}
+
+
+Bit32s DEBUG_Run(Bit32s amount,bool quickexit) {
+	skipFirstInstruction = true;
+	CPU_Cycles = amount;
+	Bit32s ret = (*cpudecoder)();
+	if (quickexit) SetCodeWinStart();
+	else {
+		// ensure all breakpoints are activated
+		CBreakpoint::ActivateBreakpoints();
+		DOSBOX_SetNormalLoop();
+	}
+	return ret;
+}
+
 
 
 Bit32u DEBUG_CheckKeys(void) {
@@ -1576,21 +1606,17 @@ Bit32u DEBUG_CheckKeys(void) {
 	bool skipDraw = false;
 	int key=getch();
 
-	if (key >='1' && key <='5' && strlen(codeViewData.inputStr) == 0) {
+	if (key >='1' && key <='5' && safe_strlen(codeViewData.inputStr) == 0) {
 		const Bit32s v[] ={5,500,1000,5000,10000};
-		CPU_Cycles= v[key - '1'];
 
-		skipFirstInstruction = true;
-
-		ret = (*cpudecoder)();
-		SetCodeWinStart();
+		ret = DEBUG_Run(v[key - '1'],true);
 
 		/* Setup variables so we end up at the proper ret processing */
 		numberrun = true;
 
 		// Don't redraw the screen if it's going to get redrawn immediately
 		// afterwards, to avoid resetting oldregs.
-		if (ret == debugCallback)
+		if (ret == static_cast<Bits>(debugCallback))
 			skipDraw = true;
 		key = -1;
 	}
@@ -1603,6 +1629,16 @@ Bit32u DEBUG_CheckKeys(void) {
 		case PADSTAR:	key='*';	break;
 		case PADMINUS:	key='-';	break;
 		case PADPLUS:	key='+';	break;
+		case PADSTOP:	key=KEY_DC;		break;
+		case PAD0:		key=KEY_IC;		break;
+		case KEY_A1:	key=KEY_HOME;	break;
+		case KEY_A2:	key=KEY_UP;		break;
+		case KEY_A3:	key=KEY_PPAGE;	break;
+		case KEY_B1:	key=KEY_LEFT;	break;
+		case KEY_B3:	key=KEY_RIGHT;	break;
+		case KEY_C1:	key=KEY_END;	break;
+		case KEY_C2:	key=KEY_DOWN;	break;
+		case KEY_C3:	key=KEY_NPAGE;	break;
 		case ALT_D:
 			if (ungetch('D') != ERR) key=27;
 			break;
@@ -1663,7 +1699,7 @@ Bit32u DEBUG_CheckKeys(void) {
 
 		case KEY_DOWN:	// down 
 				if (codeViewData.cursorPos<9) codeViewData.cursorPos++;
-				else codeViewData.useEIP += codeViewData.firstInstSize;	
+				else codeViewData.useEIP += codeViewData.firstInstSize;
 				break;
 		case KEY_UP:	// up 
 				if (codeViewData.cursorPos>0) codeViewData.cursorPos--;
@@ -1700,40 +1736,36 @@ Bit32u DEBUG_CheckKeys(void) {
 				if (codeViewData.inputStr[codeViewData.inputPos]) codeViewData.inputPos++;
 				break;
 		case KEY_F(6):	// previous command (f1-f4 generate rubbish at my place)
-		case KEY_F(3):	// previous command 
+		case KEY_F(3):	// previous command
 				if (histBuffPos == histBuff.begin()) break;
 				if (histBuffPos == histBuff.end()) {
 					// copy inputStr to suspInputStr so we can restore it
-					safe_strncpy(codeViewData.suspInputStr, codeViewData.inputStr, sizeof(codeViewData.suspInputStr));
+					safe_strcpy(codeViewData.suspInputStr,
+					            codeViewData.inputStr);
 				}
-				safe_strncpy(codeViewData.inputStr,(*--histBuffPos).c_str(),sizeof(codeViewData.inputStr));
-				codeViewData.inputPos = strlen(codeViewData.inputStr);
+				safe_strcpy(codeViewData.inputStr,
+				            (--histBuffPos)->c_str());
+				codeViewData.inputPos = safe_strlen(codeViewData.inputStr);
 				break;
 		case KEY_F(7):	// next command (f1-f4 generate rubbish at my place)
 		case KEY_F(4):	// next command
 				if (histBuffPos == histBuff.end()) break;
 				if (++histBuffPos != histBuff.end()) {
-					safe_strncpy(codeViewData.inputStr,(*histBuffPos).c_str(),sizeof(codeViewData.inputStr));
+					safe_strcpy(codeViewData.inputStr,
+					            histBuffPos->c_str());
 				} else {
 					// copy suspInputStr back into inputStr
-					safe_strncpy(codeViewData.inputStr, codeViewData.suspInputStr, sizeof(codeViewData.inputStr));
+					safe_strcpy(codeViewData.inputStr,
+					            codeViewData.suspInputStr);
 				}
-				codeViewData.inputPos = strlen(codeViewData.inputStr);
-				break; 
+				codeViewData.inputPos = safe_strlen(codeViewData.inputStr);
+				break;
 		case KEY_F(5):	// Run Program
 				debugging=false;
 				DrawCode(); // update code window to show "running" status
 
-				skipFirstInstruction = true; // for heavy debugger
-				CPU_Cycles = 1;
-				ret=(*cpudecoder)();
-
-				// ensure all breakpoints are activated
-				CBreakpoint::ActivateBreakpoints();
-
+				ret = DEBUG_Run(1,false);
 				skipDraw = true; // don't update screen after this instruction
-
-				DOSBOX_SetNormalLoop();
 				break;
 		case KEY_F(8):	// Toggle printable characters
 				showPrintable = !showPrintable;
@@ -1752,25 +1784,15 @@ Bit32u DEBUG_CheckKeys(void) {
 				break;
 		case KEY_F(10):	// Step over inst
 				if (StepOver()) {
-					skipFirstInstruction = true; // for heavy debugger
-					CPU_Cycles = 1;
-					ret=(*cpudecoder)();
-
-					DOSBOX_SetNormalLoop();
-
-					// ensure all breakpoints are activated
-					CBreakpoint::ActivateBreakpoints();
+					ret = DEBUG_Run(1,false);
 					skipDraw = true;
 					break;
 				}
 				// If we aren't stepping over something, do a normal step.
-				// NB: Fall-through
+				[[fallthrough]];
 		case KEY_F(11):	// trace into
 				exitLoop = false;
-				skipFirstInstruction = true; // for heavy debugger
-				CPU_Cycles = 1;
-				ret = (*cpudecoder)();
-				SetCodeWinStart();
+				ret = DEBUG_Run(1,true);
 				break;
 		case 0x0A: //Parse typed Command
 				codeViewData.inputStr[MAXCMDLEN] = '\0';
@@ -1781,17 +1803,17 @@ Bit32u DEBUG_CheckKeys(void) {
 					if (histBuff.size() > MAX_HIST_BUFFER) histBuff.pop_front();
 					histBuffPos = histBuff.end();
 					ClearInputLine();
-				} else { 
-					codeViewData.inputPos = strlen(codeViewData.inputStr);
-				} 
+				} else {
+					codeViewData.inputPos = safe_strlen(codeViewData.inputStr);
+				}
 				break;
 		case KEY_BACKSPACE: //backspace (linux)
 		case 0x7f:	// backspace in some terminal emulators (linux)
 		case 0x08:	// delete 
 				if (codeViewData.inputPos == 0) break;
 				codeViewData.inputPos--;
-				// fallthrough
-		case KEY_DC: // delete character 
+				[[fallthrough]];
+		case KEY_DC: // delete character
 				if ((codeViewData.inputPos<0) || (codeViewData.inputPos>=MAXCMDLEN)) break;
 				if (codeViewData.inputStr[codeViewData.inputPos] != 0) {
 						codeViewData.inputStr[MAXCMDLEN] = '\0';
@@ -1806,8 +1828,8 @@ Bit32u DEBUG_CheckKeys(void) {
 							codeViewData.inputStr[codeViewData.inputPos++] = char(key);
 							codeViewData.inputStr[codeViewData.inputPos] = '\0';
 					} else if (!codeViewData.ovrMode) {
-						int len = (int) strlen(codeViewData.inputStr);
-						if (len < MAXCMDLEN) { 
+						int len = (int) safe_strlen(codeViewData.inputStr);
+						if (len < MAXCMDLEN) {
 							for(len++;len>codeViewData.inputPos;len--)
 								codeViewData.inputStr[len]=codeViewData.inputStr[len-1];
 							codeViewData.inputStr[codeViewData.inputPos++] = char(key);
@@ -1822,7 +1844,7 @@ Bit32u DEBUG_CheckKeys(void) {
 		}
 		if (ret<0) return ret;
 		if (ret>0) {
-			if (GCC_UNLIKELY(ret >= CB_MAX)) 
+			if (GCC_UNLIKELY(ret >= CB_MAX))
 				ret = 0;
 			else
 				ret = (*CallBack_Handlers[ret])();
@@ -1837,7 +1859,7 @@ Bit32u DEBUG_CheckKeys(void) {
 			DEBUG_DrawScreen();
 	}
 	return ret;
-};
+}
 
 Bitu DEBUG_Loop(void) {
 //TODO Disable sound
@@ -1846,7 +1868,7 @@ Bitu DEBUG_Loop(void) {
 	Bit16u oldCS	= SegValue(cs);
 	Bit32u oldEIP	= reg_eip;
 	PIC_runIRQs();
-	SDL_Delay(1);
+	Delay(1);
 	if ((oldCS!=SegValue(cs)) || (oldEIP!=reg_eip)) {
 		CBreakpoint::AddBreakpoint(oldCS,oldEIP,true);
 		CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
@@ -1954,11 +1976,11 @@ static void LogGDT(void) {
 		desc.Load(address);
 		sprintf(out1,"%04" sBitfs(X) ": b:%08X type: %02X parbg",(i<<3),desc.GetBase(),desc.saved.seg.type);
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
-		sprintf(out1,"      l:%08" sBitfs(X) " dpl : %01X  %1X%1X%1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.r,desc.saved.seg.big,desc.saved.seg.g);
+		sprintf(out1,"      l:%08X dpl : %01X  %1X%1X%1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.r,desc.saved.seg.big,desc.saved.seg.g);
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 		address+=8; i++;
-	};
-};
+	}
+}
 
 static void LogLDT(void) {
 	char out1[512];
@@ -1974,24 +1996,24 @@ static void LogLDT(void) {
 		desc.Load(address);
 		sprintf(out1,"%04" sBitfs(X) ": b:%08X type: %02X parbg",(i<<3)|4,desc.GetBase(),desc.saved.seg.type);
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
-		sprintf(out1,"      l:%08" sBitfs(X) " dpl : %01X  %1X%1X%1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.r,desc.saved.seg.big,desc.saved.seg.g);
+		sprintf(out1,"      l:%08X dpl : %01X  %1X%1X%1X%1X%1X",desc.GetLimit(),desc.saved.seg.dpl,desc.saved.seg.p,desc.saved.seg.avl,desc.saved.seg.r,desc.saved.seg.big,desc.saved.seg.g);
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 		address+=8; i++;
-	};
-};
+	}
+}
 
 static void LogIDT(void) {
 	char out1[512];
 	Descriptor desc;
-	Bitu address = 0;
+	uint32_t address = 0;
 	while (address<256*8) {
 		if (cpu.idt.GetDescriptor(address,desc)) {
-			sprintf(out1,"%04" sBitfs(X) ": sel:%04" sBitfs(X) " off:%02" sBitfs(X),address/8,desc.GetSelector(),desc.GetOffset());
+			sprintf(out1,"%04X: sel:%04X off:%02X",address/8,desc.GetSelector(),desc.GetOffset());
 			LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 		}
 		address+=8;
-	};
-};
+	}
+}
 
 void LogPages(char* selname) {
 	char out1[512];
@@ -2030,13 +2052,14 @@ void LogPages(char* selname) {
 			}
 		}
 	}
-};
+}
 
 static void LogCPUInfo(void) {
 	char out1[512];
 	sprintf(out1,"cr0:%08" sBitfs(X) " cr2:%08" sBitfs(X) " cr3:%08" sBitfs(X) "  cpl=%" sBitfs(x),cpu.cr0,paging.cr2,paging.cr3,cpu.cpl);
 	LOG(LOG_MISC,LOG_ERROR)("%s",out1);
-	sprintf(out1,"eflags:%08" sBitfs(X) " [vm=%" sBitfs(x) " iopl=%" sBitfs(x) " nt=%" sBitfs(x) "]",reg_flags,GETFLAG(VM)>>17,GETFLAG(IOPL)>>12,GETFLAG(NT)>>14);
+	sprintf(out1, "eflags:%08x [vm=%x iopl=%x nt=%x]", reg_flags,
+	        GETFLAG(VM) >> 17, GETFLAG(IOPL) >> 12, GETFLAG(NT) >> 14);
 	LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 	sprintf(out1,"GDT base=%08X limit=%08" sBitfs(X),cpu.gdt.GetBase(),cpu.gdt.GetLimit());
 	LOG(LOG_MISC,LOG_ERROR)("%s",out1);
@@ -2046,18 +2069,19 @@ static void LogCPUInfo(void) {
 	Bitu sel=CPU_STR();
 	Descriptor desc;
 	if (cpu.gdt.GetDescriptor(sel,desc)) {
-		sprintf(out1,"TR selector=%04" sBitfs(X) ", base=%08X limit=%08" sBitfs(X) "*%X",sel,desc.GetBase(),desc.GetLimit(),desc.saved.seg.g?0x4000:1);
+		sprintf(out1,"TR selector=%04" sBitfs(X) ", base=%08X limit=%08X*%X",sel,desc.GetBase(),desc.GetLimit(),desc.saved.seg.g?0x4000:1);
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 	}
 	sel=CPU_SLDT();
 	if (cpu.gdt.GetDescriptor(sel,desc)) {
-		sprintf(out1,"LDT selector=%04" sBitfs(X) ", base=%08X limit=%08" sBitfs(X) "*%X",sel,desc.GetBase(),desc.GetLimit(),desc.saved.seg.g?0x4000:1);
+		sprintf(out1,"LDT selector=%04" sBitfs(X) ", base=%08X limit=%08X*%X",sel,desc.GetBase(),desc.GetLimit(),desc.saved.seg.g?0x4000:1);
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 	}
-};
+}
 
 #if C_HEAVY_DEBUG
-static void LogInstruction(Bit16u segValue, Bit32u eipValue,  ofstream& out) {
+static void LogInstruction(uint16_t segValue, uint32_t eipValue, ofstream &out)
+{
 	static char empty[23] = { 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,0 };
 
 	if (cpuLogType == 3) { //Log only cs:ip.
@@ -2073,10 +2097,12 @@ static void LogInstruction(Bit16u segValue, Bit32u eipValue,  ofstream& out) {
 		res = AnalyzeInstruction(dline,false);
 		if (!res || !(*res)) res = empty;
 		Bitu reslen = strlen(res);
-		if (reslen<22) for (Bitu i=0; i<22-reslen; i++) res[reslen+i] = ' '; res[22] = 0;
-	};
-	Bitu len = strlen(dline);
-	if (len<30) for (Bitu i=0; i<30-len; i++) dline[len + i] = ' '; dline[30] = 0;
+		if (reslen < 22) memset(res + reslen, ' ',22 - reslen);
+		res[22] = 0;
+	}
+	Bitu len = safe_strlen(dline);
+	if (len < 30) memset(dline + len,' ',30 - len);
+	dline[30] = 0;
 
 	// Get register values
 
@@ -2092,19 +2118,19 @@ static void LogInstruction(Bit16u segValue, Bit32u eipValue,  ofstream& out) {
 			else sprintf(tmpc,"%02X ",value);
 			strcat(ibytes,tmpc);
 		}
-		len = strlen(ibytes);
+		len = safe_strlen(ibytes);
 		if (len<21) { for (Bitu i=0; i<21-len; i++) ibytes[len + i] =' '; ibytes[21]=0;} //NOTE THE BRACKETS
 		out << setw(4) << SegValue(cs) << ":" << setw(8) << reg_eip << "  " << dline << "  " << res << "  " << ibytes;
 	}
-   
-	out << " EAX:" << setw(8) << reg_eax << " EBX:" << setw(8) << reg_ebx 
+
+	out << " EAX:" << setw(8) << reg_eax << " EBX:" << setw(8) << reg_ebx
 	    << " ECX:" << setw(8) << reg_ecx << " EDX:" << setw(8) << reg_edx
-	    << " ESI:" << setw(8) << reg_esi << " EDI:" << setw(8) << reg_edi 
-	    << " EBP:" << setw(8) << reg_ebp << " ESP:" << setw(8) << reg_esp 
+	    << " ESI:" << setw(8) << reg_esi << " EDI:" << setw(8) << reg_edi
+	    << " EBP:" << setw(8) << reg_ebp << " ESP:" << setw(8) << reg_esp
 	    << " DS:"  << setw(4) << SegValue(ds)<< " ES:"  << setw(4) << SegValue(es);
 
 	if(cpuLogType == 0) {
-		out << " SS:"  << setw(4) << SegValue(ss) << " C"  << (get_CF()>0)  << " Z"   << (get_ZF()>0)  
+		out << " SS:"  << setw(4) << SegValue(ss) << " C"  << (get_CF()>0)  << " Z"   << (get_ZF()>0)
 		    << " S" << (get_SF()>0) << " O"  << (get_OF()>0) << " I"  << GETFLAGBOOL(IF);
 	} else {
 		out << " FS:"  << setw(4) << SegValue(fs) << " GS:"  << setw(4) << SegValue(gs)
@@ -2114,96 +2140,101 @@ static void LogInstruction(Bit16u segValue, Bit32u eipValue,  ofstream& out) {
 		    << " IF:"  << GETFLAGBOOL(IF);
 	}
 	if(cpuLogType == 2) {
-		out << " TF:" << GETFLAGBOOL(TF) << " VM:" << GETFLAGBOOL(VM) <<" FLG:" << setw(8) << reg_flags 
-		    << " CR0:" << setw(8) << cpu.cr0;	
+		out << " TF:" << GETFLAGBOOL(TF) << " VM:" << GETFLAGBOOL(VM) <<" FLG:" << setw(8) << reg_flags
+		    << " CR0:" << setw(8) << cpu.cr0;
 	}
 	out << endl;
-};
+}
 #endif
 
 // DEBUG.COM stuff
 
-class DEBUG : public Program {
+class DEBUG final : public Program {
 public:
-	DEBUG()		{ pDebugcom	= this;	active = false; };
-	~DEBUG()	{ pDebugcom	= 0; };
+	DEBUG() : active(false) { pDebugcom = this; }
 
-	bool IsActive() { return active; };
+	~DEBUG() { pDebugcom = nullptr; }
 
-	void Run(void)
+	bool IsActive() const { return active; }
+
+	void Run()
 	{
 		if(cmd->FindExist("/NOMOUSE",false)) {
 	        	real_writed(0,0x33<<2,0);
 			return;
 		}
-	   
+
+		Bit16u commandNr = 1;
+		if (!cmd->FindCommand(commandNr++,temp_line)) return;
+		// Get filename
 		char filename[128];
+		safe_strcpy(filename, temp_line.c_str());
+		// Setup commandline
 		char args[256+1];
-	
-		cmd->FindCommand(1,temp_line);
-		safe_strncpy(filename,temp_line.c_str(),128);
-		// Read commandline
-		Bit16u i	=2;
-		args[0]		= 0;
-		for (;cmd->FindCommand(i++,temp_line)==true;) {
-			strncat(args,temp_line.c_str(),256);
-			strncat(args," ",256);
+		args[0]	= 0;
+		bool found = cmd->FindCommand(commandNr++,temp_line);
+		while (found) {
+			if (safe_strlen(args)+temp_line.length()+1>256) break;
+			strcat(args,temp_line.c_str());
+			found = cmd->FindCommand(commandNr++,temp_line);
+			if (found) strcat(args," ");
 		}
-		// Start new shell and execute prog		
+		// Start new shell and execute prog
 		active = true;
 		// Save cpu state....
 		Bit16u oldcs	= SegValue(cs);
-		Bit32u oldeip	= reg_eip;	
+		Bit32u oldeip	= reg_eip;
 		Bit16u oldss	= SegValue(ss);
 		Bit32u oldesp	= reg_esp;
 
 		// Start shell
 		DOS_Shell shell;
-		shell.Execute(filename,args);
+		if (!shell.Execute(filename, args))
+			WriteOut(MSG_Get("PROGRAM_EXECUTABLE_MISSING"), filename);
 
 		// set old reg values
 		SegSet16(ss,oldss);
 		reg_esp = oldesp;
 		SegSet16(cs,oldcs);
 		reg_eip = oldeip;
-	};
+	}
 
 private:
 	bool	active;
 };
 
-void DEBUG_CheckExecuteBreakpoint(Bit16u seg, Bit32u off)
+void DEBUG_CheckExecuteBreakpoint(uint16_t seg, uint32_t off)
 {
 	if (pDebugcom && pDebugcom->IsActive()) {
-		CBreakpoint::AddBreakpoint(seg,off,true);		
+		CBreakpoint::AddBreakpoint(seg,off,true);
 		CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
 		pDebugcom = 0;
-	};
-};
+	}
+}
 
-Bitu DEBUG_EnableDebugger(void)
+Bitu DEBUG_EnableDebugger()
 {
 	exitLoop = true;
 	DEBUG_Enable(true);
 	CPU_Cycles=CPU_CycleLeft=0;
 	return 0;
-};
+}
 
 static void DEBUG_ProgramStart(Program * * make) {
 	*make=new DEBUG;
 }
 
-// INIT 
+// INIT
 
 void DEBUG_SetupConsole(void) {
-	#ifdef WIN32
+#ifdef WIN32
 	WIN32_Console();
-	#else
+#else
 	tcgetattr(0,&consolesettings);
 	//curses must be inited first in order to catch the resize (is an event)
 //	printf("\e[8;50;80t"); //resize terminal
 //	fflush(NULL);
-	#endif	
+#endif
 	memset((void *)&dbg,0,sizeof(dbg));
 	debugging=false;
 //	dbg.active_win=3;
@@ -2216,12 +2247,12 @@ void DEBUG_ShutDown(Section * /*sec*/) {
 	CDebugVar::DeleteAll();
 	curs_set(old_cursor_state);
 	endwin();
-	#ifndef WIN32
+#ifndef WIN32
 	tcsetattr(0, TCSANOW,&consolesettings);
 //	printf("\e[0m\e[2J"); //Seems to destroy scrolling
 //	printf("\ec"); //Doesn't seem to be needed anymore
 //	fflush(NULL);
-	#endif
+#endif
 }
 
 Bitu debugCallback;
@@ -2231,11 +2262,13 @@ void DEBUG_Init(Section* sec) {
 //	MSG_Add("DEBUG_CONFIGFILE_HELP","Debugger related options.\n");
 	DEBUG_DrawScreen();
 	/* Add some keyhandlers */
-	MAPPER_AddHandler(DEBUG_Enable,MK_pause,MMOD2,"debugger","Debugger");
+	MAPPER_AddHandler(DEBUG_Enable, SDL_SCANCODE_PAUSE, MMOD2, "debugger",
+	                  "Debugger");
 	/* Reset code overview and input line */
 	memset((void*)&codeViewData,0,sizeof(codeViewData));
 	/* setup debug.com */
 	PROGRAMS_MakeFile("DEBUG.COM",DEBUG_ProgramStart);
+	PROGRAMS_MakeFile("DBXDEBUG.COM",DEBUG_ProgramStart);
 	/* Setup callback */
 	debugCallback=CALLBACK_Allocate();
 	CALLBACK_Setup(debugCallback,DEBUG_EnableDebugger,CB_RETF,"debugger");
@@ -2245,23 +2278,23 @@ void DEBUG_Init(Section* sec) {
 
 // DEBUGGING VAR STUFF
 
-void CDebugVar::InsertVariable(char* name, PhysPt adr)
+void CDebugVar::InsertVariable(char *name, PhysPt adr)
 {
 	varList.push_back(new CDebugVar(name,adr));
-};
+}
 
-void CDebugVar::DeleteAll(void) 
+void CDebugVar::DeleteAll()
 {
 	std::vector<CDebugVar*>::iterator i;
 	CDebugVar* bp;
 	for(i=varList.begin(); i != varList.end(); i++) {
 		bp = static_cast<CDebugVar*>(*i);
 		delete bp;
-	};
+	}
 	(varList.clear)();
-};
+}
 
-CDebugVar* CDebugVar::FindVar(PhysPt pt)
+CDebugVar *CDebugVar::FindVar(PhysPt pt)
 {
 	if (varList.empty()) return 0;
 
@@ -2270,11 +2303,12 @@ CDebugVar* CDebugVar::FindVar(PhysPt pt)
 	for(std::vector<CDebugVar*>::size_type i = 0; i != s; i++) {
 		bp = static_cast<CDebugVar*>(varList[i]);
 		if (bp->GetAdr() == pt) return bp;
-	};
+	}
 	return 0;
-};
+}
 
-bool CDebugVar::SaveVars(char* name) {
+bool CDebugVar::SaveVars(char *name)
+{
 	if (varList.size() > 65535) return false;
 
 	FILE* f = fopen(name,"wb+");
@@ -2293,12 +2327,12 @@ bool CDebugVar::SaveVars(char* name) {
 		// adr
 		PhysPt adr = bp->GetAdr();
 		fwrite(&adr,1,sizeof(adr),f);
-	};
+	}
 	fclose(f);
 	return true;
-};
+}
 
-bool CDebugVar::LoadVars(char* name)
+bool CDebugVar::LoadVars(char *name)
 {
 	FILE* f = fopen(name,"rb");
 	if (!f) return false;
@@ -2318,10 +2352,10 @@ bool CDebugVar::LoadVars(char* name)
 		if (fread(&adr,sizeof(adr),1,f) != 1) break;
 		// insert
 		InsertVariable(name,adr);
-	};
+	}
 	fclose(f);
 	return true;
-};
+}
 
 static void SaveMemory(Bit16u seg, Bit32u ofs1, Bit32u num) {
 	FILE* f = fopen("MEMDUMP.TXT","wt");
@@ -2329,7 +2363,7 @@ static void SaveMemory(Bit16u seg, Bit32u ofs1, Bit32u num) {
 		DEBUG_ShowMsg("DEBUG: Memory dump failed.\n");
 		return;
 	}
-	
+
 	char buffer[128];
 	char temp[16];
 
@@ -2393,7 +2427,8 @@ static void OutputVecTable(char* filename) {
 }
 
 #define DEBUG_VAR_BUF_LEN 16
-static void DrawVariables(void) {
+static void DrawVariables()
+{
 	if (CDebugVar::varList.empty()) return;
 
 	CDebugVar *dv;
@@ -2436,7 +2471,7 @@ static void DrawVariables(void) {
 	}
 
 	if (windowchanges) wrefresh(dbg.win_var);
-};
+}
 #undef DEBUG_VAR_BUF_LEN
 // HEAVY DEBUGGING STUFF
 
@@ -2475,8 +2510,8 @@ struct TLogInst {
 
 TLogInst logInst[LOGCPUMAX];
 
-void DEBUG_HeavyLogInstruction(void) {
-
+void DEBUG_HeavyLogInstruction()
+{
 	static char empty[23] = { 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,0 };
 
 	PhysPt start = GetAddress(SegValue(cs),reg_eip);
@@ -2487,11 +2522,12 @@ void DEBUG_HeavyLogInstruction(void) {
 		res = AnalyzeInstruction(dline,false);
 		if (!res || !(*res)) res = empty;
 		Bitu reslen = strlen(res);
-		if (reslen<22) for (Bitu i=0; i<22-reslen; i++) res[reslen+i] = ' '; res[22] = 0;
-	};
+		if (reslen < 22) memset(res + reslen, ' ',22 - reslen);
+		res[22] = 0;
+	}
 
-	Bitu len = strlen(dline);
-	if (len < 30) for (Bitu i=0; i < 30-len; i++) dline[len+i] = ' ';
+	Bitu len = safe_strlen(dline);
+	if (len < 30) memset(dline + len,' ',30 - len);
 	dline[30] = 0;
 
 	TLogInst & inst = logInst[logCount];
@@ -2521,17 +2557,18 @@ void DEBUG_HeavyLogInstruction(void) {
 	inst.i    = GETFLAGBOOL(IF);
 
 	if (++logCount >= LOGCPUMAX) logCount = 0;
-};
+}
 
-void DEBUG_HeavyWriteLogInstruction(void) {
+void DEBUG_HeavyWriteLogInstruction()
+{
 	if (!logHeavy) return;
 	logHeavy = false;
-	
+
 	DEBUG_ShowMsg("DEBUG: Creating cpu log LOGCPU_INT_CD.TXT\n");
 
 	ofstream out("LOGCPU_INT_CD.TXT");
 	if (!out.is_open()) {
-		DEBUG_ShowMsg("DEBUG: Failed.\n");	
+		DEBUG_ShowMsg("DEBUG: Failed.\n");
 		return;
 	}
 	out << hex << noshowbase << setfill('0') << uppercase;
@@ -2539,7 +2576,7 @@ void DEBUG_HeavyWriteLogInstruction(void) {
 	do {
 		// Write Instructions
 		TLogInst & inst = logInst[startLog];
-		out << setw(4) << inst.s_cs << ":" << setw(8) << inst.eip << "  " 
+		out << setw(4) << inst.s_cs << ":" << setw(8) << inst.eip << "  "
 		    << inst.dline << "  " << inst.res << " EAX:" << setw(8)<< inst.eax
 		    << " EBX:" << setw(8) << inst.ebx << " ECX:" << setw(8) << inst.ecx
 		    << " EDX:" << setw(8) << inst.edx << " ESI:" << setw(8) << inst.esi
@@ -2557,10 +2594,10 @@ void DEBUG_HeavyWriteLogInstruction(void) {
 		        logInst[startLog].c,logInst[startLog].z,logInst[startLog].s,logInst[startLog].o,logInst[startLog].a,logInst[startLog].p,logInst[startLog].i);*/
 		if (++startLog >= LOGCPUMAX) startLog = 0;
 	} while (startLog != logCount);
-	
+
 	out.close();
-	DEBUG_ShowMsg("DEBUG: Done.\n");	
-};
+	DEBUG_ShowMsg("DEBUG: Done.\n");
+}
 
 bool DEBUG_HeavyIsBreakpoint(void) {
 	static Bitu zero_count = 0;
@@ -2581,7 +2618,7 @@ bool DEBUG_HeavyIsBreakpoint(void) {
 	// LogInstruction
 	if (logHeavy) DEBUG_HeavyLogInstruction();
 	if (zeroProtect) {
-		Bit32u value=0;
+		Bit32u value = 0;
 		if (!mem_readd_checked(SegPhys(cs)+reg_eip,&value)) {
 			if (value == 0) zero_count++;
 			else zero_count = 0;
@@ -2593,15 +2630,12 @@ bool DEBUG_HeavyIsBreakpoint(void) {
 		skipFirstInstruction = false;
 		return false;
 	}
-	if (CBreakpoint::CheckBreakpoint(SegValue(cs),reg_eip)) {
-		return true;	
+	if (!CBreakpoint::BPoints.empty() && CBreakpoint::CheckBreakpoint(SegValue(cs),reg_eip)) {
+		return true;
 	}
 	return false;
 }
 
 #endif // HEAVY DEBUG
 
-
 #endif // DEBUG
-
-

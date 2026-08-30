@@ -1,5 +1,8 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -19,13 +22,19 @@
 #ifndef DOSBOX_SETUP_H
 #define DOSBOX_SETUP_H
 
+#include "dosbox.h"
+
 #include <cstdio>
+#include <deque>
 #include <list>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
-#include "support.h"
+using parse_environ_result_t = std::list<std::tuple<std::string, std::string>>;
+
+parse_environ_result_t parse_environ(const char * const * envp) noexcept;
 
 class Hex {
 private:
@@ -95,7 +104,7 @@ public:
 	/* Destructor */
 	virtual ~Value() { destroy(); }
 
-	/* Assigment operators */
+	/* Assignment operators */
 	Value &operator=(Hex in) { return copy(Value(in)); }
 	Value &operator=(int in) { return copy(Value(in)); }
 	Value &operator=(bool in) { return copy(Value(in)); }
@@ -135,15 +144,7 @@ public:
 
 	const std::string propname;
 
-	Property(const std::string &name, Changeable::Value when)
-		: propname(name),
-		  value(),
-		  suggested_values{},
-		  default_value(),
-		  change(when)
-	{
-		assertm(!name.empty(), "Property name can't be empty.");
-	}
+	Property(const std::string &name, Changeable::Value when);
 
 	virtual ~Property() = default;
 
@@ -169,7 +170,7 @@ public:
 
 protected:
 	//Set interval value to in or default if in is invalid. force always sets the value.
-	//Can be overriden to set a different value if invalid.
+	//Can be overridden to set a different value if invalid.
 	virtual bool SetVal(Value const& in, bool forced,bool warn=true) {
 		if(forced || CheckValue(in,warn)) {
 			value = in; return true;
@@ -184,7 +185,7 @@ protected:
 	const Changeable::Value change;
 };
 
-class Prop_int : public Property {
+class Prop_int final : public Property {
 public:
 	Prop_int(const std::string &name, Changeable::Value when, int val)
 	        : Property(name, when),
@@ -220,7 +221,7 @@ private:
 	Value max_value;
 };
 
-class Prop_double:public Property {
+class Prop_double final : public Property {
 public:
 	Prop_double(std::string const & _propname, Changeable::Value when, double _value)
 		:Property(_propname,when){
@@ -230,7 +231,7 @@ public:
 	~Prop_double(){ }
 };
 
-class Prop_bool:public Property {
+class Prop_bool final : public Property {
 public:
 	Prop_bool(std::string const& _propname, Changeable::Value when, bool _value)
 		:Property(_propname,when) {
@@ -256,7 +257,7 @@ public:
 	bool CheckValue(const Value &in, bool warn) override;
 };
 
-class Prop_path : public Prop_string {
+class Prop_path final : public Prop_string {
 public:
 	Prop_path(const std::string &name, Changeable::Value when, const char *val)
 	        : Prop_string(name, when, val),
@@ -270,7 +271,7 @@ public:
 	std::string realpath;
 };
 
-class Prop_hex:public Property {
+class Prop_hex final : public Property {
 public:
 	Prop_hex(std::string const& _propname, Changeable::Value when, Hex _value)
 		:Property(_propname,when) {
@@ -282,32 +283,39 @@ public:
 
 #define NO_SUCH_PROPERTY "PROP_NOT_EXIST"
 
+typedef void (*SectionFunction)(Section *);
+
 class Section {
 private:
-	typedef void (*SectionFunction)(Section*);
-
 	/* Wrapper class around startup and shutdown functions. the variable
-	 * canchange indicates it can be called on configuration changes */
+	 * changeable_at_runtime indicates it can be called on configuration
+	 * changes */
 	struct Function_wrapper {
 		SectionFunction function;
-		bool canchange;
+		bool changeable_at_runtime;
 
 		Function_wrapper(SectionFunction const fn, bool ch)
 		        : function(fn),
-		          canchange(ch)
+		          changeable_at_runtime(ch)
 		{}
 	};
 
-	std::list<Function_wrapper> initfunctions = {};
-	std::list<Function_wrapper> destroyfunctions = {};
+	std::deque<Function_wrapper> early_init_functions = {};
+	std::deque<Function_wrapper> initfunctions = {};
+	std::deque<Function_wrapper> destroyfunctions = {};
 	std::string sectionname;
 public:
 	Section(const std::string &name) : sectionname(name) {}
 
 	virtual ~Section() = default; // Children must call executedestroy!
 
-	void AddInitFunction(SectionFunction func, bool canchange = false);
-	void AddDestroyFunction(SectionFunction func, bool canchange = false);
+	void AddEarlyInitFunction(SectionFunction func,
+	                          bool changeable_at_runtime = false);
+	void AddInitFunction(SectionFunction func, bool changeable_at_runtime = false);
+	void AddDestroyFunction(SectionFunction func,
+	                        bool changeable_at_runtime = false);
+
+	void ExecuteEarlyInit(bool initall = true);
 	void ExecuteInit(bool initall=true);
 	void ExecuteDestroy(bool destroyall=true);
 	const char* GetName() const {return sectionname.c_str();}
@@ -320,11 +328,11 @@ public:
 class Prop_multival;
 class Prop_multival_remain;
 
-class Section_prop : public Section {
+class Section_prop final : public Section {
 private:
-	std::list<Property *> properties = {};
-	typedef std::list<Property*>::iterator it;
-	typedef std::list<Property*>::const_iterator const_it;
+	std::deque<Property *> properties = {};
+	typedef std::deque<Property*>::iterator it;
+	typedef std::deque<Property*>::const_iterator const_it;
 
 public:
 	Section_prop(const std::string &name) : Section(name) {}
@@ -382,14 +390,14 @@ public:
 	const std::vector<Value> &GetValues() const override;
 };
 
-class Prop_multival_remain:public Prop_multival{
+class Prop_multival_remain final : public Prop_multival{
 public:
 	Prop_multival_remain(std::string const& _propname, Changeable::Value when,std::string const& sep):Prop_multival(_propname,when,sep){ }
 
 	virtual bool SetValue(std::string const& input);
 };
 
-class Section_line : public Section {
+class Section_line final : public Section {
 public:
 	Section_line(std::string const &name) : Section(name), data() {}
 
@@ -417,5 +425,7 @@ public:
 
 	virtual bool Change_Config(Section * /*newconfig*/) { return false; }
 };
+
+void SETUP_ParseConfigFiles(const std::string &config_path);
 
 #endif

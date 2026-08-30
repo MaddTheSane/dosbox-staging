@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,39 +16,50 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
 #include "dos_inc.h"
+
+#include <cstring>
+
 #include "../ints/int10.h"
-#include <string.h>
 
 #define NUMBER_ANSI_DATA 10
 
-class device_CON : public DOS_Device {
+class device_CON final : public DOS_Device {
 public:
-	device_CON();
+	device_CON() { SetName("CON"); }
+
 	bool Read(Bit8u * data,Bit16u * size);
 	bool Write(Bit8u * data,Bit16u * size);
 	bool Seek(Bit32u * pos,Bit32u type);
 	bool Close();
 	Bit16u GetInformation(void);
-	bool ReadFromControlChannel(PhysPt bufptr,Bit16u size,Bit16u * retcode){return false;}
-	bool WriteToControlChannel(PhysPt bufptr,Bit16u size,Bit16u * retcode){return false;}
+	bool ReadFromControlChannel(PhysPt /*bufptr*/,Bit16u /*size*/,Bit16u * /*retcode*/){return false;}
+	bool WriteToControlChannel(PhysPt /*bufptr*/,Bit16u /*size*/,Bit16u * /*retcode*/){return false;}
 private:
-	void ClearAnsi(void);
+	void ClearAnsi();
 	void Output(Bit8u chr);
-	Bit8u readcache;
-	struct ansi { /* should create a constructor, which would fill them with the appropriate values */
-		bool esc;
-		bool sci;
-		bool enabled;
-		Bit8u attr;
-		Bit8u data[NUMBER_ANSI_DATA];
-		Bit8u numberofarg;
-		Bit8s savecol;
-		Bit8s saverow;
-		bool warned;
-	} ansi;
+
+	uint8_t readcache = 0;
+	struct ansi {
+		bool esc = false;
+		bool sci = false;
+		bool enabled = false;
+		uint8_t attr = 0x7;
+		uint8_t data[NUMBER_ANSI_DATA] = {};
+		uint8_t numberofarg = 0;
+		int8_t savecol = 0;
+		int8_t saverow = 0;
+		bool warned = false;
+	} ansi = {};
 };
+
+void device_CON::ClearAnsi()
+{
+	memset(ansi.data, 0, NUMBER_ANSI_DATA);
+	ansi.esc = false;
+	ansi.sci = false;
+	ansi.numberofarg = 0;
+}
 
 bool device_CON::Read(Bit8u * data,Bit16u * size) {
 	Bit16u oldax=reg_ax;
@@ -62,6 +73,15 @@ bool device_CON::Read(Bit8u * data,Bit16u * size) {
 	while (*size>count) {
 		reg_ah=(IS_EGAVGA_ARCH)?0x10:0x0;
 		CALLBACK_RunRealInt(0x16);
+        
+        //--Added 2012-08-19 by Alun Bestor to let Boxer interrupt STDIN keyboard input listening
+        if (!boxer_continueListeningForKeyEvents())
+        {
+			reg_ax=oldax;
+            return false;
+        }
+        //--End of modifications
+        
 		switch(reg_al) {
 		case 13:
 			data[count++]=0x0D;
@@ -276,7 +296,7 @@ bool device_CON::Write(Bit8u * data,Bit16u * size) {
 				LOG(LOG_IOCTL,LOG_WARN)("ANSI SEQUENCES USED");
 			}
 			ncols = real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS);
-			nrows = real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS) + 1;
+			nrows = IS_EGAVGA_ARCH ? (real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS) + 1) : 25;
 			/* Turn them into positions that are on the screen */
 			if(ansi.data[0] == 0) ansi.data[0] = 1;
 			if(ansi.data[1] == 0) ansi.data[1] = 1;
@@ -298,7 +318,7 @@ bool device_CON::Write(Bit8u * data,Bit16u * size) {
 		case 'B': /*cursor Down */
 			col=CURSOR_POS_COL(page) ;
 			row=CURSOR_POS_ROW(page) ;
-			nrows = real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS) + 1;
+			nrows = IS_EGAVGA_ARCH ? (real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS) + 1) : 25;
 			tempdata = (ansi.data[0]? ansi.data[0] : 1);
 			if(tempdata + static_cast<Bitu>(row) >= nrows)
 				{ row = nrows - 1;}
@@ -361,7 +381,7 @@ bool device_CON::Write(Bit8u * data,Bit16u * size) {
 		case 'M': /* delete line (NANSI) */
 			row = CURSOR_POS_ROW(page);
 			ncols = real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS);
-			nrows = real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS) + 1;
+			nrows = IS_EGAVGA_ARCH ? (real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS) + 1) : 25;
 			INT10_ScrollWindow(row,0,nrows-1,ncols-1,ansi.data[0]? -ansi.data[0] : -1,ansi.attr,0xFF);
 			ClearAnsi();
 			break;
@@ -379,7 +399,7 @@ bool device_CON::Write(Bit8u * data,Bit16u * size) {
 	return true;
 }
 
-bool device_CON::Seek(Bit32u * pos,Bit32u type) {
+bool device_CON::Seek(Bit32u * pos,Bit32u /*type*/) {
 	// seek is valid
 	*pos = 0;
 	return true;
@@ -390,6 +410,11 @@ bool device_CON::Close() {
 }
 
 Bit16u device_CON::GetInformation(void) {
+    //--Added 2012-04-15 by Alun Bestor to let Boxer inject key codes into the console.
+    if (boxer_numKeyCodesInPasteBuffer())
+        return 0x8093;
+    //--End of modifications.
+    
 	Bit16u head=mem_readw(BIOS_KEYBOARD_BUFFER_HEAD);
 	Bit16u tail=mem_readw(BIOS_KEYBOARD_BUFFER_TAIL);
 
@@ -403,24 +428,6 @@ Bit16u device_CON::GetInformation(void) {
 	if (head>=end) head=start;
 	mem_writew(BIOS_KEYBOARD_BUFFER_HEAD,head);
 	return 0x80D3; /* No Key Available */
-}
-
-device_CON::device_CON() {
-	SetName("CON");
-	readcache=0;
-	ansi.enabled=false;
-	ansi.attr=0x7;
-	ansi.saverow=0;
-	ansi.savecol=0;
-	ansi.warned=false;
-	ClearAnsi();
-}
-
-void device_CON::ClearAnsi(void){
-	for(Bit8u i=0; i<NUMBER_ANSI_DATA;i++) ansi.data[i]=0;
-	ansi.esc=false;
-	ansi.sci=false;
-	ansi.numberofarg=0;
 }
 
 void device_CON::Output(Bit8u chr) {

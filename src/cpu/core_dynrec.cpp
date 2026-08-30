@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -15,7 +15,6 @@
  *  with this program; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
-
 
 #include "dosbox.h"
 
@@ -34,14 +33,16 @@
 #include <winbase.h>
 #endif
 
-#if (C_HAVE_MPROTECT)
+#if defined(HAVE_MPROTECT) || defined(HAVE_MMAP)
 #include <sys/mman.h>
 
 #include <limits.h>
+
 #ifndef PAGESIZE
 #define PAGESIZE 4096
 #endif
-#endif /* C_HAVE_MPROTECT */
+
+#endif // HAVE_MPROTECT
 
 #include "callback.h"
 #include "regs.h"
@@ -125,7 +126,7 @@ static void IllegalOptionDynrec(const char* msg) {
 }
 
 struct core_dynrec_t {
-	BlockReturn (*runcode)(Bit8u*);		// points to code that can start a block
+	BlockReturn (*runcode)(const Bit8u*);		// points to code that can start a block
 	Bitu callback;				// the occurred callback
 	Bitu readdata;				// spare space used when reading from memory
 	Bit32u protected_regs[8];	// space to save/restore register values
@@ -303,7 +304,9 @@ run_block:
 		case BR_SMCBlock:
 //			LOG_MSG("selfmodification of running block at %x:%x",SegValue(cs),reg_eip);
 			cpu.exception.which=0;
-			// fallthrough, let the normal core handle the block-modifying instruction
+			// let the normal core handle the block-modifying
+			// instruction
+			FALLTHROUGH;
 		case BR_Opcode:
 			// some instruction has been encountered that could not be translated
 			// (thus it is not part of the code block), the normal core will
@@ -342,7 +345,7 @@ Bits CPU_Core_Dynrec_Trap_Run(void) {
 
 	// trap to int1 unless the last instruction deferred this
 	// (allows hardware interrupts to be served without interaction)
-	if (!cpu.trap_skip) CPU_HW_Interrupt(1);
+	if (!cpu.trap_skip) CPU_DebugException(DBINT_STEP,reg_eip);
 
 	CPU_Cycles = oldCycles-1;
 	// continue (either the trapflag was clear anyways, or the int1 cleared it)

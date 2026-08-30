@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Copyright (c) 2020 Kevin R Croft <krcroft@gmail.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Copyright (C) 2020-2021  kcgen <kcgen@users.noreply.github.com>
 
 # Builds and installs the AutoFDO package from
 # https://github.com/google/autofdo
@@ -54,7 +55,7 @@ flags="-Os -DNDEBUG -pipe"
 
 # Build and install
 # Note: make cannot be run in parallel because the sub-projects'
-#       need to be configured serially with respect to eachother
+#       need to be configured serially with respect to each other
 make
 make install
 popd

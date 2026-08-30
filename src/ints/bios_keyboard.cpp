@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,12 +16,12 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "bios.h"
+
 #include <SDL.h>
 
-#include "dosbox.h"
 #include "callback.h"
 #include "mem.h"
-#include "bios.h"
 #include "keyboard.h"
 #include "regs.h"
 #include "inout.h"
@@ -158,6 +158,11 @@ static void add_key(Bit16u code) {
 }
 
 static bool get_key(Bit16u &code) {
+    //--Added 2012-04-15 to let Boxer insert its own keys
+    if (boxer_getNextKeyCodeInPasteBuffer(&code, true))
+        return true;
+    //--End of modifications
+    
 	Bit16u start,end,head,tail,thead;
 	if (machine==MCH_PCJR) {
 		/* should be done for cga and others as well, to be tested */
@@ -179,12 +184,19 @@ static bool get_key(Bit16u &code) {
 }
 
 static bool check_key(Bit16u &code) {
+    //--Added 2012-04-15 to let Boxer insert its own keys
+    if (boxer_getNextKeyCodeInPasteBuffer(&code, false))
+        return true;
+    //--End of modifications
+    
 	Bit16u head,tail;
 	head =mem_readw(BIOS_KEYBOARD_BUFFER_HEAD);
 	tail =mem_readw(BIOS_KEYBOARD_BUFFER_TAIL);
-	if (head==tail) return false;
 	code = real_readw(0x40,head);
-	return true;
+	// cpu flags from instruction comparing head and tail pointers
+	CALLBACK_SZF(head==tail);
+	CALLBACK_SCF(head<tail);
+	return (head!=tail);
 }
 
 	/*	Flag Byte 1 
@@ -295,16 +307,18 @@ static Bitu IRQ1_Handler(void) {
 		}
 		break;
 	case 0x3a:flags2 |=0x40;break;//CAPSLOCK
-	case 0xba:flags1 ^=0x40;flags2 &=~0x40;leds ^=0x04;break;
+		//--Modified 2011-03-13 by Alun Bestor to let Boxer sniff the state of lock keys.
+	case 0xba:flags1 ^=0x40;flags2 &=~0x40;leds ^=0x04;boxer_setCapsLockActive(flags1 & 0x40);break;
+		//--End of modifications
 	case 0x45:
 		if (flags3 &0x01) {
 			/* last scancode of pause received; first remove 0xe1-prefix */
 			flags3 &=~0x01;
 			mem_writeb(BIOS_KEYBOARD_FLAGS3,flags3);
 			if (flags2&1) {
-				/* ctrl-pause (break), special handling needed:
+				/* Ctrl+Pause (Break), special handling needed:
 				   add zero to the keyboard buffer, call int 0x1b which
-				   sets ctrl-c flag which calls int 0x23 in certain dos
+				   sets Ctrl+C flag which calls int 0x23 in certain dos
 				   input/output functions;    not handled */
 			} else if ((flags2&8)==0) {
 				/* normal pause key, enter loop */
@@ -327,10 +341,13 @@ static Bitu IRQ1_Handler(void) {
 			flags1^=0x20;
 			leds^=0x02;
 			flags2&=~0x20;
+			//--Added 2011-03-13 by Alun Bestor to let Boxer sniff the state of lock keys.
+			boxer_setNumLockActive(flags1 & 0x20);
+			//--End of modifications
 		}
 		break;
 	case 0x46:flags2 |=0x10;break;				/* Scroll Lock SDL Seems to do this one fine (so break and make codes) */
-	case 0xc6:flags1 ^=0x10;flags2 &=~0x10;leds ^=0x01;break;
+	case 0xc6:flags1 ^=0x10;flags2 &=~0x10;leds ^=0x01;boxer_setScrollLockActive(flags1 & 0x10);break;
 //	case 0x52:flags2|=128;break;//See numpad					/* Insert */
 	case 0xd2:	
 		if(flags3&0x02) { /* Maybe honour the insert on keypad as well */
@@ -466,6 +483,14 @@ static bool IsEnhancedKey(Bit16u &key) {
 
 static Bitu INT16_Handler(void) {
 	Bit16u temp=0;
+    
+    //--Added 2012-08-19 by Alun Bestor to let Boxer interrupt keyboard listening loops
+    if (!boxer_continueListeningForKeyEvents())
+    {
+        return CBRET_STOP;
+    }
+    //--End of modifications
+    
 	switch (reg_ah) {
 	case 0x00: /* GET KEYSTROKE */
 		if ((get_key(temp)) && (!IsEnhancedKey(temp))) {
@@ -492,37 +517,32 @@ static Bitu INT16_Handler(void) {
 		// enable interrupt-flag after IRET of this int16
 		CALLBACK_SIF(true);
 		for (;;) {
-			if (check_key(temp)) {
+			if (check_key(temp)) { //  check_key changes ZF and CF as required
 				if (!IsEnhancedKey(temp)) {
 					/* normal key, return translated key in ax */
-					CALLBACK_SZF(false);
-					reg_ax=temp;
 					break;
 				} else {
 					/* remove enhanced key from buffer and ignore it */
 					get_key(temp);
 				}
 			} else {
-				/* no key available */
-				CALLBACK_SZF(true);
+				/* no key available, return key at buffer head anyway */
 				break;
 			}
 //			CALLBACK_Idle();
 		}
+		reg_ax=temp;
 		break;
 	case 0x11: /* CHECK FOR KEYSTROKE (enhanced keyboards only) */
 		// enable interrupt-flag after IRET of this int16
 		CALLBACK_SIF(true);
-		if (!check_key(temp)) {
-			CALLBACK_SZF(true);
-		} else {
-			CALLBACK_SZF(false);
+		if (check_key(temp)) { // check_key changes ZF and CF as required
 			if (((temp&0xff)==0xf0) && (temp>>8)) {
 				/* special enhanced key, clear low part before returning key */
 				temp&=0xff00;
 			}
-			reg_ax=temp;
 		}
+		reg_ax=temp;
 		break;
 	case 0x02:	/* GET SHIFT FLAGS */
 		reg_al=mem_readb(BIOS_KEYBOARD_FLAGS1);

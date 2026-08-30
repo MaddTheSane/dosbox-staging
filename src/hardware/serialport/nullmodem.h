@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -33,7 +33,7 @@
 #define SERIAL_NULLMODEM_DTR_EVENT	SERIAL_BASE_EVENT_COUNT+3
 #define SERIAL_NULLMODEM_EVENT_COUNT	SERIAL_BASE_EVENT_COUNT+3
 
-class CNullModem : public CSerial {
+class CNullModem final : public CSerial {
 public:
 	CNullModem(const CNullModem &) = delete;            // prevent copying
 	CNullModem &operator=(const CNullModem &) = delete; // prevent assignment
@@ -51,9 +51,11 @@ public:
 	void setDTR(bool val);
 	void handleUpperEvent(uint16_t type);
 
+	SocketTypesE socketType = SOCKET_TYPE_TCP;
+
 private:
-	TCPServerSocket *serversocket = nullptr;
-	TCPClientSocket *clientsocket = nullptr;
+	NETServerSocket *serversocket = nullptr;
+	NETClientSocket *clientsocket = nullptr;
 
 	uint16_t serverport = 0; // we are a server if this is nonzero
 	uint16_t clientport = 0;
@@ -68,7 +70,7 @@ private:
 #define N_RX_DISC		4
 
 	bool doReceive();
-	bool ClientConnect(TCPClientSocket* newsocket);
+	bool ClientConnect(NETClientSocket *newsocket);
 	bool ServerListen();
 	bool ServerConnect();
     void Disconnect();

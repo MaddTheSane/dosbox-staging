@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2020  The dosbox-staging team
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -35,7 +35,7 @@
  * Examples used in comments throughout this file are NOT alignment safe - they
  * exist only for illustrative purposes; they will work on x86 architecture in
  * practice, but depend on undefined behaviour, might generate slow code or
- * outright crash when targetting different architectures.
+ * outright crash when targeting different architectures.
  */
 
 #include <cstdint>
@@ -77,6 +77,14 @@ static inline uint64_t read_unaligned_uint64(const uint8_t *arr) noexcept
 	return val;
 }
 
+// Read a size_t from unaligned 8-bit byte-ordered memory.
+static inline size_t read_unaligned_size_t(const uint8_t *arr) noexcept
+{
+	size_t val;
+	memcpy(&val, arr, sizeof(size_t));
+	return val;
+}
+
 /* Use read_unaligned_*_at functions instead constructs like:
  *
  *   ((uint16_t*)pointer_to_uint8)[idx]
@@ -101,6 +109,13 @@ static inline uint64_t read_unaligned_uint64_at(const uint8_t *arr,
                                                 const uintptr_t idx) noexcept
 {
 	return read_unaligned_uint64(arr + idx * sizeof(uint64_t));
+}
+
+// Read an array-indexed size_t from unaligned 8-bit byte-ordered memory.
+static inline size_t read_unaligned_size_t_at(const uint8_t *arr,
+                                              const uintptr_t idx) noexcept
+{
+	return read_unaligned_size_t(arr + idx * sizeof(size_t));
 }
 
 /* Use write_unaligned_* functions instead constructs like:

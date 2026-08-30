@@ -1,8 +1,9 @@
 #!/usr/bin/python3
 
-# Copyright (C) 2019-2020  Patryk Obara <patryk.obara@gmail.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
+# Copyright (C) 2019-2021  Patryk Obara <patryk.obara@gmail.com>
+
 # pylint: disable=invalid-name
 # pylint: disable=missing-docstring
 
@@ -44,6 +45,8 @@ MSVC_WARN_PATTERN = re.compile(r'.+>([^\(]+)\((\d+),\d+\): warning ([^:]+): .*')
 #
 ANSI_COLOR_PATTERN = re.compile(r'\x1b\[[0-9;]*[mGKH]')
 
+# For recognizing warnings from usr/* or subprojects files
+USR_OR_SUBPROJECTS_PATTERN = re.compile(r'^/usr/.*|.*/subprojects/.*')
 
 class warning_summaries:
 
@@ -84,6 +87,11 @@ def count_warning(gcc_format, line_no, line, warnings):
     if not match:
         return 0
 
+    # Ignore out-of-scope warnings from system and subprojects.
+    file = match.group(1)
+    if USR_OR_SUBPROJECTS_PATTERN.match(file):
+        return 0
+
     # Some warnings (e.g. effc++) are reported multiple times, once
     # for every usage; ignore duplicates.
     line = line.strip()
@@ -91,7 +99,6 @@ def count_warning(gcc_format, line_no, line, warnings):
         return 0
     warnings.lines.add(line)
 
-    file = match.group(1)
     # wline = match.group(2)
     wtype = match.group(3)
 
@@ -111,7 +118,7 @@ def get_input_lines(name):
     if not os.path.isfile(name):
         print('{}: no such file.'.format(name))
         sys.exit(2)
-    with open(name, 'r') as logs:
+    with open(name, 'r', encoding='utf-8') as logs:
         return logs.readlines()
 
 

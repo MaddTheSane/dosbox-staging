@@ -1,8 +1,8 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2020  The dosbox-staging team
- *  Copyright (c) 2020-2020  Kevin R Croft <krcroft@gmail.com>
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2021  kcgen <kcgen@users.noreply.github.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -64,8 +64,10 @@ Use
 
 */
 
-#include <cstdint>
-#include "support.h"
+#include "config.h"
+
+#include <cinttypes>
+#include <cstdlib>
 
 class DCSilencer {
 public:

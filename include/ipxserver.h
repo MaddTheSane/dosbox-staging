@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
 
 #if C_IPX
 
-#include <SDL_net.h>
+#include "SDL_net.h"
 
 struct packetBuffer {
 	Bit8u buffer[1024];
@@ -38,7 +38,7 @@ struct packetBuffer {
 
 
 void IPX_StopServer();
-bool IPX_StartServer(Bit16u portnum);
+bool IPX_StartServer(uint16_t portnum);
 bool IPX_isConnectedToServer(Bits tableNum, IPaddress ** ptrAddr);
 
 Bit8u packetCRC(Bit8u *buffer, Bit16u bufSize);

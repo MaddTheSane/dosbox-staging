@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -18,7 +18,9 @@
 
 #include "drives.h"
 
-#include "support.h"
+#include "../../include/ide.h"
+#include "string_utils.h"
+
 
 bool WildFileCmp(const char *file, const char *wild)
 {
@@ -45,6 +47,7 @@ bool WildFileCmp(const char *file, const char *wild)
 		memcpy(file_name, file, strnlen(file, 8));
 	}
 	upcase(file_name);upcase(file_ext);
+
 	find_ext=strrchr(wild,'.');
 	if (find_ext) {
 		Bitu size=(Bitu)(find_ext-wild);
@@ -73,7 +76,13 @@ checkext:
 	return true;
 }
 
-
+// TODO Right now label formatting seems to be a bit of mess, with various
+// places in code setting/expecting different format, so simple GetLabel() on
+// a drive object might not yield an expected result. Not sure how to sort it
+// out, but it will require some attention to detail.
+// Also: this function is too strict - it removes all punctuation when *some*
+// punctuation is acceptable in drive labels (e.g. '_' or '-').
+//
 std::string To_Label(const char* name) {
 	// Reformat the name per the DOS label specification:
 	// - Upper-case, up to 11 ASCII characters
@@ -121,6 +130,20 @@ DOS_Drive::DOS_Drive()
 {
 	curdir[0] = '\0';
 	info[0] = '\0';
+	//--Added 2009-10-25 by Alun Bestor to record the base system path for a drive
+	systempath[0]=0;
+	//--End of modifications
+}
+
+//--Added 2009-10-25 by Alun Bestor to retrieve the base system path for a drive
+char * DOS_Drive::getSystemPath(void) {
+	return systempath;
+}
+//--End of modifications
+
+void DOS_Drive::SetDir(const char *path)
+{
+	safe_strcpy(curdir, path);
 }
 
 // static members variables
@@ -175,13 +198,24 @@ void DriveManager::CycleDisk(bool pressed) {
 }
 */
 
-void DriveManager::CycleDisks(int drive, bool notify) {
+void DriveManager::CycleDisks(int requested_drive, bool notify)
+{
+	const auto drive = check_cast<int8_t>(requested_drive);
+
 	int numDisks = (int)driveInfos[drive].disks.size();
 	if (numDisks > 1) {
 		// cycle disk
 		int currentDisk = driveInfos[drive].currentDisk;
-		DOS_Drive* oldDisk = driveInfos[drive].disks[currentDisk];
-		currentDisk = (currentDisk + 1) % numDisks;		
+
+		// dettach CDROM from controller, if attached
+		isoDrive *cdrom = dynamic_cast<isoDrive *>(Drives[drive]);
+		int8_t index = -1;
+		bool slave = false;
+		if (cdrom)
+			IDE_CDROM_Detach_Ret(index, slave, drive);
+
+		DOS_Drive *oldDisk = driveInfos[drive].disks[currentDisk];
+		currentDisk = (currentDisk + 1) % numDisks;
 		DOS_Drive* newDisk = driveInfos[drive].disks[currentDisk];
 		driveInfos[drive].currentDisk = currentDisk;
 		
@@ -189,7 +223,14 @@ void DriveManager::CycleDisks(int drive, bool notify) {
 		strcpy(newDisk->curdir, oldDisk->curdir);
 		newDisk->Activate();
 		Drives[drive] = newDisk;
-		if (notify) LOG_MSG("Drive %c: disk %d of %d now active", 'A'+drive, currentDisk+1, numDisks);
+
+		// Re-attach the new drive to the controller
+		if (cdrom && index > -1)
+			IDE_CDROM_Attach(index, slave, drive);
+
+		if (notify)
+			LOG_MSG("Drive %c: disk %d of %d now active",
+			        'A' + drive, currentDisk + 1, numDisks);
 	}
 }
 
@@ -199,6 +240,12 @@ void DriveManager::CycleAllDisks(void) {
 
 int DriveManager::UnmountDrive(int drive) {
 	int result = 0;
+
+	// dettach CDROM from controller, if attached
+	isoDrive *cdrom = dynamic_cast<isoDrive *>(Drives[drive]);
+	if (cdrom)
+		IDE_CDROM_Detach(drive);
+
 	// unmanaged drive
 	if (driveInfos[drive].disks.size() == 0) {
 		result = Drives[drive]->UnMount();
@@ -215,7 +262,6 @@ int DriveManager::UnmountDrive(int drive) {
 			driveInfos[drive].disks.clear();
 		}
 	}
-	
 	return result;
 }
 
@@ -226,9 +272,11 @@ void DriveManager::Init(Section* /* sec */) {
 	for(int i = 0; i < DOS_DRIVES; i++) {
 		driveInfos[i].currentDisk = 0;
 	}
-	
-//	MAPPER_AddHandler(&CycleDisk, MK_f3, MMOD1, "cycledisk", "Cycle Disk");
-//	MAPPER_AddHandler(&CycleDrive, MK_f3, MMOD2, "cycledrive", "Cycle Drv");
+
+	// MAPPER_AddHandler(&CycleDisk, SDL_SCANCODE_F3, MMOD1,
+	//                   "cycledisk", "Cycle Disk");
+	// MAPPER_AddHandler(&CycleDrive, SDL_SCANCODE_F3, MMOD2,
+	//                   "cycledrive", "Cycle Drv");
 }
 
 void DRIVES_Init(Section* sec) {

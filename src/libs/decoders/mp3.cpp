@@ -1,9 +1,9 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2018-2021  kcgen <kcgen@users.noreply.github.com>
  *  Copyright (C) 2001-2017  Ryan C. Gordon <icculus@icculus.org>
- *  Copyright (C) 2018-2019  Kevin R. Croft <krcroft@gmail.com>
- *  Copyright (C) 2020-2020  The dosbox-staging team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -27,7 +27,10 @@
  *    - dr_libs: https://github.com/mackron/dr_libs (source)
  *    - dr_mp3:  http://mackron.github.io/dr_mp3.html (website)
  */
-#include <support.h>
+
+#include "config.h"
+
+#include "support.h"
 
 #include "mp3_seek_table.h"
 #define DR_MP3_IMPLEMENTATION
@@ -86,6 +89,8 @@ static void MP3_close(Sound_Sample* const sample)
     Sound_SampleInternal* const internal = static_cast<Sound_SampleInternal*>(sample->opaque);
     mp3_t* p_mp3 = static_cast<mp3_t*>(internal->decoder_private);
     if (p_mp3) {
+        assert(p_mp3->p_dr);
+        drmp3_uninit(p_mp3->p_dr);
         delete p_mp3->p_dr;
         p_mp3->p_dr = nullptr;
         delete p_mp3;
@@ -168,7 +173,7 @@ extern const Sound_DecoderFunctions __Sound_DecoderFunctions_MP3 = {
     {
         extensions_mp3,
         "MPEG-1 Audio Layer I-III",
-        "The dosbox-staging team"
+        "The DOSBox Staging Team"
     },
 
     MP3_init,       /*   init() method */

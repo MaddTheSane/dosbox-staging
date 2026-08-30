@@ -1,6 +1,10 @@
 This directory contains resources to re-build icon files for various operating
 systems.
 
+# Install
+
+Run `make help` to see usage examples.
+
 # Base design
 
 Base icon source file is `dosbox-staging.svg`. It contains scalable icon of
@@ -39,7 +43,7 @@ files.
 
 ## Linux
 
-Base design icon follows size and colour recommendations of Gnome HIG, so you
+Base design icon follows size and colour recommendations of GNOME HIG, so you
 can use it directly, no pre-processing is needed.
 
 When packaging for Linux, copy and rename `dosbox-staging.svg` icon to distro

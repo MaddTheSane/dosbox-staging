@@ -1,8 +1,9 @@
 #!/usr/bin/python3
 
-# Copyright (C) 2020  Patryk Obara <patryk.obara@gmail.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
+# Copyright (C) 2020-2021  Patryk Obara <patryk.obara@gmail.com>
+
 # pylint: disable=invalid-name
 # pylint: disable=missing-docstring
 
@@ -81,7 +82,7 @@ def get_input_lines(name):
     if not os.path.isfile(name):
         print('{}: no such file.'.format(name))
         sys.exit(2)
-    with open(name, 'r') as logs:
+    with open(name, 'r', encoding='utf-8') as logs:
         return logs.readlines()
 
 

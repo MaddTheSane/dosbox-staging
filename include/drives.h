@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -153,9 +153,9 @@ struct partTable {
 #endif
 //Forward
 class imageDisk;
-class fatDrive : public DOS_Drive {
+class fatDrive final : public DOS_Drive {
 public:
-	fatDrive(const char * sysFilename, Bit32u bytesector, Bit32u cylsector, Bit32u headscyl, Bit32u cylinders, Bit32u startSector);
+	fatDrive(const char * sysFilename, Bit32u bytesector, Bit32u cylsector, Bit32u headscyl, Bit32u cylinders, Bit32u startSector, bool roflag);
 	fatDrive(const fatDrive&) = delete; // prevent copying
 	fatDrive& operator= (const fatDrive&) = delete; // prevent assignment
 	virtual bool FileOpen(DOS_File * * file,char * name,Bit32u flags);
@@ -175,6 +175,7 @@ public:
 	virtual bool isRemote(void);
 	virtual bool isRemovable(void);
 	virtual Bits UnMount(void);
+	virtual void EmptyCache(void){}
 public:
 	Bit8u readSector(Bit32u sectnum, void * data);
 	Bit8u writeSector(Bit32u sectnum, void * data);
@@ -203,6 +204,7 @@ private:
 	
 	bootstrap bootbuffer;
 	bool absolute;
+	bool readonly;
 	Bit8u fattype;
 	Bit32u CountOfClusters;
 	Bit32u partSectOff;
@@ -215,7 +217,7 @@ private:
 	Bit32u curFatSect;
 };
 
-class cdromDrive : public localDrive
+class cdromDrive final : public localDrive
 {
 public:
 	cdromDrive(const char _driveLetter, const char * startdir,Bit16u _bytes_sector,Bit8u _sectors_cluster,Bit16u _total_clusters,Bit16u _free_clusters,Bit8u _mediaid, int& error);
@@ -313,7 +315,7 @@ struct isoDirEntry {
 #define IS_HIDDEN(fileFlags)	(fileFlags & ISO_HIDDEN)
 #define ISO_MAX_HASH_TABLE_SIZE 	100
 
-class isoDrive : public DOS_Drive {
+class isoDrive final : public DOS_Drive {
 public:
 	isoDrive(char driveLetter, const char* device_name, Bit8u mediaid, int &error);
 	~isoDrive();
@@ -377,7 +379,7 @@ private:
 
 struct VFILE_Block;
 
-class Virtual_Drive: public DOS_Drive {
+class Virtual_Drive final : public DOS_Drive {
 public:
 	Virtual_Drive();
 	bool FileOpen(DOS_File * * file,char * name,Bit32u flags);
@@ -405,11 +407,18 @@ private:
 	VFILE_Block * search_file;
 };
 
-class Overlay_Drive: public localDrive {
+class Overlay_Drive final : public localDrive {
 public:
-	Overlay_Drive(const char * startdir,const char* overlay, Bit16u _bytes_sector,Bit8u _sectors_cluster,Bit16u _total_clusters,Bit16u _free_clusters,Bit8u _mediaid,Bit8u &error);
+	Overlay_Drive(const char *startdir,
+	              const char *overlay,
+	              uint16_t _bytes_sector,
+	              uint8_t _sectors_cluster,
+	              uint16_t _total_clusters,
+	              uint16_t _free_clusters,
+	              uint8_t _mediaid,
+	              uint8_t &error);
 
-	virtual bool FileOpen(DOS_File * * file,char * name,Bit32u flags);
+	virtual bool FileOpen(DOS_File **file, char *name, uint32_t flags);
 	virtual bool FileCreate(DOS_File * * file,char * name,Bit16u /*attributes*/);
 	virtual bool FindFirst(char * _dir,DOS_DTA & dta,bool fcb_findfirst);
 	virtual bool FindNext(DOS_DTA & dta);
@@ -428,14 +437,13 @@ public:
 	virtual bool MakeDir(char * dir);
 private:
 	char overlaydir[CROSS_LEN];
-	bool optimize_cache_v1;
 	bool Sync_leading_dirs(const char* dos_filename);
 	void add_DOSname_to_cache(const char* name);
 	void remove_DOSname_from_cache(const char* name);
 	void add_DOSdir_to_cache(const char* name);
 	void remove_DOSdir_from_cache(const char* name);
 	void update_cache(bool read_directory_contents = false);
-	
+
 	std::vector<std::string> deleted_files_in_base; //Set is probably better, or some other solution (involving the disk).
 	std::vector<std::string> deleted_paths_in_base; //Currently only used to hide the overlay folder.
 	std::string overlap_folder;

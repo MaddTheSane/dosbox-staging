@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -108,14 +108,16 @@ bool SecondDMAControllerAvailable(void) {
 	else return false;
 }
 
-static void DMA_Write_Port(Bitu port,Bitu val,Bitu /*iolen*/) {
-	//LOG(LOG_DMACONTROL,LOG_ERROR)("Write %" sBitfs(X) " %" sBitfs(X),port,val);
-	if (port<0x10) {
+static void DMA_Write_Port(io_port_t port, io_val_t value, io_width_t)
+{
+	const auto val = check_cast<uint16_t>(value);
+	// LOG(LOG_DMACONTROL,LOG_ERROR)("Write %" sBitfs(X) " %" sBitfs(X),port,val);
+	if (port < 0x10) {
 		/* write to the first DMA controller (channels 0-3) */
-		DmaControllers[0]->WriteControllerReg(port,val,1);
-	} else if (port>=0xc0 && port <=0xdf) {
+		DmaControllers[0]->WriteControllerReg(port, val, io_width_t::byte);
+	} else if (port >= 0xc0 && port <= 0xdf) {
 		/* write to the second DMA controller (channels 4-7) */
-		DmaControllers[1]->WriteControllerReg((port-0xc0) >> 1,val,1);
+		DmaControllers[1]->WriteControllerReg((port - 0xc0) >> 1, val, io_width_t::byte);
 	} else {
 		UpdateEMSMapping();
 		switch (port) {
@@ -127,19 +129,22 @@ static void DMA_Write_Port(Bitu port,Bitu val,Bitu /*iolen*/) {
 			case 0x89:GetDMAChannel(6)->SetPage((Bit8u)val);break;
 			case 0x8a:GetDMAChannel(7)->SetPage((Bit8u)val);break;
 			case 0x8b:GetDMAChannel(5)->SetPage((Bit8u)val);break;
+			case 0x8f:GetDMAChannel(4)->SetPage((Bit8u)val);break;
 		}
 	}
 }
 
-static Bitu DMA_Read_Port(Bitu port,Bitu iolen) {
-	//LOG(LOG_DMACONTROL,LOG_ERROR)("Read %" sBitfs(X),port);
-	if (port<0x10) {
+static uint16_t DMA_Read_Port(io_port_t port, io_width_t width)
+{
+	// LOG(LOG_DMACONTROL,LOG_ERROR)("Read %" sBitfs(X),port);
+	if (port < 0x10) {
 		/* read from the first DMA controller (channels 0-3) */
-		return DmaControllers[0]->ReadControllerReg(port,iolen);
-	} else if (port>=0xc0 && port <=0xdf) {
+		return DmaControllers[0]->ReadControllerReg(port, width);
+	} else if (port >= 0xc0 && port <= 0xdf) {
 		/* read from the second DMA controller (channels 4-7) */
-		return DmaControllers[1]->ReadControllerReg((port-0xc0) >> 1,iolen);
-	} else switch (port) {
+		return DmaControllers[1]->ReadControllerReg((port - 0xc0) >> 1, width);
+	} else
+		switch (port) {
 		/* read DMA page register */
 		case 0x81:return GetDMAChannel(2)->pagenum;
 		case 0x82:return GetDMAChannel(3)->pagenum;
@@ -148,12 +153,15 @@ static Bitu DMA_Read_Port(Bitu port,Bitu iolen) {
 		case 0x89:return GetDMAChannel(6)->pagenum;
 		case 0x8a:return GetDMAChannel(7)->pagenum;
 		case 0x8b:return GetDMAChannel(5)->pagenum;
-	}
+		case 0x8f:return GetDMAChannel(4)->pagenum;
+		}
 	return 0;
 }
 
-void DmaController::WriteControllerReg(Bitu reg,Bitu val,Bitu /*len*/) {
-	DmaChannel * chan;
+void DmaController::WriteControllerReg(io_port_t reg, io_val_t value, io_width_t)
+{
+	auto val = check_cast<uint16_t>(value);
+	DmaChannel *chan = nullptr;
 	switch (reg) {
 	/* set base address of DMA transfer (1st byte low part, 2nd byte high part) */
 	case 0x0:case 0x2:case 0x4:case 0x6:
@@ -201,7 +209,7 @@ void DmaController::WriteControllerReg(Bitu reg,Bitu val,Bitu /*len*/) {
 	case 0xc:		/* Clear Flip/Flip */
 		flipflop=false;
 		break;
-	case 0xd:		/* Master Clear/Reset */
+	case 0xd: /* Clear/Reset all channels */
 		for (Bit8u ct=0;ct<4;ct++) {
 			chan=GetChannel(ct);
 			chan->SetMask(true);
@@ -227,59 +235,74 @@ void DmaController::WriteControllerReg(Bitu reg,Bitu val,Bitu /*len*/) {
 	}
 }
 
-Bitu DmaController::ReadControllerReg(Bitu reg,Bitu /*len*/) {
-	DmaChannel * chan;Bitu ret;
+uint16_t DmaController::ReadControllerReg(io_port_t reg, io_width_t)
+{
+	DmaChannel *chan = nullptr;
+	uint16_t ret = 0;
 	switch (reg) {
 	/* read base address of DMA transfer (1st byte low part, 2nd byte high part) */
-	case 0x0:case 0x2:case 0x4:case 0x6:
-		chan=GetChannel((Bit8u)(reg >> 1));
-		flipflop=!flipflop;
+	case 0x0:
+	case 0x2:
+	case 0x4:
+	case 0x6:
+		chan = GetChannel((Bit8u)(reg >> 1));
+		flipflop = !flipflop;
 		if (flipflop) {
 			return chan->curraddr & 0xff;
 		} else {
 			return (chan->curraddr >> 8) & 0xff;
 		}
 	/* read DMA transfer count (1st byte low part, 2nd byte high part) */
-	case 0x1:case 0x3:case 0x5:case 0x7:
-		chan=GetChannel((Bit8u)(reg >> 1));
-		flipflop=!flipflop;
+	case 0x1:
+	case 0x3:
+	case 0x5:
+	case 0x7:
+		chan = GetChannel((Bit8u)(reg >> 1));
+		flipflop = !flipflop;
 		if (flipflop) {
 			return chan->currcnt & 0xff;
 		} else {
 			return (chan->currcnt >> 8) & 0xff;
 		}
-	case 0x8:		/* Status Register */
-		ret=0;
-		for (Bit8u ct=0;ct<4;ct++) {
-			chan=GetChannel(ct);
-			if (chan->tcount) ret|=1 << ct;
-			chan->tcount=false;
-			if (chan->request) ret|=1 << (4+ct);
+	case 0x8: /* Status Register */
+		ret = 0;
+		for (uint8_t ct = 0; ct < 4; ct++) {
+			chan = GetChannel(ct);
+			if (chan->tcount)
+				ret |= 1 << ct;
+			chan->tcount = false;
+			if (chan->request)
+				ret |= 1 << (4 + ct);
 		}
 		return ret;
 	default:
-		LOG(LOG_DMACONTROL,LOG_NORMAL)("Trying to read undefined DMA port %" sBitfs(x),reg);
+		LOG(LOG_DMACONTROL, LOG_NORMAL)("Trying to read undefined DMA port %x", reg);
 		break;
 	}
-	return 0xffffffff;
+	return 0xffff;
 }
 
-DmaChannel::DmaChannel(Bit8u num, bool dma16) {
-	masked = true;
-	callback = NULL;
-	if(num == 4) return;
+DmaChannel::DmaChannel(uint8_t num, bool dma16)
+        : pagebase(0),
+          baseaddr(0),
+          curraddr(0),
+          basecnt(0),
+          currcnt(0),
+          channum(0),
+          pagenum(0),
+          DMA16(0x0),
+          increment(false),
+          autoinit(false),
+          masked(true),
+          tcount(false),
+          request(false),
+          callback(nullptr)
+{
+	if (num == 4)
+		return;
 	channum = num;
 	DMA16 = dma16 ? 0x1 : 0x0;
-	pagenum = 0;
-	pagebase = 0;
-	baseaddr = 0;
-	curraddr = 0;
-	basecnt = 0;
-	currcnt = 0;
 	increment = true;
-	autoinit = false;
-	tcount = false;
-	request = false;
 }
 
 Bitu DmaChannel::Read(Bitu want, Bit8u * buffer) {
@@ -346,7 +369,7 @@ again:
 	return done;
 }
 
-class DMA : public Module_base {
+class DMA final : public Module_base {
 public:
 	DMA(Section *configuration) : Module_base(configuration)
 	{
@@ -356,28 +379,32 @@ public:
 		else
 			DmaControllers[1] = nullptr;
 
-		for (Bitu i = 0; i < 0x10; i++) {
-			Bitu mask=IO_MB;
-			if (i<8) mask|=IO_MW;
+		for (io_port_t i = 0; i < 0x10; ++i) {
+			const io_width_t width = (i < 8) ? io_width_t::word : io_width_t::byte;
 			/* install handler for first DMA controller ports */
-			DmaControllers[0]->DMA_WriteHandler[i].Install(i,DMA_Write_Port,mask);
-			DmaControllers[0]->DMA_ReadHandler[i].Install(i,DMA_Read_Port,mask);
+			DmaControllers[0]->DMA_WriteHandler[i].Install(i, DMA_Write_Port, width);
+			DmaControllers[0]->DMA_ReadHandler[i].Install(i, DMA_Read_Port, width);
 			if (IS_EGAVGA_ARCH) {
 				/* install handler for second DMA controller ports */
-				DmaControllers[1]->DMA_WriteHandler[i].Install(0xc0+i*2,DMA_Write_Port,mask);
-				DmaControllers[1]->DMA_ReadHandler[i].Install(0xc0+i*2,DMA_Read_Port,mask);
+				const auto dma_port = static_cast<io_port_t>(0xc0 + i * 2);
+				DmaControllers[1]->DMA_WriteHandler[i].Install(dma_port,
+				                                               DMA_Write_Port, width);
+				DmaControllers[1]->DMA_ReadHandler[i].Install(dma_port,
+				                                              DMA_Read_Port, width);
 			}
 		}
-		/* install handlers for ports 0x81-0x83 (on the first DMA controller) */
-		DmaControllers[0]->DMA_WriteHandler[0x10].Install(0x81,DMA_Write_Port,IO_MB,3);
-		DmaControllers[0]->DMA_ReadHandler[0x10].Install(0x81,DMA_Read_Port,IO_MB,3);
-		DmaControllers[0]->DMA_WriteHandler[0x11].Install(0x87,DMA_Write_Port,IO_MB,1);
-		DmaControllers[0]->DMA_ReadHandler[0x11].Install(0x87,DMA_Read_Port,IO_MB,1);
+		/* install handlers for ports 0x81-0x83,0x87 (on the first DMA controller) */
+		DmaControllers[0]->DMA_WriteHandler[0x10].Install(0x81, DMA_Write_Port, io_width_t::byte, 3);
+		DmaControllers[0]->DMA_ReadHandler[0x10].Install(0x81, DMA_Read_Port, io_width_t::byte, 3);
+		DmaControllers[0]->DMA_WriteHandler[0x11].Install(0x87, DMA_Write_Port, io_width_t::byte, 1);
+		DmaControllers[0]->DMA_ReadHandler[0x11].Install(0x87, DMA_Read_Port, io_width_t::byte, 1);
 
 		if (IS_EGAVGA_ARCH) {
-			/* install handlers for ports 0x89-0x8B (on the second DMA controller) */
-			DmaControllers[1]->DMA_WriteHandler[0x10].Install(0x89,DMA_Write_Port,IO_MB,3);
-			DmaControllers[1]->DMA_ReadHandler[0x10].Install(0x89,DMA_Read_Port,IO_MB,3);
+			/* install handlers for ports 0x89-0x8b,0x8f (on the second DMA controller) */
+			DmaControllers[1]->DMA_WriteHandler[0x10].Install(0x89, DMA_Write_Port, io_width_t::byte, 3);
+			DmaControllers[1]->DMA_ReadHandler[0x10].Install(0x89, DMA_Read_Port, io_width_t::byte, 3);
+			DmaControllers[1]->DMA_WriteHandler[0x11].Install(0x8f, DMA_Write_Port, io_width_t::byte, 1);
+			DmaControllers[1]->DMA_ReadHandler[0x11].Install(0x8f, DMA_Read_Port, io_width_t::byte, 1);
 		}
 	}
 	~DMA(){

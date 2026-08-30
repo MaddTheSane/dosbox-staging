@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -52,117 +52,153 @@
 #define GETFLAG_IOPL ((reg_flags & FLAG_IOPL) >> 12)
 
 struct Segment {
-	Bit16u val;
-	PhysPt phys;							/* The phyiscal address start in emulated machine */
+	uint16_t val = 0;
+	PhysPt phys = 0; /* The physical address start in emulated machine */
 };
 
-enum SegNames { es=0,cs,ss,ds,fs,gs};
+enum SegNames {
+	es = 0,
+	cs,
+	ss,
+	ds,
+	fs,
+	gs,
+};
 
 struct Segments {
-	Bit16u val[8];
-	PhysPt phys[8];
+	uint16_t val[8] = {};
+	PhysPt phys[8] = {};
 };
 
 union GenReg32 {
-	Bit32u dword[1];
-	Bit16u word[2];
-	Bit8u byte[4];
+	uint32_t dword[1] = {};
+	uint16_t word[2];
+	uint8_t byte[4];
 };
 
 #ifdef WORDS_BIGENDIAN
 
-#define DW_INDEX 0
-#define W_INDEX 1
-#define BH_INDEX 2
-#define BL_INDEX 3
+constexpr auto DW_INDEX = 0;
+constexpr auto W_INDEX = 1;
+constexpr auto BH_INDEX = 2;
+constexpr auto BL_INDEX = 3;
 
 #else
 
-#define DW_INDEX 0
-#define W_INDEX 0
-#define BH_INDEX 1
-#define BL_INDEX 0
+constexpr auto DW_INDEX = 0;
+constexpr auto W_INDEX = 0;
+constexpr auto BH_INDEX = 1;
+constexpr auto BL_INDEX = 0;
 
 #endif
 
 struct CPU_Regs {
-	GenReg32 regs[8],ip;
-	Bitu flags;
+	GenReg32 regs[8] = {};
+	GenReg32 ip = {};
+	uint32_t flags = 0;
 };
 
 extern Segments Segs;
 extern CPU_Regs cpu_regs;
 
-static INLINE PhysPt SegPhys(SegNames index) {
+static inline PhysPt SegPhys(SegNames index) {
 	return Segs.phys[index];
 }
 
-static INLINE Bit16u SegValue(SegNames index) {
-	return (Bit16u)Segs.val[index];
-}
-	
-static INLINE RealPt RealMakeSeg(SegNames index,Bit16u off) {
-	return RealMake(SegValue(index),off);	
+static inline uint16_t SegValue(SegNames index)
+{
+	return Segs.val[index];
 }
 
+static inline RealPt RealMakeSeg(SegNames index, uint16_t off)
+{
+	return RealMake(SegValue(index), off);
+}
 
-static INLINE void SegSet16(Bitu index,Bit16u val) {
-	Segs.val[index]=val;
-	Segs.phys[index]=val << 4;
+static inline void SegSet16(Bitu index, uint16_t val)
+{
+	Segs.val[index] = val;
+	Segs.phys[index] = static_cast<uint32_t>(val << 4);
 }
 
 enum {
-	REGI_AX, REGI_CX, REGI_DX, REGI_BX,
-	REGI_SP, REGI_BP, REGI_SI, REGI_DI
+	REGI_AX = 0,
+	REGI_CX,
+	REGI_DX,
+	REGI_BX,
+	REGI_SP,
+	REGI_BP,
+	REGI_SI,
+	REGI_DI,
 };
 
 enum {
-	REGI_AL, REGI_CL, REGI_DL, REGI_BL,
-	REGI_AH, REGI_CH, REGI_DH, REGI_BH
+	REGI_AL = 0,
+	REGI_CL,
+	REGI_DL,
+	REGI_BL,
+	REGI_AH,
+	REGI_CH,
+	REGI_DH,
+	REGI_BH,
 };
-
 
 //macros to convert a 3-bit register index to the correct register
-#define reg_8l(reg) (cpu_regs.regs[(reg)].byte[BL_INDEX])
-#define reg_8h(reg) (cpu_regs.regs[(reg)].byte[BH_INDEX])
-#define reg_8(reg) ((reg) & 4 ? reg_8h((reg) & 3) : reg_8l((reg) & 3))
-#define reg_16(reg) (cpu_regs.regs[(reg)].word[W_INDEX])
-#define reg_32(reg) (cpu_regs.regs[(reg)].dword[DW_INDEX])
+constexpr uint8_t &reg_8l(const uint8_t reg)
+{
+	return cpu_regs.regs[reg].byte[BL_INDEX];
+}
+constexpr uint8_t &reg_8h(const uint8_t reg)
+{
+	return cpu_regs.regs[reg].byte[BH_INDEX];
+}
+constexpr uint8_t &reg_8(const uint8_t reg)
+{
+	return (reg & 4) ? reg_8h(reg & 3) : reg_8l(reg & 3);
+}
+constexpr uint16_t &reg_16(const uint8_t reg)
+{
+	return cpu_regs.regs[reg].word[W_INDEX];
+}
+constexpr uint32_t &reg_32(const uint8_t reg)
+{
+	return cpu_regs.regs[reg].dword[DW_INDEX];
+}
 
-#define reg_al cpu_regs.regs[REGI_AX].byte[BL_INDEX]
-#define reg_ah cpu_regs.regs[REGI_AX].byte[BH_INDEX]
-#define reg_ax cpu_regs.regs[REGI_AX].word[W_INDEX]
-#define reg_eax cpu_regs.regs[REGI_AX].dword[DW_INDEX]
+inline constexpr uint8_t &reg_al = cpu_regs.regs[REGI_AX].byte[BL_INDEX];
+inline constexpr uint8_t &reg_ah = cpu_regs.regs[REGI_AX].byte[BH_INDEX];
+inline constexpr uint16_t &reg_ax = cpu_regs.regs[REGI_AX].word[W_INDEX];
+inline constexpr uint32_t &reg_eax = cpu_regs.regs[REGI_AX].dword[DW_INDEX];
 
-#define reg_bl cpu_regs.regs[REGI_BX].byte[BL_INDEX]
-#define reg_bh cpu_regs.regs[REGI_BX].byte[BH_INDEX]
-#define reg_bx cpu_regs.regs[REGI_BX].word[W_INDEX]
-#define reg_ebx cpu_regs.regs[REGI_BX].dword[DW_INDEX]
+inline constexpr uint8_t &reg_bl = cpu_regs.regs[REGI_BX].byte[BL_INDEX];
+inline constexpr uint8_t &reg_bh = cpu_regs.regs[REGI_BX].byte[BH_INDEX];
+inline constexpr uint16_t &reg_bx = cpu_regs.regs[REGI_BX].word[W_INDEX];
+inline constexpr uint32_t &reg_ebx = cpu_regs.regs[REGI_BX].dword[DW_INDEX];
 
-#define reg_cl cpu_regs.regs[REGI_CX].byte[BL_INDEX]
-#define reg_ch cpu_regs.regs[REGI_CX].byte[BH_INDEX]
-#define reg_cx cpu_regs.regs[REGI_CX].word[W_INDEX]
-#define reg_ecx cpu_regs.regs[REGI_CX].dword[DW_INDEX]
+inline constexpr uint8_t &reg_cl = cpu_regs.regs[REGI_CX].byte[BL_INDEX];
+inline constexpr uint8_t &reg_ch = cpu_regs.regs[REGI_CX].byte[BH_INDEX];
+inline constexpr uint16_t &reg_cx = cpu_regs.regs[REGI_CX].word[W_INDEX];
+inline constexpr uint32_t &reg_ecx = cpu_regs.regs[REGI_CX].dword[DW_INDEX];
 
-#define reg_dl cpu_regs.regs[REGI_DX].byte[BL_INDEX]
-#define reg_dh cpu_regs.regs[REGI_DX].byte[BH_INDEX]
-#define reg_dx cpu_regs.regs[REGI_DX].word[W_INDEX]
-#define reg_edx cpu_regs.regs[REGI_DX].dword[DW_INDEX]
+inline constexpr uint8_t &reg_dl = cpu_regs.regs[REGI_DX].byte[BL_INDEX];
+inline constexpr uint8_t &reg_dh = cpu_regs.regs[REGI_DX].byte[BH_INDEX];
+inline constexpr uint16_t &reg_dx = cpu_regs.regs[REGI_DX].word[W_INDEX];
+inline constexpr uint32_t &reg_edx = cpu_regs.regs[REGI_DX].dword[DW_INDEX];
 
-#define reg_si cpu_regs.regs[REGI_SI].word[W_INDEX]
-#define reg_esi cpu_regs.regs[REGI_SI].dword[DW_INDEX]
+inline constexpr uint16_t &reg_si = cpu_regs.regs[REGI_SI].word[W_INDEX];
+inline constexpr uint32_t &reg_esi = cpu_regs.regs[REGI_SI].dword[DW_INDEX];
 
-#define reg_di cpu_regs.regs[REGI_DI].word[W_INDEX]
-#define reg_edi cpu_regs.regs[REGI_DI].dword[DW_INDEX]
+inline constexpr uint16_t &reg_di = cpu_regs.regs[REGI_DI].word[W_INDEX];
+inline constexpr uint32_t &reg_edi = cpu_regs.regs[REGI_DI].dword[DW_INDEX];
 
-#define reg_sp cpu_regs.regs[REGI_SP].word[W_INDEX]
-#define reg_esp cpu_regs.regs[REGI_SP].dword[DW_INDEX]
+inline constexpr uint16_t &reg_sp = cpu_regs.regs[REGI_SP].word[W_INDEX];
+inline constexpr uint32_t &reg_esp = cpu_regs.regs[REGI_SP].dword[DW_INDEX];
 
-#define reg_bp cpu_regs.regs[REGI_BP].word[W_INDEX]
-#define reg_ebp cpu_regs.regs[REGI_BP].dword[DW_INDEX]
+inline constexpr uint16_t &reg_bp = cpu_regs.regs[REGI_BP].word[W_INDEX];
+inline constexpr uint32_t &reg_ebp = cpu_regs.regs[REGI_BP].dword[DW_INDEX];
 
-#define reg_ip cpu_regs.ip.word[W_INDEX]
-#define reg_eip cpu_regs.ip.dword[DW_INDEX]
+inline constexpr uint16_t &reg_ip = cpu_regs.ip.word[W_INDEX];
+inline constexpr uint32_t &reg_eip = cpu_regs.ip.dword[DW_INDEX];
 
 #define reg_flags cpu_regs.flags
 

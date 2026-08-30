@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,11 +16,12 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "dosbox.h"
+
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
 
-#include "dosbox.h"
 #include "callback.h"
 #include "mem.h"
 #include "paging.h"
@@ -101,7 +102,7 @@ static EMM_Mapping emm_segmentmappings[0x40];
 
 static Bit16u GEMMIS_seg;
 
-class device_EMM : public DOS_Device {
+class device_EMM final : public DOS_Device {
 public:
 	device_EMM(bool is_emm386_avail) : is_emm386(is_emm386_avail)
 	{
@@ -160,14 +161,18 @@ bool device_EMM::ReadFromControlChannel(PhysPt bufptr,Bit16u size,Bit16u * retco
 				mem_writeb(GEMMIS_addr+0x0e + frnr,(Bit8u)(frct&0xff));		// physical EMS page number
 				mem_writeb(GEMMIS_addr+0x0f+frnr,0x00);		// EMS frame
 			}
-			/* build non-EMS ROM frames (0xf000-0x10000) */
-			for (Bitu frct=(EMM_PAGEFRAME4K+0x10)/4; frct<0xf0/4; frct++) {
+			/*
+			build non-EMS ROM frames (0xf000-0x10000)
+			Note: This is dead code, because frct is always >= 60
+
+ 			for (Bitu frct=(EMM_PAGEFRAME4K+0x10)/4; frct<0xf0/4; frct++) {
 				mem_writeb(GEMMIS_addr+0x0a+frct*6,0x00);	// frame type: NONE
 				mem_writeb(GEMMIS_addr+0x0b+frct*6,0xff);	// owner: NONE
 				mem_writew(GEMMIS_addr+0x0c+frct*6,0xffff);	// non-EMS frame
 				mem_writeb(GEMMIS_addr+0x0e + frct*6,0xff);	// EMS page number (NONE)
 				mem_writeb(GEMMIS_addr+0x0f+frct*6,0xaa);	// flags: direct mapping
 			}
+			*/
 
 			mem_writeb(GEMMIS_addr+0x18a,0x74);			// ???
 			mem_writeb(GEMMIS_addr+0x18b,0x00);			// no UMB descriptors following
@@ -234,7 +239,7 @@ static Bit16u EMM_GetFreePages(void) {
 	return (Bit16u)count;
 }
 
-static bool INLINE ValidHandle(Bit16u handle) {
+static bool inline ValidHandle(Bit16u handle) {
 	if (handle>=EMM_MAX_HANDLES) return false;
 	if (emm_handles[handle].pages==NULL_HANDLE) return false;
 	return true;
@@ -437,15 +442,15 @@ static Bit8u EMM_SavePageMap(Bit16u handle) {
 }
 
 static Bit8u EMM_RestoreMappingTable(void) {
-	Bit8u result;
 	/* Move through the mappings table and setup mapping accordingly */
 	for (Bitu i=0;i<0x40;i++) {
 		/* Skip the pageframe */
 		if ((i>=EMM_PAGEFRAME/0x400) && (i<(EMM_PAGEFRAME/0x400)+EMM_MAX_PHYS)) continue;
-		result=EMM_MapSegment(i<<10,emm_segmentmappings[i].handle,emm_segmentmappings[i].page);
+		EMM_MapSegment(i << 10, emm_segmentmappings[i].handle,
+		               emm_segmentmappings[i].page);
 	}
 	for (Bitu i=0;i<EMM_MAX_PHYS;i++) {
-		result=EMM_MapPage(i,emm_mappings[i].handle,emm_mappings[i].page);
+		EMM_MapPage(i, emm_mappings[i].handle, emm_mappings[i].page);
 	}
 	return EMM_NO_ERROR;
 }
@@ -1001,9 +1006,9 @@ static Bitu INT67_Handler(void) {
 				}
 				break;
 			case 0x0a:		/* VCPI Get PIC Vector Mappings */
-				reg_bx=vcpi.pic1_remapping;		// master PIC
-				reg_cx=vcpi.pic2_remapping;		// slave PIC
-				reg_ah=EMM_NO_ERROR;
+				reg_bx = vcpi.pic1_remapping; // primary PIC
+				reg_cx = vcpi.pic2_remapping; // secondary PIC
+				reg_ah = EMM_NO_ERROR;
 				break;
 			case 0x0b:		/* VCPI Set PIC Vector Mappings */
 				reg_flags&=(~FLAG_IF);
@@ -1275,8 +1280,8 @@ static void SetupVCPI() {
 
 	vcpi.enabled=true;
 
-	vcpi.pic1_remapping=0x08;	// master PIC base
-	vcpi.pic2_remapping=0x70;	// slave PIC base
+	vcpi.pic1_remapping = 0x08; // primary PIC base
+	vcpi.pic2_remapping = 0x70; // secondary PIC base
 
 	vcpi.private_area=emm_handles[vcpi.ems_handle].mem<<12;
 
@@ -1362,14 +1367,10 @@ Bitu GetEMSType(Section_prop * section) {
 	return rtype;
 }
 
-class EMS : public Module_base {
+class EMS final : public Module_base {
 private:
+	uint16_t ems_baseseg = 0;
 	DOS_Device *emm_device = nullptr;
-
-	/* location in protected unfreeable memory where the ems name and callback are
-	 * stored  32 bytes.*/
-	static Bit16u ems_baseseg;
-
 	RealPt old67_pointer = 0;
 	CALLBACK_HandlerObject call_vdma;
 	CALLBACK_HandlerObject call_vcpi;
@@ -1403,7 +1404,7 @@ public:
 		}
 		BIOS_ZeroExtendedSize(true);
 
-		if (!ems_baseseg) ems_baseseg=DOS_GetMemory(2);	//We have 32 bytes
+		ems_baseseg = DOS_GetMemory(2); // We have 32 bytes
 
 		/* Add a little hack so it appears that there is an actual ems device installed */
 		char const *emsname = "EMMXXXX0";
@@ -1539,6 +1540,3 @@ void EMS_Init(Section* sec) {
 	test = new EMS(sec);
 	sec->AddDestroyFunction(&EMS_ShutDown,true);
 }
-
-//Initialize static members
-Bit16u EMS::ems_baseseg = 0;

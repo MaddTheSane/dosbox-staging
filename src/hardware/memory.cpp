@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -17,14 +17,15 @@
  */
 
 
-#include "dosbox.h"
 #include "mem.h"
+
+#include <string.h>
+
 #include "inout.h"
 #include "setup.h"
 #include "paging.h"
 #include "regs.h"
-
-#include <string.h>
+#include "support.h"
 
 #define PAGES_IN_BLOCK	((1024*1024)/MEM_PAGE_SIZE)
 #define SAFE_MEMORY	32
@@ -58,12 +59,13 @@ static struct MemoryBlock {
 
 HostPt MemBase;
 
-class IllegalPageHandler : public PageHandler {
+class IllegalPageHandler final : public PageHandler {
 public:
 	IllegalPageHandler() {
 		flags=PFLAG_INIT|PFLAG_NOCODE;
 	}
-	Bitu readb(PhysPt addr) {
+	uint8_t readb(PhysPt addr)
+	{
 #if C_DEBUG
 		LOG_MSG("Illegal read from %x, CS:IP %8x:%8x",addr,SegValue(cs),reg_eip);
 #else
@@ -74,8 +76,9 @@ public:
 		}
 #endif
 		return 0xff;
-	} 
-	void writeb(PhysPt addr,Bitu val) {
+	}
+	void writeb(PhysPt addr, [[maybe_unused]] uint8_t val)
+	{
 #if C_DEBUG
 		LOG_MSG("Illegal write to %x, CS:IP %8x:%8x",addr,SegValue(cs),reg_eip);
 #else
@@ -101,19 +104,19 @@ public:
 	}
 };
 
-class ROMPageHandler : public RAMPageHandler {
+class ROMPageHandler final : public RAMPageHandler {
 public:
 	ROMPageHandler() {
 		flags=PFLAG_READABLE|PFLAG_HASROM;
 	}
-	void writeb(PhysPt addr,Bitu val){
-		LOG(LOG_CPU,LOG_ERROR)("Write %" sBitfs(x) " to rom at %x",val,addr);
+	void writeb(PhysPt addr,uint8_t val){
+		LOG(LOG_CPU, LOG_ERROR)("Write 0x%x to rom at %x", val, addr);
 	}
-	void writew(PhysPt addr,Bitu val){
-		LOG(LOG_CPU,LOG_ERROR)("Write %" sBitfs(x) " to rom at %x",val,addr);
+	void writew(PhysPt addr,uint16_t val){
+		LOG(LOG_CPU, LOG_ERROR)("Write 0x%x to rom at %x", val, addr);
 	}
-	void writed(PhysPt addr,Bitu val){
-		LOG(LOG_CPU,LOG_ERROR)("Write %" sBitfs(x) " to rom at %x",val,addr);
+	void writed(PhysPt addr,uint32_t val){
+		LOG(LOG_CPU, LOG_ERROR)("Write 0x%x to rom at %x", val, addr);
 	}
 };
 
@@ -184,8 +187,9 @@ void MEM_BlockRead(PhysPt pt,void * data,Bitu size) {
 	}
 }
 
-void MEM_BlockWrite(PhysPt pt,void const * const data,Bitu size) {
-	Bit8u const * read = reinterpret_cast<Bit8u const * const>(data);
+void MEM_BlockWrite(PhysPt pt, const void *data, size_t size)
+{
+	const uint8_t *read = static_cast<const uint8_t *>(data);
 	while (size--) {
 		mem_writeb_inline(pt++,*read++);
 	}
@@ -246,7 +250,7 @@ Bitu MEM_AllocatedPages(MemHandle handle)
 
 //TODO Maybe some protection for this whole allocation scheme
 
-INLINE Bitu BestMatch(Bitu size) {
+inline Bitu BestMatch(Bitu size) {
 	Bitu index=XMS_START;	
 	Bitu first=0;
 	Bitu best=0xfffffff;
@@ -455,20 +459,35 @@ void mem_unalignedwrited(PhysPt address,Bit32u val) {
 
 
 bool mem_unalignedreadw_checked(PhysPt address, Bit16u * val) {
-	Bit8u rval1,rval2;
-	if (mem_readb_checked(address+0, &rval1)) return true;
-	if (mem_readb_checked(address+1, &rval2)) return true;
-	*val=(Bit16u)(((Bit8u)rval1) | (((Bit8u)rval2) << 8));
+	uint8_t rval1;
+	if (mem_readb_checked(address + 0, &rval1))
+		return true;
+
+	uint8_t rval2;
+	if (mem_readb_checked(address + 1, &rval2))
+		return true;
+
+	*val = static_cast<uint16_t>(rval1 | (rval2 << 8));
 	return false;
 }
 
 bool mem_unalignedreadd_checked(PhysPt address, Bit32u * val) {
-	Bit8u rval1,rval2,rval3,rval4;
+	uint8_t rval1;
 	if (mem_readb_checked(address+0, &rval1)) return true;
-	if (mem_readb_checked(address+1, &rval2)) return true;
-	if (mem_readb_checked(address+2, &rval3)) return true;
-	if (mem_readb_checked(address+3, &rval4)) return true;
-	*val=(Bit32u)(((Bit8u)rval1) | (((Bit8u)rval2) << 8) | (((Bit8u)rval3) << 16) | (((Bit8u)rval4) << 24));
+
+	uint8_t rval2;
+	if (mem_readb_checked(address + 1, &rval2))
+		return true;
+
+	uint8_t rval3;
+	if (mem_readb_checked(address + 2, &rval3))
+		return true;
+
+	uint8_t rval4;
+	if (mem_readb_checked(address + 3, &rval4))
+		return true;
+
+	*val = static_cast<uint32_t>(rval1 | (rval2 << 8) | (rval3 << 16) | (rval4 << 24));
 	return false;
 }
 
@@ -514,25 +533,30 @@ void mem_writed(PhysPt address,Bit32u val) {
 	mem_writed_inline(address,val);
 }
 
-static void write_p92(Bitu port,Bitu val,Bitu iolen) {	
+static void write_p92(io_port_t, io_val_t value, io_width_t)
+{
+	const auto val = check_cast<uint8_t>(value);
 	// Bit 0 = system reset (switch back to real mode)
 	if (val&1) E_Exit("XMS: CPU reset via port 0x92 not supported.");
 	memory.a20.controlport = val & ~2;
 	MEM_A20_Enable((val & 2)>0);
 }
 
-static Bitu read_p92(Bitu port,Bitu iolen) {
+static uint8_t read_p92(io_port_t, io_width_t)
+{
 	return memory.a20.controlport | (memory.a20.enabled ? 0x02 : 0);
 }
 
-void RemoveEMSPageFrame(void) {
+void MEM_RemoveEMSPageFrame()
+{
 	/* Setup rom at 0xe0000-0xf0000 */
 	for (Bitu ct=0xe0;ct<0xf0;ct++) {
 		memory.phandlers[ct] = &rom_page_handler;
 	}
 }
 
-void PreparePCJRCartRom(void) {
+void MEM_PreparePCJRCartRom()
+{
 	/* Setup rom at 0xd0000-0xe0000 */
 	for (Bitu ct=0xd0;ct<0xe0;ct++) {
 		memory.phandlers[ct] = &rom_page_handler;
@@ -541,7 +565,7 @@ void PreparePCJRCartRom(void) {
 
 HostPt GetMemBase(void) { return MemBase; }
 
-class MEMORY : public Module_base {
+class MEMORY final : public Module_base {
 private:
 	IO_ReadHandleObject ReadHandler{};
 	IO_WriteHandleObject WriteHandler{};
@@ -553,8 +577,8 @@ public:
 		Section_prop * section=static_cast<Section_prop *>(configuration);
 	
 		/* Setup the Physical Page Links */
-		uint16_t memsize = section->Get_int("memsize");
-	
+		auto memsize = static_cast<uint16_t>(section->Get_int("memsize"));
+
 		if (memsize < 1) memsize = 1;
 		/* max 63 to solve problems with certain xms handlers */
 		if (memsize > MAX_MEMORY - 1) {
@@ -571,7 +595,7 @@ public:
 		}
 		memset((void*)MemBase, 0, memsize * 1024 * 1024);
 		memory.pages = (memsize * 1024 * 1024) / 4096;
-		LOG_MSG("MEMORY: Base address: %p", MemBase);
+		LOG_MSG("MEMORY: Base address: %p", static_cast<void *>(MemBase));
 		LOG_MSG("MEMORY: Using %d DOS memory pages (%u MiB)",
 		        static_cast<int>(memory.pages), memsize);
 
@@ -609,8 +633,8 @@ public:
 		/* Reset some links */
 		memory.links.used = 0;
 		// A20 Line - PS/2 system control port A
-		WriteHandler.Install(0x92,write_p92,IO_MB);
-		ReadHandler.Install(0x92,read_p92,IO_MB);
+		WriteHandler.Install(0x92, write_p92, io_width_t::byte);
+		ReadHandler.Install(0x92, read_p92, io_width_t::byte);
 		MEM_A20_Enable(false);
 	}
 
@@ -622,9 +646,10 @@ public:
 	}
 };
 
-static MEMORY* test;	
-	
-static void MEM_ShutDown(Section * sec) {
+static MEMORY* test;
+
+static void MEM_ShutDown([[maybe_unused]] Section *sec)
+{
 	delete test;
 }
 

@@ -1,9 +1,9 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2020-2020  Nikos Chantziaras <realnc@gmail.com>
  *  Copyright (C) 2002-2011  The DOSBox Team
- *  Copyright (C) 2020       Nikos Chantziaras <realnc@gmail.com>
- *  Copyright (C) 2020       The dosbox-staging team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -27,39 +27,54 @@
 
 #if C_FLUIDSYNTH
 
+#include <atomic>
 #include <memory>
+#include <vector>
 #include <fluidsynth.h>
+#include <thread>
 
 #include "mixer.h"
+#include "rwqueue.h"
+#include "soft_limiter.h"
 
 class MidiHandlerFluidsynth final : public MidiHandler {
-private:
-	using fsynth_ptr_t = std::unique_ptr<fluid_synth_t, decltype(&delete_fluid_synth)>;
-
-	using fluid_settings_ptr_t =
-	        std::unique_ptr<fluid_settings_t, decltype(&delete_fluid_settings)>;
-
-	using mixer_channel_ptr_t =
-	        std::unique_ptr<MixerChannel, decltype(&MIXER_DelChannel)>;
-
 public:
+	MidiHandlerFluidsynth();
+	~MidiHandlerFluidsynth() override;
+	void PrintStats();
 	const char *GetName() const override { return "fluidsynth"; }
 	bool Open(const char *conf) override;
 	void Close() override;
 	void PlayMsg(const uint8_t *msg) override;
 	void PlaySysex(uint8_t *sysex, size_t len) override;
+	MIDI_RC ListAll(Program *caller) override;
 
 private:
-	MidiHandlerFluidsynth() = default;
+	void MixerCallBack(uint16_t requested_frames);
+	void SetMixerLevel(const AudioFrame &levels) noexcept;
+	uint16_t GetRemainingFrames();
+	void Render();
 
-	static MidiHandlerFluidsynth instance;
+	using fluid_settings_ptr_t =
+	        std::unique_ptr<fluid_settings_t, decltype(&delete_fluid_settings)>;
+	using fsynth_ptr_t = std::unique_ptr<fluid_synth_t, decltype(&delete_fluid_synth)>;
 
 	fluid_settings_ptr_t settings{nullptr, &delete_fluid_settings};
 	fsynth_ptr_t synth{nullptr, &delete_fluid_synth};
-	mixer_channel_ptr_t channel{nullptr, MIXER_DelChannel};
-	bool is_open = false;
+	mixer_channel_t channel = nullptr;
+	std::string selected_font = "";
 
-	static void mixer_callback(uint16_t len); // see: MIXER_Handler
+	std::vector<int16_t> play_buffer = {};
+	static constexpr auto num_buffers = 8;
+	RWQueue<std::vector<int16_t>> playable{num_buffers};
+	RWQueue<std::vector<int16_t>> backstock{num_buffers};
+
+	std::thread renderer = {};
+	SoftLimiter soft_limiter;
+
+	uint16_t last_played_frame = 0; // relative frame-offset in the play buffer
+	std::atomic_bool keep_rendering = {};
+	bool is_open = false;
 };
 
 #endif // C_FLUIDSYNTH

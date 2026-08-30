@@ -1,5 +1,8 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -19,6 +22,7 @@
 // #define DEBUG 1
 
 #include "cdrom.h"
+
 #include <cassert>
 #include <cctype>
 #include <chrono>
@@ -30,7 +34,6 @@
 #include <limits>
 #include <sstream>
 #include <vector>
-#include <sys/stat.h>
 
 #if !defined(WIN32)
 #include <libgen.h>
@@ -39,8 +42,10 @@
 #endif
 
 #include "drives.h"
-#include "support.h"
+#include "fs_utils.h"
 #include "setup.h"
+#include "string_utils.h"
+#include "support.h"
 
 using namespace std;
 
@@ -333,7 +338,7 @@ bool CDROM_Interface_Image::AudioFile::read(uint8_t *buffer,
 		static uint8_t dae_attempts = 0;
 		if (dae_attempts++ > 10) {
 			E_Exit("\n"
-			       "CDROM: Digital Audio Extration (DAE) was attempted with a %u kHz\n"
+			       "CDROM: Digital Audio Extraction (DAE) was attempted with a %u kHz\n"
 			       "       track, but DAE is only compatible with %u kHz tracks.",
 			       getRate(),
 			       REDBOOK_PCM_FRAMES_PER_SECOND);
@@ -459,9 +464,10 @@ int CDROM_Interface_Image::AudioFile::getLength()
 		 *  Sound_GetDuration returns milliseconds but getLength()
 		 *  needs to return bytes, so we covert using PCM bytes/s
 		 */
-		length_redbook_bytes = static_cast<int>(
-		        static_cast<float>(Sound_GetDuration(sample)) *
-		        REDBOOK_PCM_BYTES_PER_MS);
+		const auto track_ms = Sound_GetDuration(sample);
+		const auto track_bytes = static_cast<float>(track_ms) * REDBOOK_PCM_BYTES_PER_MS;
+		assert(track_bytes < static_cast<float>(INT32_MAX));
+		length_redbook_bytes = static_cast<int32_t>(track_bytes);
 	}
 	assertm(length_redbook_bytes >= 0,
 	        "Track length could not be determined");
@@ -475,22 +481,21 @@ int CDROM_Interface_Image::refCount = 0;
 CDROM_Interface_Image* CDROM_Interface_Image::images[26] = {};
 CDROM_Interface_Image::imagePlayer CDROM_Interface_Image::player;
 
-CDROM_Interface_Image::CDROM_Interface_Image(Bit8u _subUnit)
-	: tracks({}),
-	  mcn(""),
-	  subUnit(_subUnit)
+CDROM_Interface_Image::CDROM_Interface_Image(uint8_t sub_unit)
+        : tracks{},
+          readBuffer{},
+          mcn("")
 {
-	images[subUnit] = this;
+	images[sub_unit] = this;
 	if (refCount == 0) {
-		if (!player.mutex)
-			player.mutex = SDL_CreateMutex();
-
 		if (!player.channel) {
-			player.channel = player.mixerChannel.Install(&CDAudioCallBack, 0, "CDAUDIO");
+			const auto mixer_callback = std::bind(&CDROM_Interface_Image::CDAudioCallBack,
+			                                      this, std::placeholders::_1);
+			player.channel = MIXER_AddChannel(mixer_callback, 0, "CDAUDIO");
 			player.channel->Enable(false); // only enabled during playback periods
 		}
 #ifdef DEBUG
-		LOG_MSG("CDROM: Initialized the CDAUDIO mixer channel and mutex");
+		LOG_MSG("CDROM: Initialized the CDAUDIO mixer channel");
 #endif
 	}
 	refCount++;
@@ -503,8 +508,6 @@ CDROM_Interface_Image::~CDROM_Interface_Image()
 	// Stop playback before wiping out the CD Player
 	if (refCount == 0 && player.cd) {
 		StopAudio();
-		SDL_DestroyMutex(player.mutex);
-		player.mutex = nullptr;
 #ifdef DEBUG
 		LOG_MSG("CDROM: Released CD Player resources");
 #endif
@@ -512,6 +515,7 @@ CDROM_Interface_Image::~CDROM_Interface_Image()
 	if (player.cd == this) {
 		player.cd = nullptr;
 	}
+	player.channel.reset();
 }
 
 bool CDROM_Interface_Image::SetDevice(char* path)
@@ -519,10 +523,14 @@ bool CDROM_Interface_Image::SetDevice(char* path)
 	const bool result = LoadCueSheet(path) || LoadIsoFile(path);
 	if (!result) {
 		// print error message on dosbox console
+		//--Disabled 2012-11-07 by Alun Bestor: this is already covered by our own error messages.
+		/*
 		char buf[MAX_LINE_LENGTH];
 		snprintf(buf, MAX_LINE_LENGTH, "Could not load image file: %s\r\n", path);
 		Bit16u size = (Bit16u)strlen(buf);
 		DOS_WriteFile(STDOUT, (Bit8u*)buf, &size);
+		 */
+		//--End of modifications
 	}
 	return result;
 }
@@ -685,7 +693,7 @@ bool CDROM_Interface_Image::GetMediaTrayStatus(bool& mediaPresent, bool& mediaCh
 	return true;
 }
 
-bool CDROM_Interface_Image::PlayAudioSector(const uint32_t start, uint32_t len)
+bool CDROM_Interface_Image::PlayAudioSector(uint32_t start, uint32_t len)
 {
 	// Find the track that holds the requested sector
 	track_const_iter track = GetTrack(start);
@@ -694,58 +702,42 @@ bool CDROM_Interface_Image::PlayAudioSector(const uint32_t start, uint32_t len)
 		track_file = track->file;
 
 	// Guard: sanity check the request beyond what GetTrack already checks
-	if (len == 0
-	   || track == tracks.end()
-	   || !track_file
-	   || track->attr == 0x40
-	   || !player.channel
-	   || !player.mutex) {
+	if (len == 0 || track == tracks.end() || !track_file ||
+	    track->attr == 0x40 || !player.channel) {
 		StopAudio();
 #ifdef DEBUG
 		LOG_MSG("CDROM: PlayAudioSector => sanity check failed");
 #endif
 		return false;
 	}
-	/**
-	 *  If the request falls in the pregap we deduct the difference from the
-	 *  playback duration, because we skip the pre-gap area and jump straight to
-	 *  the track start.
-	 */
-	if (start < track->start)
+	// If the request falls into the pregap, which is prior to the track's
+	// actual start but not so earlier that it falls into the prior track's
+	// audio, then we simply skip the pre-gap (beacuse we can't negatively
+	// seek into the track) and instead start playback at the actual track
+	// start.
+	if (start < track->start) {
 		len -= (track->start - start);
+		start = track->start;
+	}
 
-	// Seek to the calculated byte offset, bounded to the valid byte offsets
-	const uint32_t offset = (track->skip
-	                        + clamp(start - static_cast<uint32_t>(track->start),
-	                                0u, track->length - 1)
-	                        * track->sectorSize);
+	// Calculate the requested byte offset from the sector offset
+	const auto sector_offset = start - track->start;
+	const auto byte_offset = track->skip + sector_offset * track->sectorSize;
 
 	// Guard: Bail if our track could not be seeked
-	if (!track_file->seek(offset)) {
+	if (!track_file->seek(byte_offset)) {
 		LOG_MSG("CDROM: Track %d failed to seek to byte %u, so cancelling playback",
-		        track->number,
-		        offset);
+		        track->number, byte_offset);
 		StopAudio();
 		return false;
 	}
 
 	// We're performing an audio-task, so update the audio position
-	track_file->setAudioPosition(offset);
+	track_file->setAudioPosition(byte_offset);
 
 	// Get properties about the current track
 	const uint8_t track_channels = track_file->getChannels();
 	const uint32_t track_rate = track_file->getRate();
-
-	/**
-	 *  Guard: Before we update our player object with new track details, we
-	 *  lock access to it to prevent the Callback (which runs in a separate
-	 *  thread) from getting inconsistent or partial values.
-	 */
-	if (SDL_LockMutex(player.mutex) < 0) {
-		LOG_MSG("CDROM: PlayAudioSector couldn't lock our player for exclusive access");
-		StopAudio();
-		return false;
-	}
 
 	// Update our player with properties about this playback sequence
 	player.cd = this;
@@ -802,13 +794,6 @@ bool CDROM_Interface_Image::PlayAudioSector(const uint32_t start, uint32_t len)
 	// start the channel!
 	player.channel->SetFreq(track_rate);
 	player.channel->Enable(true);
-
-	// Guard: release the lock in this data
-    if (SDL_UnlockMutex(player.mutex) < 0) {
-        LOG_MSG("CDROM: PlayAudioSector couldn't unlock this thread");
-		StopAudio();
-		return false;
-    }
 	return true;
 }
 
@@ -905,9 +890,8 @@ bool CDROM_Interface_Image::ReadSectors(PhysPt buffer,
 	return success;
 }
 
-bool CDROM_Interface_Image::LoadUnloadMedia(bool unload)
+bool CDROM_Interface_Image::LoadUnloadMedia(bool /*unload*/)
 {
-	(void)unload; // unused by part of the API
 	return true;
 }
 
@@ -994,8 +978,19 @@ bool CDROM_Interface_Image::ReadSector(uint8_t *buffer, const bool raw, const ui
 	return track->file->read(buffer, offset, length);
 }
 
+bool CDROM_Interface_Image::ReadSectorsHost(void *buffer, bool raw, unsigned long sector, unsigned long num)
+{
+	unsigned int sectorSize = raw ? BYTES_PER_RAW_REDBOOK_FRAME : BYTES_PER_COOKED_REDBOOK_FRAME;
+	bool success = true; //Gobliiins reads 0 sectors
+	for(unsigned long i = 0; i < num; i++) {
+		success = ReadSector((uint8_t*)buffer + (i * (Bitu)sectorSize), raw, sector + i);
+		if (!success) break;
+	}
 
-void CDROM_Interface_Image::CDAudioCallBack(Bitu desired_track_frames)
+	return success;
+}
+
+void CDROM_Interface_Image::CDAudioCallBack(uint16_t desired_track_frames)
 {
 	/**
 	 *  This callback runs in SDL's mixer thread, so there's a risk
@@ -1005,29 +1000,17 @@ void CDROM_Interface_Image::CDAudioCallBack(Bitu desired_track_frames)
 	std::shared_ptr<TrackFile> track_file = player.trackFile.lock();
 
 	// Guards: Bail if the request or our player is invalid
-	if (desired_track_frames == 0
-	   || !player.cd
-	   || !player.mutex
-	   || !track_file) {
+	if (desired_track_frames == 0 || !player.cd || !track_file) {
 #ifdef DEBUG
 		LOG_MSG("CDROM: CDAudioCallBack called with one more empty dependencies:\n"
 		        "\t - frames to play (%" PRIuPTR ")\n"
-				"\t - pointer to the CD object (%p)\n"
-				"\t - pointer to the mutex object (%p)\n"
-				"\t - pointer to the track's file (%p)\n",
-				desired_track_frames,
-				static_cast<void*>(player.cd),
-				static_cast<void*>(player.mutex),
-				static_cast<void*>(track_file.get()));
+		        "\t - pointer to the CD object (%p)\n"
+		        "\t - pointer to the track's file (%p)\n",
+		        desired_track_frames, static_cast<void *>(player.cd),
+		        static_cast<void *>(track_file.get()));
 #endif
 		if (player.cd)
 			player.cd->StopAudio();
-		return;
-	}
-
-	// Ensure we have exclusive access to update our player members
-	if (SDL_LockMutex(player.mutex) < 0) {
-		LOG_MSG("CDROM: CDAudioCallBack couldn't lock this thread");
 		return;
 	}
 
@@ -1039,7 +1022,7 @@ void CDROM_Interface_Image::CDAudioCallBack(Bitu desired_track_frames)
 	 *  Uses either the stereo or mono and native or nonnative
 	 *  AddSamples call assigned during construction
 	 */
-	(player.channel->*player.addFrames)(decoded_track_frames, player.buffer);
+	(player.channel.get()->*player.addFrames)(decoded_track_frames, player.buffer);
 
 	if (player.playedTrackFrames >= player.totalTrackFrames) {
 #ifdef DEBUG
@@ -1059,17 +1042,10 @@ void CDROM_Interface_Image::CDAudioCallBack(Bitu desired_track_frames)
 		                                     * player.totalRedbookFrames));
 		const Bit32u new_redbook_start_frame = player.startSector
 		                                       + played_redbook_frames;
-		const Bit32u remaining_redbook_frames = player.totalRedbookFrames
-		                                        - played_redbook_frames;
-		if (SDL_UnlockMutex(player.mutex) < 0) {
-			LOG_MSG("CDROM: CDAudioCallBack couldn't unlock to move to next track");
-			return;
-		}
+		const Bit32u remaining_redbook_frames = player.totalRedbookFrames -
+		                                        played_redbook_frames;
 		player.cd->PlayAudioSector(new_redbook_start_frame, remaining_redbook_frames);
 		return;
-	}
-	if (SDL_UnlockMutex(player.mutex) < 0) {
-		LOG_MSG("CDROM: CDAudioCallBack couldn't unlock our player before returning");
 	}
 }
 
@@ -1176,10 +1152,10 @@ bool CDROM_Interface_Image::LoadCueSheet(char *cuefile)
 	bool success;
 	bool canAddTrack = false;
 	char tmp[MAX_FILENAME_LENGTH];  // dirname can change its argument
-	safe_strncpy(tmp, cuefile, MAX_FILENAME_LENGTH);
+	safe_strcpy(tmp, cuefile);
 	string pathname(dirname(tmp));
 	ifstream in;
-	in.open(cuefile, ios::in);
+	in.open(to_native_path(cuefile), ios::in);
 	if (in.fail()) {
 		return false;
 	}
@@ -1392,21 +1368,26 @@ bool CDROM_Interface_Image::HasDataTrack(void)
 bool CDROM_Interface_Image::GetRealFileName(string &filename, string &pathname)
 {
 	// check if file exists
-	struct stat test;
-	if (stat(filename.c_str(), &test) == 0) {
+	if (path_exists(filename)) {
 		return true;
 	}
 
-	// check if file with path relative to cue file exists
-	string tmpstr(pathname + "/" + filename);
-	if (stat(tmpstr.c_str(), &test) == 0) {
+	// Check if file with path relative to cue file exists.
+	// Consider the possibility that the filename has a windows directory
+	// seperator or case-insensitive path (inside the CUE file) which is common
+	// for some commercial rereleases of DOS games using DOSBox.
+	const std::string cue_file_entry = (pathname + CROSS_FILESPLIT + filename);
+	const std::string tmpstr = to_native_path(cue_file_entry);
+
+	if (path_exists(tmpstr)) {
 		filename = tmpstr;
 		return true;
 	}
+
 	// finally check if file is in a dosbox local drive
 	char fullname[CROSS_LEN];
 	char tmp[CROSS_LEN];
-	safe_strncpy(tmp, filename.c_str(), CROSS_LEN);
+	safe_strcpy(tmp, filename.c_str());
 	Bit8u drive;
 	if (!DOS_MakeName(tmp, fullname, &drive)) {
 		return false;
@@ -1415,35 +1396,12 @@ bool CDROM_Interface_Image::GetRealFileName(string &filename, string &pathname)
 	localDrive *ldp = dynamic_cast<localDrive*>(Drives[drive]);
 	if (ldp) {
 		ldp->GetSystemFilename(tmp, fullname);
-		if (stat(tmp, &test) == 0) {
+		if (path_exists(tmp)) {
 			filename = tmp;
 			return true;
 		}
 	}
 
-#if !defined (WIN32)
-	/**
-	 *  Consider the possibility that the filename has a windows directory
-	 *  seperator (inside the CUE file) which is common for some commercial
-	 *  rereleases of DOS games using DOSBox
-	 */
-	string copy = filename;
-	size_t l = copy.size();
-	for (size_t i = 0; i < l;i++) {
-		if (copy[i] == '\\') copy[i] = '/';
-	}
-
-	if (stat(copy.c_str(), &test) == 0) {
-		filename = copy;
-		return true;
-	}
-
-	tmpstr = pathname + "/" + copy;
-	if (stat(tmpstr.c_str(), &test) == 0) {
-		filename = tmpstr;
-		return true;
-	}
-#endif
 	return false;
 }
 

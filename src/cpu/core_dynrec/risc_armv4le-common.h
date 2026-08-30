@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -28,9 +28,6 @@
 #define DRC_FLAGS_INVALIDATION
 // try to replace _simple functions by code
 #define DRC_FLAGS_INVALIDATION_DCODE
-
-// type with the same size as a pointer
-#define DRC_PTR_SIZE_IM Bit32u
 
 // calling convention modifier
 #define DRC_CALL_CONV	/* nothing */
@@ -83,28 +80,4 @@ typedef Bit8u HostReg;
 #define HOST_lr HOST_r14
 #define HOST_pc HOST_r15
 
-
-static void cache_block_closing(Bit8u* block_start,Bitu block_size) {
-#if (__ARM_EABI__)
-	//flush cache - eabi
-	register unsigned long _beg __asm ("a1") = (unsigned long)(block_start);				// block start
-	register unsigned long _end __asm ("a2") = (unsigned long)(block_start+block_size);		// block end
-	register unsigned long _flg __asm ("a3") = 0;
-	register unsigned long _par __asm ("r7") = 0xf0002;										// sys_cacheflush
-	__asm __volatile ("swi 0x0"
-		: // no outputs
-		: "r" (_beg), "r" (_end), "r" (_flg), "r" (_par)
-		);
-#else
-// GP2X BEGIN
-	//flush cache - old abi
-	register unsigned long _beg __asm ("a1") = (unsigned long)(block_start);				// block start
-	register unsigned long _end __asm ("a2") = (unsigned long)(block_start+block_size);		// block end
-	register unsigned long _flg __asm ("a3") = 0;
-	__asm __volatile ("swi 0x9f0002		@ sys_cacheflush"
-		: // no outputs
-		: "r" (_beg), "r" (_end), "r" (_flg)
-		);
-// GP2X END
-#endif
-}
+static void cache_block_closing([[maybe_unused]] const Bit8u *block_start, [[maybe_unused]] Bitu block_size) { }

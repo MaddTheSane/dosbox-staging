@@ -1,8 +1,8 @@
-/* String appended to the .conf file. */
-#define CONF_BRAND "staging-git"
-
 /* Version number of package */
-#define VERSION "git"
+#define VERSION "0.78.1"
+
+/* This macro is going to be overriden via CI */
+#define DOSBOX_DETAILED_VERSION "git"
 
 /* Define to 1 to enable internal debugger, requires libcurses */
 #define C_DEBUG 0
@@ -39,8 +39,11 @@
 /* Enable memory function inlining in */
 #define C_CORE_INLINE 1
 
-/* Define to 1 to enable FluidSynth MIDI synthesiser */
+/* Define to 1 to enable FluidSynth MIDI synthesizer */
 #define C_FLUIDSYNTH 1
+
+// Define to 1 to enable MT-32 emulator
+#define C_MT32EMU 1
 
 /* Enable the FPU module, still only for beta testing */
 #define C_FPU 1
@@ -57,20 +60,11 @@
 /* Define to 1 to use a unaligned memory access */
 #define C_UNALIGNED_MEMORY 1
 
-/* environ is defined */
-#define ENVIRON_INCLUDED 1
-
-/* environ can be linked */
-#define ENVIRON_LINKED 1
-
 /* Prevent <windows.h> from clobbering std::min and std::max */
 #define NOMINMAX 1
 
 /* Define to 1 if you want serial passthrough support. */
 #define C_DIRECTSERIAL 1
-
-#define INLINE __forceinline
-#define DB_FASTCALL __fastcall
 
 // Enables mathematical constants under Visual Studio, such as M_PI
 // https://docs.microsoft.com/en-us/cpp/c-runtime-library/math-constants
@@ -81,3 +75,24 @@
 // Microsoft-specific names and functions instead of POSIX conformant ones.
 // https://docs.microsoft.com/en-us/cpp/error-messages/compiler-warnings/compiler-warning-level-3-c4996?view=vs-2019#posix-function-names
 #define _CRT_NONSTDC_NO_WARNINGS
+
+// MSVC issues warnings on what it considers "unsafe" C-calls for
+// which "safer" (_s-equivalent) calls.
+//
+// To date, no effort has been made to transition toward these _s
+// calls, in part because no static analyzer (Coverity, PVS Studio,
+// or Clang) has flagged the project's use of the existing non-_s
+// calls as having security implications.
+//
+// Likewise, if there is going to be work put into altering the use
+// of these calls, it will involve transitioning toward modern C++
+// constructs as mentioned in #1314 (Ref:
+// https://github.com/dosbox-staging/dosbox-staging/issues/1314)
+//
+// Because the recommendations in these warnings will not be acted
+// upon given the planned direction of the the project, they
+// therefore provide no value and are being silenced.
+
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif

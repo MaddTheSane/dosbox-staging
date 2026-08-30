@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,7 +26,8 @@
 
 bool DOS_IOCTL(void) {
 //	LOG(LOG_IOCTL,LOG_WARN)("%X %X %X %X",reg_ax,reg_bx,reg_cx,reg_dx);
-	Bitu handle=0;Bit8u drive=0;
+	uint8_t handle=0; // DOS managed up to 256 file handles (and our 'Files' array is 8-bit)
+	uint8_t drive=0;
 	/* calls 0-4,6,7,10,12,16 use a file handle */
 	if ((reg_al<4) || (reg_al==0x06) || (reg_al==0x07) || (reg_al==0x0a) || (reg_al==0x0c) || (reg_al==0x10)) {
 		handle=RealHandle(reg_bx);
@@ -54,7 +55,7 @@ bool DOS_IOCTL(void) {
 	switch(reg_al) {
 	case 0x00:		/* Get Device Information */
 		if (Files[handle]->GetInformation() & 0x8000) {	//Check for device
-			reg_dx=Files[handle]->GetInformation();
+			reg_dx = Files[handle]->GetInformation() & ~EXT_DEVICE_BIT;
 		} else {
 			Bit8u hdrive=Files[handle]->GetDrive();
 			if (hdrive==0xff) {
@@ -72,7 +73,7 @@ bool DOS_IOCTL(void) {
 			return false;
 		} else {
 			if (Files[handle]->GetInformation() & 0x8000) {	//Check for device
-				reg_al=(Bit8u)(Files[handle]->GetInformation() & 0xff);
+				reg_al = reinterpret_cast<DOS_Device *>(Files[handle])->GetStatus(true);
 			} else {
 				DOS_SetError(DOSERR_FUNCTION_NUMBER_INVALID);
 				return false;
@@ -117,12 +118,16 @@ bool DOS_IOCTL(void) {
 				reg_al=0x0; //EOF or beyond
 			}
 			Files[handle]->Seek(&oldlocation, DOS_SEEK_SET); //restore filelocation
-			LOG(LOG_IOCTL,LOG_NORMAL)("06:Used Get Input Status on regular file with handle %d",handle);
+			LOG(LOG_IOCTL,LOG_NORMAL)("06:Used Get Input Status on regular file with handle %u",handle);
 		}
 		return true;
 	case 0x07:		/* Get Output Status */
-		LOG(LOG_IOCTL,LOG_NORMAL)("07:Fakes output status is ready for handle %d",handle);
-		reg_al=0xff;
+		if (Files[handle]->GetInformation() & EXT_DEVICE_BIT) {
+			reg_al = reinterpret_cast<DOS_Device *>(Files[handle])->GetStatus(false);
+			return true;
+		}
+		LOG(LOG_IOCTL, LOG_NORMAL)("07:Fakes output status is ready for handle %u", handle);
+		reg_al = 0xff;
 		return true;
 	case 0x08:		/* Check if block device removable */
 		/* cdrom drives and drive a&b are removable */

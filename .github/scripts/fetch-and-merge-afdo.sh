@@ -1,13 +1,14 @@
 #!/bin/bash
 
-# Copyright (c) 2019-2020 Kevin R Croft <krcroft@gmail.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Copyright (C) 2019-2021  kcgen <kcgen@users.noreply.github.com>
 
 # A helper script that fetches, converts, and merges kernel sample
 # (.prof) files (collected during prior DOSBox testing) into a single
 # GCC-compatible AutoFDO record that can be used to optimize builds.
 
-# Depedencies:
+# Dependencies:
 #   - zstd
 #   - autofdo
 

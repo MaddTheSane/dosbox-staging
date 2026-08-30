@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -21,6 +21,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #include "mem.h"
 #include "regs.h"
@@ -36,33 +37,38 @@
 
 PagingBlock paging;
 
-
-Bitu PageHandler::readb(PhysPt addr) {
+uint8_t PageHandler::readb(PhysPt addr)
+{
 	E_Exit("No byte handler for read from %d",addr);	
 	return 0;
 }
-Bitu PageHandler::readw(PhysPt addr) {
-	Bitu ret = (readb(addr+0) << 0);
+uint16_t PageHandler::readw(PhysPt addr)
+{
+	uint16_t ret = (readb(addr+0) << 0);
 	ret     |= (readb(addr+1) << 8);
 	return ret;
 }
-Bitu PageHandler::readd(PhysPt addr) {
-	Bitu ret = (readb(addr+0) << 0);
+uint32_t PageHandler::readd(PhysPt addr)
+{
+	uint32_t ret = (readb(addr+0) << 0);
 	ret     |= (readb(addr+1) << 8);
 	ret     |= (readb(addr+2) << 16);
 	ret     |= (readb(addr+3) << 24);
 	return ret;
 }
 
-void PageHandler::writeb(PhysPt addr,Bitu /*val*/) {
-	E_Exit("No byte handler for write to %d",addr);	
+void PageHandler::writeb(PhysPt addr, uint8_t /*val*/)
+{
+	E_Exit("No byte handler for write to %d",addr);
 }
 
-void PageHandler::writew(PhysPt addr,Bitu val) {
+void PageHandler::writew(PhysPt addr, uint16_t val)
+{
 	writeb(addr+0,(Bit8u) (val >> 0));
 	writeb(addr+1,(Bit8u) (val >> 8));
 }
-void PageHandler::writed(PhysPt addr,Bitu val) {
+void PageHandler::writed(PhysPt addr, uint32_t val)
+{
 	writeb(addr+0,(Bit8u) (val >> 0));
 	writeb(addr+1,(Bit8u) (val >> 8));
 	writeb(addr+2,(Bit8u) (val >> 16));
@@ -77,26 +83,33 @@ HostPt PageHandler::GetHostWritePt(Bitu /*phys_page*/) {
 	return 0;
 }
 
-bool PageHandler::readb_checked(PhysPt addr, Bit8u * val) {
-	*val=(Bit8u)readb(addr);	return false;
+bool PageHandler::readb_checked(PhysPt addr, uint8_t *val)
+{
+	*val = readb(addr);
+	return false;
 }
-bool PageHandler::readw_checked(PhysPt addr, Bit16u * val) {
-	*val=(Bit16u)readw(addr);	return false;
+bool PageHandler::readw_checked(PhysPt addr, uint16_t *val)
+{
+	*val = readw(addr);
+	return false;
 }
-bool PageHandler::readd_checked(PhysPt addr, Bit32u * val) {
-	*val=(Bit32u)readd(addr);	return false;
+bool PageHandler::readd_checked(PhysPt addr, uint32_t *val)
+{
+	*val = readd(addr);
+	return false;
 }
-bool PageHandler::writeb_checked(PhysPt addr,Bitu val) {
+bool PageHandler::writeb_checked(PhysPt addr, uint8_t val)
+{
 	writeb(addr,val);	return false;
 }
-bool PageHandler::writew_checked(PhysPt addr,Bitu val) {
+bool PageHandler::writew_checked(PhysPt addr, uint16_t val)
+{
 	writew(addr,val);	return false;
 }
-bool PageHandler::writed_checked(PhysPt addr,Bitu val) {
+bool PageHandler::writed_checked(PhysPt addr, uint32_t val)
+{
 	writed(addr,val);	return false;
 }
-
-
 
 struct PF_Entry {
 	Bitu cs;
@@ -107,7 +120,7 @@ struct PF_Entry {
 
 #define PF_QUEUESIZE 16
 static struct {
-	Bitu used;
+	uint8_t used = 0; // keeps track of number of entries
 	PF_Entry entries[PF_QUEUESIZE];
 } pf_queue;
 
@@ -129,13 +142,10 @@ static Bits PageFaultCore(void) {
 	}
 	return 0;
 }
-#if C_DEBUG
-Bitu DEBUG_EnableDebugger(void);
-#endif
 
 bool first=false;
 
-void PAGING_PageFault(PhysPt lin_addr,Bitu page_addr,Bitu faultcode) {
+void PAGING_PageFault(PhysPt lin_addr,Bitu page_addr,uint32_t faultcode) {
 	/* Save the state of the cpu cores */
 	LazyFlags old_lflags;
 	memcpy(&old_lflags,&lflags,sizeof(LazyFlags));
@@ -144,9 +154,9 @@ void PAGING_PageFault(PhysPt lin_addr,Bitu page_addr,Bitu faultcode) {
 	cpudecoder=&PageFaultCore;
 	paging.cr2=lin_addr;
 	PF_Entry * entry=&pf_queue.entries[pf_queue.used++];
-	LOG(LOG_PAGING,LOG_NORMAL)("PageFault at %X type [%x] queue %d",lin_addr,faultcode,pf_queue.used);
-//	LOG_MSG("EAX:%04X ECX:%04X EDX:%04X EBX:%04X",reg_eax,reg_ecx,reg_edx,reg_ebx);
-//	LOG_MSG("CS:%04X EIP:%08X SS:%04x SP:%08X",SegValue(cs),reg_eip,SegValue(ss),reg_esp);
+	LOG(LOG_PAGING, LOG_NORMAL)("PageFault at %X type [%x] queue %u", lin_addr, faultcode, pf_queue.used);
+	// LOG_MSG("EAX:%04X ECX:%04X EDX:%04X EBX:%04X",reg_eax,reg_ecx,reg_edx,reg_ebx);
+	// LOG_MSG("CS:%04X EIP:%08X SS:%04x SP:%08X",SegValue(cs),reg_eip,SegValue(ss),reg_esp);
 	entry->cs=SegValue(cs);
 	entry->eip=reg_eip;
 	entry->page_addr=page_addr;
@@ -154,18 +164,15 @@ void PAGING_PageFault(PhysPt lin_addr,Bitu page_addr,Bitu faultcode) {
 	cpu.mpl=3;
 
 	CPU_Exception(EXCEPTION_PF,faultcode);
-#if C_DEBUG
-//	DEBUG_EnableDebugger();
-#endif
 	DOSBOX_RunMachine();
 	pf_queue.used--;
-	LOG(LOG_PAGING,LOG_NORMAL)("Left PageFault for %x queue %d",lin_addr,pf_queue.used);
+	LOG(LOG_PAGING, LOG_NORMAL)("Left PageFault for %x queue %u", lin_addr, pf_queue.used);
 	memcpy(&lflags,&old_lflags,sizeof(LazyFlags));
 	cpudecoder=old_cpudecoder;
 //	LOG_MSG("SS:%04x SP:%08X",SegValue(ss),reg_esp);
 }
 
-static INLINE void InitPageUpdateLink(Bitu relink,PhysPt addr) {
+static inline void InitPageUpdateLink(Bitu relink,PhysPt addr) {
 	if (relink==0) return;
 	if (paging.links.used) {
 		if (paging.links.entries[paging.links.used-1]==(addr>>12)) {
@@ -176,7 +183,7 @@ static INLINE void InitPageUpdateLink(Bitu relink,PhysPt addr) {
 	if (relink>1) PAGING_LinkPage_ReadOnly(addr>>12,relink);
 }
 
-static INLINE void InitPageCheckPresence(PhysPt lin_addr,bool writing,X86PageEntry& table,X86PageEntry& entry) {
+static inline void InitPageCheckPresence(PhysPt lin_addr,bool writing,X86PageEntry& table,X86PageEntry& entry) {
 	Bitu lin_page=lin_addr >> 12;
 	Bitu d_index=lin_page >> 10;
 	Bitu t_index=lin_page & 0x3ff;
@@ -202,7 +209,7 @@ static INLINE void InitPageCheckPresence(PhysPt lin_addr,bool writing,X86PageEnt
 	}
 }
 			
-static INLINE bool InitPageCheckPresence_CheckOnly(PhysPt lin_addr,bool writing,X86PageEntry& table,X86PageEntry& entry) {
+static inline bool InitPageCheckPresence_CheckOnly(PhysPt lin_addr,bool writing,X86PageEntry& table,X86PageEntry& entry) {
 	Bitu lin_page=lin_addr >> 12;
 	Bitu d_index=lin_page >> 10;
 	Bitu t_index=lin_page & 0x3ff;
@@ -226,7 +233,7 @@ static INLINE bool InitPageCheckPresence_CheckOnly(PhysPt lin_addr,bool writing,
 }
 
 // check if a user-level memory access would trigger a privilege page fault
-static INLINE bool InitPage_CheckUseraccess(Bitu u1,Bitu u2) {
+static inline bool InitPage_CheckUseraccess(Bitu u1,Bitu u2) {
 	switch (CPU_ArchitectureType) {
 	case CPU_ARCHTYPE_MIXED:
 	case CPU_ARCHTYPE_386SLOW:
@@ -241,75 +248,87 @@ static INLINE bool InitPage_CheckUseraccess(Bitu u1,Bitu u2) {
 }
 
 
-class InitPageHandler : public PageHandler {
+class InitPageHandler final : public PageHandler {
 public:
 	InitPageHandler() {
 		flags=PFLAG_INIT|PFLAG_NOCODE;
 	}
-	Bitu readb(PhysPt addr) {
-		Bitu needs_reset=InitPage(addr,false);
-		Bit8u val=mem_readb(addr);
-		InitPageUpdateLink(needs_reset,addr);
+	uint8_t readb(PhysPt addr)
+	{
+		const auto needs_reset = InitPage(addr, false);
+		const auto val = mem_readb(addr);
+		InitPageUpdateLink(needs_reset, addr);
 		return val;
 	}
-	Bitu readw(PhysPt addr) {
-		Bitu needs_reset=InitPage(addr,false);
-		Bit16u val=mem_readw(addr);
-		InitPageUpdateLink(needs_reset,addr);
+	uint16_t readw(PhysPt addr)
+	{
+		const auto needs_reset = InitPage(addr, false);
+		const auto val = mem_readw(addr);
+		InitPageUpdateLink(needs_reset, addr);
 		return val;
 	}
-	Bitu readd(PhysPt addr) {
-		Bitu needs_reset=InitPage(addr,false);
-		Bit32u val=mem_readd(addr);
-		InitPageUpdateLink(needs_reset,addr);
+	uint32_t readd(PhysPt addr)
+	{
+		const auto needs_reset = InitPage(addr, false);
+		const auto val = mem_readd(addr);
+		InitPageUpdateLink(needs_reset, addr);
 		return val;
 	}
-	void writeb(PhysPt addr,Bitu val) {
-		Bitu needs_reset=InitPage(addr,true);
-		mem_writeb(addr,val);
+	void writeb(PhysPt addr, uint8_t val)
+	{
+		const auto needs_reset = InitPage(addr, true);
+		mem_writeb(addr, val);
 		InitPageUpdateLink(needs_reset,addr);
 	}
-	void writew(PhysPt addr,Bitu val) {
-		Bitu needs_reset=InitPage(addr,true);
-		mem_writew(addr,val);
+	void writew(PhysPt addr, uint16_t val)
+	{
+		const auto needs_reset = InitPage(addr, true);
+		mem_writew(addr, val);
 		InitPageUpdateLink(needs_reset,addr);
 	}
-	void writed(PhysPt addr,Bitu val) {
-		Bitu needs_reset=InitPage(addr,true);
-		mem_writed(addr,val);
+	void writed(PhysPt addr, uint32_t val)
+	{
+		const auto needs_reset = InitPage(addr, true);
+		mem_writed(addr, val);
 		InitPageUpdateLink(needs_reset,addr);
 	}
-	bool readb_checked(PhysPt addr, Bit8u * val) {
+	bool readb_checked(PhysPt addr, uint8_t *val)
+	{
 		if (InitPageCheckOnly(addr,false)) {
 			*val=mem_readb(addr);
 			return false;
 		} else return true;
 	}
-	bool readw_checked(PhysPt addr, Bit16u * val) {
+	bool readw_checked(PhysPt addr, uint16_t *val)
+	{
 		if (InitPageCheckOnly(addr,false)){
 			*val=mem_readw(addr);
 			return false;
 		} else return true;
 	}
-	bool readd_checked(PhysPt addr, Bit32u * val) {
+	bool readd_checked(PhysPt addr, uint32_t *val)
+	{
 		if (InitPageCheckOnly(addr,false)) {
 			*val=mem_readd(addr);
 			return false;
 		} else return true;
 	}
-	bool writeb_checked(PhysPt addr,Bitu val) {
+	bool writeb_checked(PhysPt addr, uint8_t val)
+	{
 		if (InitPageCheckOnly(addr,true)) {
 			mem_writeb(addr,val);
 			return false;
 		} else return true;
 	}
-	bool writew_checked(PhysPt addr,Bitu val) {
+	bool writew_checked(PhysPt addr, uint16_t val)
+	{
 		if (InitPageCheckOnly(addr,true)) {
 			mem_writew(addr,val);
 			return false;
 		} else return true;
 	}
-	bool writed_checked(PhysPt addr,Bitu val) {
+	bool writed_checked(PhysPt addr, uint32_t val)
+	{
 		if (InitPageCheckOnly(addr,true)) {
 			mem_writed(addr,val);
 			return false;
@@ -367,8 +386,8 @@ public:
 				if (writing && USERWRITE_PROHIBITED) priv_check=3;
 			}
 			if (priv_check==3) {
-				LOG(LOG_PAGING,LOG_NORMAL)("Page access denied: cpl=%i, %x:%x:%x:%x",
-					cpu.cpl,entry.block.us,table.block.us,entry.block.wr,table.block.wr);
+				LOG(LOG_PAGING, LOG_NORMAL)("Page access denied: cpl=%i, %x:%x:%x:%x",
+				    static_cast<int>(cpu.cpl), entry.block.us, table.block.us, entry.block.wr, table.block.wr);
 				PAGING_PageFault(lin_addr,(table.block.base<<12)+(lin_page & 0x3ff)*4,0x05 | (writing?0x02:0x00));
 				priv_check=0;
 			}
@@ -429,8 +448,8 @@ public:
 
 			if (InitPage_CheckUseraccess(entry.block.us,table.block.us) ||
 					(((entry.block.wr==0) || (table.block.wr==0)) && writing)) {
-				LOG(LOG_PAGING,LOG_NORMAL)("Page access denied: cpl=%i, %x:%x:%x:%x",
-					cpu.cpl,entry.block.us,table.block.us,entry.block.wr,table.block.wr);
+				LOG(LOG_PAGING, LOG_NORMAL)("Page access denied: cpl=%i, %x:%x:%x:%x",
+				    static_cast<int>(cpu.cpl), entry.block.us, table.block.us, entry.block.wr, table.block.wr);
 				paging.cr2=lin_addr;
 				cpu.exception.which=EXCEPTION_PF;
 				cpu.exception.error=0x05 | (writing?0x02:0x00);
@@ -470,57 +489,63 @@ public:
 	}
 };
 
-class InitPageUserROHandler : public PageHandler {
+class InitPageUserROHandler final : public PageHandler {
 public:
 	InitPageUserROHandler() {
 		flags=PFLAG_INIT|PFLAG_NOCODE;
 	}
-	void writeb(PhysPt addr,Bitu val) {
-		InitPage(addr,(Bit8u)(val&0xff));
-		host_writeb(get_tlb_read(addr)+addr,(Bit8u)(val&0xff));
+	void writeb(PhysPt addr, uint8_t val)
+	{
+		InitPage(addr, val);
+		host_writeb(get_tlb_read(addr) + addr, val);
 	}
-	void writew(PhysPt addr,Bitu val) {
-		InitPage(addr,(Bit16u)(val&0xffff));
-		host_writew(get_tlb_read(addr)+addr,(Bit16u)(val&0xffff));
+	void writew(PhysPt addr, uint16_t val)
+	{
+		InitPage(addr, val);
+		host_writew(get_tlb_read(addr) + addr, val);
 	}
-	void writed(PhysPt addr,Bitu val) {
-		InitPage(addr,(Bit32u)val);
-		host_writed(get_tlb_read(addr)+addr,(Bit32u)val);
+	void writed(PhysPt addr, uint32_t val)
+	{
+		InitPage(addr, val);
+		host_writed(get_tlb_read(addr) + addr, val);
 	}
-	bool writeb_checked(PhysPt addr,Bitu val) {
-		Bitu writecode=InitPageCheckOnly(addr,(Bit8u)(val&0xff));
+	bool writeb_checked(PhysPt addr, uint8_t val)
+	{
+		Bitu writecode = InitPageCheckOnly(addr, val);
 		if (writecode) {
 			HostPt tlb_addr;
 			if (writecode>1) tlb_addr=get_tlb_read(addr);
 			else tlb_addr=get_tlb_write(addr);
-			host_writeb(tlb_addr+addr,(Bit8u)(val&0xff));
+			host_writeb(tlb_addr + addr, val);
 			return false;
 		}
 		return true;
 	}
-	bool writew_checked(PhysPt addr,Bitu val) {
-		Bitu writecode=InitPageCheckOnly(addr,(Bit16u)(val&0xffff));
+	bool writew_checked(PhysPt addr, uint16_t val)
+	{
+		Bitu writecode = InitPageCheckOnly(addr, val);
 		if (writecode) {
 			HostPt tlb_addr;
 			if (writecode>1) tlb_addr=get_tlb_read(addr);
 			else tlb_addr=get_tlb_write(addr);
-			host_writew(tlb_addr+addr,(Bit16u)(val&0xffff));
+			host_writew(tlb_addr + addr, val);
 			return false;
 		}
 		return true;
 	}
-	bool writed_checked(PhysPt addr,Bitu val) {
-		Bitu writecode=InitPageCheckOnly(addr,(Bit32u)val);
+	bool writed_checked(PhysPt addr, uint32_t val)
+	{
+		Bitu writecode = InitPageCheckOnly(addr, val);
 		if (writecode) {
 			HostPt tlb_addr;
 			if (writecode>1) tlb_addr=get_tlb_read(addr);
 			else tlb_addr=get_tlb_write(addr);
-			host_writed(tlb_addr+addr,(Bit32u)val);
+			host_writed(tlb_addr + addr, val);
 			return false;
 		}
 		return true;
 	}
-	void InitPage(Bitu lin_addr,Bitu val) {
+	void InitPage(Bitu lin_addr, [[maybe_unused]] Bitu val) {
 		Bitu lin_page=lin_addr >> 12;
 		Bitu phys_page;
 		if (paging.enabled) {
@@ -530,8 +555,8 @@ public:
 			X86PageEntry entry;
 			InitPageCheckPresence(lin_addr,true,table,entry);
 
-			LOG(LOG_PAGING,LOG_NORMAL)("Page access denied: cpl=%i, %x:%x:%x:%x",
-				cpu.cpl,entry.block.us,table.block.us,entry.block.wr,table.block.wr);
+			LOG(LOG_PAGING, LOG_NORMAL)("Page access denied: cpl=%i, %x:%x:%x:%x",
+			    static_cast<int>(cpu.cpl), entry.block.us, table.block.us, entry.block.wr, table.block.wr);
 			PAGING_PageFault(lin_addr,(table.block.base<<12)+(lin_page & 0x3ff)*4,0x07);
 
 			if (!table.block.a) {
@@ -551,7 +576,7 @@ public:
 			PAGING_LinkPage(lin_page,phys_page);
 		}
 	}
-	Bitu InitPageCheckOnly(Bitu lin_addr,Bitu val) {
+	Bitu InitPageCheckOnly(Bitu lin_addr, [[maybe_unused]] Bitu val) {
 		Bitu lin_page=lin_addr >> 12;
 		if (paging.enabled) {
 			if (!USERWRITE_PROHIBITED) return 2;
@@ -561,8 +586,8 @@ public:
 			if (!InitPageCheckPresence_CheckOnly(lin_addr,true,table,entry)) return 0;
 
 			if (InitPage_CheckUseraccess(entry.block.us,table.block.us) || (((entry.block.wr==0) || (table.block.wr==0)))) {
-				LOG(LOG_PAGING,LOG_NORMAL)("Page access denied: cpl=%i, %x:%x:%x:%x",
-					cpu.cpl,entry.block.us,table.block.us,entry.block.wr,table.block.wr);
+				LOG(LOG_PAGING, LOG_NORMAL)("Page access denied: cpl=%i, %x:%x:%x:%x",
+				    static_cast<int>(cpu.cpl), entry.block.us, table.block.us, entry.block.wr, table.block.wr);
 				paging.cr2=lin_addr;
 				cpu.exception.which=EXCEPTION_PF;
 				cpu.exception.error=0x07;
@@ -734,7 +759,7 @@ void PAGING_LinkPage_ReadOnly(Bitu lin_page,Bitu phys_page) {
 
 #else
 
-static INLINE void InitTLBInt(tlb_entry *bank) {
+static inline void InitTLBInt(tlb_entry *bank) {
  	for (Bitu i=0;i<TLB_SIZE;i++) {
 		bank[i].read=0;
 		bank[i].write=0;
@@ -870,7 +895,7 @@ bool PAGING_Enabled(void) {
 	return paging.enabled;
 }
 
-class PAGING:public Module_base{
+class PAGING final : public Module_base{
 public:
 	PAGING(Section* configuration):Module_base(configuration){
 		/* Setup default Page Directory, force it to update */
@@ -882,10 +907,11 @@ public:
 		}
 		pf_queue.used=0;
 	}
-	~PAGING(){}
 };
 
-static PAGING* test;
-void PAGING_Init(Section * sec) {
-	test = new PAGING(sec);
+static std::unique_ptr<PAGING> paging_instance = nullptr;
+
+void PAGING_Init(Section *sec)
+{
+	paging_instance = std::make_unique<PAGING>(sec);
 }

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,26 +16,16 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
 #ifndef DOSBOX_PROGRAMS_H
 #define DOSBOX_PROGRAMS_H
 
-#ifndef DOSBOX_DOSBOX_H
 #include "dosbox.h"
-#endif
-#ifndef DOSBOX_DOS_INC_H
-#include "dos_inc.h"
-#endif
 
-#ifndef CH_LIST
-#define CH_LIST
 #include <list>
-#endif
-
-#ifndef CH_STRING
-#define CH_STRING
 #include <string>
-#endif
+#include "std_filesystem.h"
+
+#include "dos_inc.h"
 
 class CommandLine {
 public:
@@ -45,13 +35,12 @@ public:
 	const char *GetFileName() { return file_name.c_str(); }
 
 	bool FindExist(char const * const name,bool remove=false);
-	bool FindHex(char const * const name,unsigned int & value,bool remove=false);
 	bool FindInt(char const * const name,int & value,bool remove=false);
 	bool FindString(char const * const name,std::string & value,bool remove=false);
 	bool FindCommand(unsigned int which,std::string & value);
 	bool FindStringBegin(char const * const begin,std::string & value, bool remove=false);
 	bool FindStringRemain(char const * const name,std::string & value);
-	bool FindStringRemainBegin(char const * const name,std::string & value);
+	bool FindStringRemainBegin(char const *const name, std::string &value);
 	bool GetStringRemain(std::string & value);
 	int GetParameterFromList(const char* const params[], std::vector<std::string> & output);
 	void FillVector(std::vector<std::string> & vector);
@@ -92,7 +81,8 @@ public:
 	bool GetEnvNum(Bitu num, std::string &result) const;
 	Bitu GetEnvCount() const;
 	bool SetEnv(const char * entry,const char * new_string);
-	void WriteOut(const char *format, ...);	// printf to DOS stdout
+	virtual void WriteOut(const char *format, const char * arguments);
+	virtual void WriteOut(const char *format, ...);	// printf to DOS stdout
 	void WriteOut_NoParsing(const char *str); // write string to DOS stdout
 	bool SuppressWriteOut(const char *format); // prevent writing to DOS stdout
 	void InjectMissingNewline();

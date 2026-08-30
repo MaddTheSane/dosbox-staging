@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -19,18 +19,15 @@
 #ifndef DOSBOX_BIOS_DISK_H
 #define DOSBOX_BIOS_DISK_H
 
+#include "dosbox.h"
+
 #include <memory>
 #include <stdio.h>
 #include <array>
-#ifndef DOSBOX_MEM_H
-#include "mem.h"
-#endif
-#ifndef DOSBOX_DOS_INC_H
-#include "dos_inc.h"
-#endif
-#ifndef DOSBOX_BIOS_H
+
 #include "bios.h"
-#endif
+#include "dos_inc.h"
+#include "mem.h"
 
 /* The Section handling Bios Disk Access */
 #define BIOS_MAX_DISK 10
@@ -57,7 +54,7 @@ public:
 	Bit8u GetBiosType(void);
 	Bit32u getSectSize(void);
 
-	imageDisk(FILE *imgFile, const char *imgName, Bit32u imgSizeK, bool isHardDisk);
+	imageDisk(FILE *img_file, const char *img_name, uint32_t img_size_k, bool is_hdd);
 	imageDisk(const imageDisk&) = delete; // prevent copy
 	imageDisk& operator=(const imageDisk&) = delete; // prevent assignment
 

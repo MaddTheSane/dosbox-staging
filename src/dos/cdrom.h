@@ -1,5 +1,8 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2019-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,9 +19,10 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#ifndef DOSBOX_CDROM_H
+#define DOSBOX_CDROM_H
 
-#ifndef __CDROM_INTERFACE__
-#define __CDROM_INTERFACE__
+#include "dosbox.h"
 
 #include <cstring>
 #include <fstream>
@@ -29,10 +33,9 @@
 #include <string>
 #include <vector>
 
-#include <SDL.h>
-#include <SDL_thread.h>
+#include "SDL.h"
+#include "SDL_thread.h"
 
-#include "dosbox.h"
 #include "support.h"
 #include "mem.h"
 #include "mixer.h"
@@ -107,11 +110,12 @@ public:
 	virtual bool StopAudio          (void) = 0;
 	virtual void ChannelControl     (TCtrl ctrl) = 0;
 	virtual bool ReadSectors        (PhysPt buffer, const bool raw, const uint32_t sector, const uint16_t num) = 0;
+	virtual bool ReadSectorsHost    (void* buffer, bool raw, unsigned long sector, unsigned long num) = 0;
 	virtual bool LoadUnloadMedia    (bool unload) = 0;
 	virtual void InitNewMedia       (void) {}
 };
 
-class CDROM_Interface_Fake : public CDROM_Interface
+class CDROM_Interface_Fake final : public CDROM_Interface
 {
 public:
 	bool SetDevice          (char *) { return true; }
@@ -125,13 +129,14 @@ public:
 	bool PauseAudio         (bool /*resume*/) { return true; }
 	bool StopAudio          (void) { return true; }
 
-	void ChannelControl(MAYBE_UNUSED TCtrl ctrl) {}
+	void ChannelControl([[maybe_unused]] TCtrl ctrl) {}
 
 	bool ReadSectors        (PhysPt /*buffer*/, const bool /*raw*/, const uint32_t /*sector*/, const uint16_t /*num*/) { return true; }
+	bool ReadSectorsHost    ([[maybe_unused]] void* buffer, [[maybe_unused]] bool raw, [[maybe_unused]] unsigned long sector, [[maybe_unused]] unsigned long num) { return true; }
 	bool LoadUnloadMedia    (bool /*unload*/) { return true; }
 };
 
-class CDROM_Interface_Image : public CDROM_Interface
+class CDROM_Interface_Image final : public CDROM_Interface
 {
 private:
 	// Nested Class Definitions
@@ -159,7 +164,7 @@ private:
 		const Bit16u chunkSize = 0;
 	};
 
-	class BinaryFile : public TrackFile {
+	class BinaryFile final : public TrackFile {
 	public:
 		BinaryFile      (const char *filename, bool &error);
 		~BinaryFile     ();
@@ -183,7 +188,7 @@ private:
 		std::ifstream   *file;
 	};
 
-	class AudioFile : public TrackFile {
+	class AudioFile final : public TrackFile {
 	public:
 		AudioFile       (const char *filename, bool &error);
 		~AudioFile      ();
@@ -203,7 +208,7 @@ private:
 		int             getLength();
 		// This is a no-op because we track the audio position in all
 		// areas of this class.
-		void setAudioPosition(uint32_t pos) {}
+		void setAudioPosition([[maybe_unused]] uint32_t pos) {}
 	private:
 		Sound_Sample *sample = nullptr;
 	};
@@ -220,7 +225,9 @@ public:
 		uint8_t                    attr       = 0;
 		bool                       mode2      = false;
 	};
-	CDROM_Interface_Image           (Bit8u _subUnit);
+
+	CDROM_Interface_Image(uint8_t sub_unit);
+
 	virtual ~CDROM_Interface_Image  (void);
 	void	InitNewMedia            (void) {}
 	bool	SetDevice               (char *path);
@@ -230,11 +237,12 @@ public:
 	bool	GetAudioSub             (unsigned char& attr, unsigned char& track, unsigned char& index, TMSF& relPos, TMSF& absPos);
 	bool	GetAudioStatus          (bool& playing, bool& pause);
 	bool	GetMediaTrayStatus      (bool& mediaPresent, bool& mediaChanged, bool& trayOpen);
-	bool	PlayAudioSector         (const uint32_t start, uint32_t len);
+	bool PlayAudioSector(uint32_t start, uint32_t len);
 	bool	PauseAudio              (bool resume);
 	bool	StopAudio               (void);
 	void	ChannelControl          (TCtrl ctrl);
 	bool	ReadSectors             (PhysPt buffer, const bool raw, const uint32_t sector, const uint16_t num);
+	bool	ReadSectorsHost			(void* buffer, bool raw, unsigned long sector, unsigned long num);
 	bool	LoadUnloadMedia         (bool unload);
 	bool	ReadSector              (uint8_t *buffer, const bool raw, const uint32_t sector);
 	bool	HasDataTrack            (void);
@@ -243,12 +251,10 @@ public:
 private:
 	static struct imagePlayer {
 		// Objects, pointers, and then scalars; in descending size-order.
-		MixerObject              mixerChannel       = {};
-		std::weak_ptr<TrackFile> trackFile          = {};
-		SDL_mutex                *mutex             = nullptr;
-		MixerChannel             *channel           = nullptr;
+		std::weak_ptr<TrackFile> trackFile = {};
+		mixer_channel_t channel = nullptr;
 		CDROM_Interface_Image    *cd                = nullptr;
-		void (MixerChannel::*addFrames) (Bitu, const Bit16s*) = nullptr;
+		void (MixerChannel::*addFrames)(uint16_t, const int16_t *) = nullptr;
 		uint32_t                 playedTrackFrames  = 0;
 		uint32_t                 totalTrackFrames   = 0;
 		uint32_t                 startSector        = 0;
@@ -264,7 +270,7 @@ private:
 	                 const uint16_t sectorSize,
 	                 const bool mode2);
 	std::vector<Track>::iterator GetTrack(const uint32_t sector);
-	static void CDAudioCallBack (Bitu desired_frames);
+	void CDAudioCallBack(uint16_t desired_frames);
 
 	// Private functions for cue sheet processing
 	bool  LoadCueSheet(char *cuefile);
@@ -282,7 +288,6 @@ private:
 	std::vector<uint8_t> readBuffer;
 	std::string          mcn;
 	static int           refCount;
-	uint8_t              subUnit;
 };
 
-#endif /* __CDROM_INTERFACE__ */
+#endif

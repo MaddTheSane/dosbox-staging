@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -17,9 +17,9 @@
  */
 
 {
-	EAPoint seg_base;
-	Bit16u off;
-	switch ((inst.rm_mod<<3)|inst.rm_eai) {
+	EAPoint seg_base = 0;
+	Bit16u off = 0;
+	switch ((inst.rm_mod << 3) | inst.rm_eai) {
 	case 0x00:
 		off=reg_bx+reg_si;
 		seg_base=SegBase(ds);
@@ -145,8 +145,8 @@
 };																	
 	static Bit32u SIBZero=0;
 	static Bit32u * SIBIndex[8]= { &reg_eax,&reg_ecx,&reg_edx,&reg_ebx,&SIBZero,&reg_ebp,&reg_esi,&reg_edi };
-	EAPoint seg_base;
-	Bit32u off;
+	EAPoint seg_base = 0;
+	Bit32u off = 0;
 	switch ((inst.rm_mod<<3)|inst.rm_eai) {
 	case 0x00:
 		off=reg_eax;

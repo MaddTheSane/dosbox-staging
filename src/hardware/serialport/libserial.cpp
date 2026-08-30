@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,7 +16,6 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
 #include "libserial.h"
 
 #include "config.h"
@@ -25,6 +24,8 @@
 
 #include <windows.h>
 #include <stdio.h>
+
+#include "string_utils.h"
 
 struct _COMPORT {
 	HANDLE porthandle;
@@ -154,11 +155,11 @@ void SERIAL_getErrorString(char* buffer, size_t length) {
 	
 	// Go for length > so there will be bytes left afterwards.
 	// (which are 0 due to memset, thus the buffer is 0 terminated
-	if ( length > (sysmsg_offset + strlen((const char*)sysmessagebuffer)) ) {
+	if (length > (sysmsg_offset + strlen((const char *)sysmessagebuffer))) {
 		memcpy(buffer + sysmsg_offset, sysmessagebuffer,
-		       strlen((const char*)sysmessagebuffer));
+		       strlen((const char *)sysmessagebuffer));
 	}
-		
+
 	LocalFree(sysmessagebuffer);
 }
 
@@ -259,7 +260,7 @@ bool SERIAL_setCommParameters(COMPORT port,
 
 #if defined (LINUX) || defined (MACOSX) || defined (BSD)
 
-#include <string.h> // strlen
+#include <string.h> // safe_strlen
 #include <stdlib.h>
 
 #include <termios.h>
@@ -476,5 +477,5 @@ void SERIAL_setRTS(COMPORT port, bool value) {
 	long flag = TIOCM_RTS;
 	ioctl(port->porthandle, value?TIOCMBIS:TIOCMBIC, &flag);
 }
-#endif
 
+#endif

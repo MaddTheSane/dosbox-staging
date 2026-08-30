@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -22,7 +22,8 @@
 #include "dosbox.h"
 
 #include <cassert>
-#include <list>
+#include <deque>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -30,35 +31,31 @@
 #include "setup.h"
 
 enum class Verbosity : int8_t {
-	//             Show Splash | Show Welcome | Show Early Stdout |
-	High = 3,   //     yes     |     yes      |       yes         |
-	Medium = 2, //     no      |     yes      |       yes         |
-	Low = 1,    //     no      |     no       |       yes         |
-	Quiet = 0   //     no      |     no       |       no          |
+	//                     Splash | Welcome | Early Stdout |
+	Quiet = 0,         //   no    |   no    |    no        |
+	SplashOnly = 1,    //   yes   |   no    |    no        |
+	InstantLaunch = 2, //   no    |   no    |    yes       |
+	Low = 3,           //   no    |   no    |    yes       |
+	Medium = 4,        //   no    |   yes   |    yes       |
+	High = 5,          //   yes   |   yes   |    yes       |
 };
 
 class Config {
 public:
-	CommandLine * cmdline;
+	CommandLine * cmdline = nullptr;
 private:
-	std::list<Section*> sectionlist;
-	typedef std::list<Section*>::iterator it;
-	typedef std::list<Section*>::reverse_iterator reverse_it;
-	typedef std::list<Section*>::const_iterator const_it;
-	typedef std::list<Section*>::const_reverse_iterator const_reverse_it;
-	void (* _start_function)(void);
-	bool secure_mode; //Sandbox mode
+	std::deque<Section*> sectionlist = {};
+	Section_line overwritten_autoexec_section;
+	std::string overwritten_autoexec_conf = {};
+	void (*_start_function)(void) = nullptr;
+	bool secure_mode = false; // Sandbox mode
 public:
-	std::vector<std::string> startup_params;
-	std::vector<std::string> configfiles;
+	std::vector<std::string> startup_params = {};
+	std::vector<std::string> configfiles = {};
 
 	Config(CommandLine *cmd)
-		: cmdline(cmd),
-		  sectionlist{},
-		  _start_function(nullptr),
-		  secure_mode(false),
-		  startup_params{},
-		  configfiles{}
+	        : cmdline(cmd),
+	          overwritten_autoexec_section("overwritten-autoexec")
 	{
 		assert(cmdline);
 		startup_params.push_back(cmdline->GetFileName());
@@ -70,20 +67,34 @@ public:
 
 	~Config();
 
-	Section_line * AddSection_line(char const * const _name,void (*_initfunction)(Section*));
-	Section_prop * AddSection_prop(char const * const _name,void (*_initfunction)(Section*),bool canchange=false);
-	
-	Section* GetSection(int index);
-	Section* GetSection(std::string const&_sectionname) const;
-	Section* GetSectionFromProperty(char const * const prop) const;
+	Section_prop *AddEarlySectionProp(const char *name,
+	                                  SectionFunction func,
+	                                  bool changeable_at_runtime = false);
+
+	Section_line *AddSection_line(const char *section_name, SectionFunction func);
+
+	Section_prop *AddSection_prop(const char *section_name,
+	                              SectionFunction func,
+	                              bool changeable_at_runtime = false);
+
+	auto begin() { return sectionlist.begin(); }
+	auto end() { return sectionlist.end(); }
+
+	Section *GetSection(const std::string &section_name) const;
+	Section *GetSectionFromProperty(const char *prop) const;
+
+	void OverwriteAutoexec(const std::string &conf, const std::string &line);
+	const Section_line &GetOverwrittenAutoexecSection() const;
+	const std::string &GetOverwrittenAutoexecConf() const;
 
 	void SetStartUp(void (*_function)(void));
-	void Init();
+	void Init() const;
 	void ShutDown();
 	void StartUp();
 	bool PrintConfig(const std::string &filename) const;
-	bool ParseConfigFile(char const * const configfilename);
-	void ParseEnv(char ** envp);
+	bool ParseConfigFile(const std::string &type,
+	                     const std::string &configfilename);
+	void ParseEnv();
 	bool SecureMode() const { return secure_mode; }
 	void SwitchToSecureMode() { secure_mode = true; }//can't be undone
 	Verbosity GetStartupVerbosity() const;

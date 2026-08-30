@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,16 +16,14 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
 #ifndef DOSBOX_SERIALPORT_H
 #define DOSBOX_SERIALPORT_H
+
+#include "dosbox.h"
 
 #include <algorithm>
 #include <vector>
 
-#ifndef DOSBOX_DOSBOX_H
-#include "dosbox.h"
-#endif
 #ifndef DOSBOX_INOUT_H
 #include "inout.h"
 #endif
@@ -51,7 +49,7 @@
 #endif
 
 // Serial port interface
-
+#define SERIAL_IO_HANDLERS 8
 #define SERIAL_MAX_FIFO_SIZE 256
 /* Note: Almost all DOS-era universal asynchronous receiver-transmitter
  *       (UART)'s permitted up to a 16-byte receive and transmit
@@ -145,13 +143,22 @@ private:
 	size_t used = 0;
 };
 
+enum SERIAL_PORT_TYPE { // Also change src/dos/program_serial.cpp
+	DISABLED = 0,
+	DUMMY,
+	DIRECT_SERIAL,
+	MODEM,
+	NULL_MODEM,
+	INVALID,
+};
+
 class CSerial {
 public:
 	CSerial(const CSerial &) = delete;            // prevent copying
 	CSerial &operator=(const CSerial &) = delete; // prevent assignment
 
 #if SERIAL_DEBUG
-	FILE * debugfp;
+	FILE * debugfp = nullptr;
 	bool dbg_modemcontrol = false; // RTS,CTS,DTR,DSR,RI,CD
 	bool dbg_serialtraffic = false;
 	bool dbg_register = false;
@@ -175,8 +182,8 @@ public:
 	CSerial(const uint8_t port_idx, CommandLine *cmd);
 	virtual ~CSerial();
 
-	IO_ReadHandleObject ReadHandler[8];
-	IO_WriteHandleObject WriteHandler[8];
+	IO_ReadHandleObject ReadHandler[SERIAL_IO_HANDLERS];
+	IO_WriteHandleObject WriteHandler[SERIAL_IO_HANDLERS];
 
 	float bytetime = 0.0f; // how long a byte takes to transmit/receive in
 	                       // milliseconds
@@ -281,6 +288,12 @@ public:
 	bool Putchar(uint8_t data, bool wait_dtr, bool wait_rts, uint32_t timeout);
 	bool Getchar(uint8_t *data, uint8_t *lsr, bool wait_dsr, uint32_t timeout);
 	uint8_t GetPortNumber() const { return port_index + 1; }
+
+	// What type of port is this?
+	SERIAL_PORT_TYPE serialType = SERIAL_PORT_TYPE::DISABLED;
+
+	// How was it created?
+	std::string commandLineString = "";
 
 private:
 	DOS_Device *mydosdevice = nullptr;
@@ -465,7 +478,7 @@ const char *const serial_comname[] = {"COM1", "COM2", "COM3", "COM4"};
 
 // the COM devices
 
-class device_COM : public DOS_Device {
+class device_COM final : public DOS_Device {
 public:
 	device_COM(const device_COM &) = delete;            // prevent copying
 	device_COM &operator=(const device_COM &) = delete; // prevent assignment

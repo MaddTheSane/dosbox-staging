@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -19,20 +19,31 @@
 #include "shell.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
+#include <regex>
 
 #include "regs.h"
 #include "callback.h"
-#include "support.h"
+#include "string_utils.h"
+
+DOS_Shell::~DOS_Shell() {
+	bf.reset();
+}
+
+//--Added 2010-01-21 by Alun Bestor to let Boxer hook into DOSBox internals
+#include "BXCoalface.h"
+//--End of modifications
 
 void DOS_Shell::ShowPrompt(void) {
 	Bit8u drive=DOS_GetDefaultDrive()+'A';
 	char dir[DOS_PATHLENGTH];
-	dir[0] = 0; //DOS_GetCurrentDir doesn't always return something. (if drive is messed up)
-	DOS_GetCurrentDir(0,dir);
+	reset_str(dir); // DOS_GetCurrentDir doesn't always return
+	                // something. (if drive is messed up)
+	DOS_GetCurrentDir(0, dir);
 	InjectMissingNewline();
 	WriteOut("%c:\\%s>", drive, dir);
 	ResetLastWrittenChar('\n'); // prevents excessive newline if cmd prints nothing
@@ -46,33 +57,67 @@ static void outc(Bit8u c) {
 void DOS_Shell::InputCommand(char * line) {
 	Bitu size=CMD_MAXLINE-2; //lastcharacter+0
 	Bit8u c;Bit16u n=1;
-	Bitu str_len=0;Bitu str_index=0;
+	size_t str_len = 0;
+	size_t str_index = 0;
 	Bit16u len=0;
 	bool current_hist=false; // current command stored in history?
 
-	line[0] = '\0';
+	reset_str(line);
 
 	std::list<std::string>::iterator it_history = l_history.begin(), it_completion = l_completion.begin();
 
-	while (size) {
+	while (size && !shutdown_requested) {
 		dos.echo=false;
-		while(!DOS_ReadFile(input_handle,&c,&n)) {
+		
+		//--Modified 2012-08-19 by Alun Bestor to let Boxer inject its own input
+        //and cancel keyboard input listening.
+        boxer_shellWillReadCommandInputFromHandle(this, input_handle);
+		while(boxer_continueListeningForKeyEvents() && !DOS_ReadFile(input_handle,&c,&n)) {
 			Bit16u dummy;
 			DOS_CloseFile(input_handle);
 			DOS_OpenFile("con",2,&dummy);
 			LOG(LOG_MISC,LOG_ERROR)("Reopening the input handle. This is a bug!");
 		}
+        boxer_shellDidReadCommandInputFromHandle(this, input_handle);
+		
+        if (!boxer_shellShouldContinue(this))
+        {
+            return;
+        }
+
+		bool executeImmediately = false;
+		if (boxer_handleShellCommandInput(this, line, &str_index, &executeImmediately))
+		{
+			if (executeImmediately)
+			{
+				size = 0;
+				break;
+			}
+			else
+			{
+				//Correct the visible cursor position and the cached lengths
+				str_len = strlen(line);
+				size = CMD_MAXLINE - str_len - 2;
+				int cursorOffset = str_len - str_index;
+				while (cursorOffset > 0) {
+					outc(8); cursorOffset--;
+				}
+				continue;
+			}
+		}
+		//--End of modifications
+		
 		if (!n) {
 			size=0;			//Kill the while loop
 			continue;
 		}
 		switch (c) {
-		case 0x00:				/* Extended Keys */
+		case 0x00: /* Extended Keys */
 			{
 				DOS_ReadFile(input_handle,&c,&n);
 				switch (c) {
 
-				case 0x3d:		/* F3 */
+				case 0x3d: /* F3 */
 					if (!l_history.size()) break;
 					it_history = l_history.begin();
 					if (it_history != l_history.end() && it_history->length() > str_len) {
@@ -81,39 +126,39 @@ void DOS_Shell::InputCommand(char * line) {
 							line[str_index ++] = c;
 							DOS_WriteFile(STDOUT,&c,&n);
 						}
-						str_len = str_index = (Bitu)it_history->length();
+						str_len = str_index = it_history->length();
 						size = CMD_MAXLINE - str_index - 2;
-						line[str_len] = 0;
+						terminate_str_at(line, str_len);
 					}
 					break;
 
-				case 0x4B:	/* LEFT */
+				case 0x4B: /* Left */
 					if (str_index) {
 						outc(8);
 						str_index --;
 					}
 					break;
 
-				case 0x4D:	/* RIGHT */
+				case 0x4D: /* Right */
 					if (str_index < str_len) {
 						outc(line[str_index++]);
 					}
 					break;
 
-				case 0x47:	/* HOME */
+				case 0x47: /* Home */
 					while (str_index) {
 						outc(8);
 						str_index--;
 					}
 					break;
 
-				case 0x4F:	/* END */
+				case 0x4F: /* End */
 					while (str_index < str_len) {
 						outc(line[str_index++]);
 					}
 					break;
 
-				case 0x48:	/* UP */
+				case 0x48: /* Up */
 					if (l_history.empty() || it_history == l_history.end()) break;
 
 					// store current command in history if we are at beginning
@@ -131,57 +176,63 @@ void DOS_Shell::InputCommand(char * line) {
 					str_len = str_index = len;
 					size = CMD_MAXLINE - str_index - 2;
 					DOS_WriteFile(STDOUT, (Bit8u *)line, &len);
-					it_history ++;
+					++it_history;
 					break;
 
-				case 0x50:	/* DOWN */
+				case 0x50: /* Down */
 					if (l_history.empty() || it_history == l_history.begin()) break;
 
 					// not very nice but works ..
-					it_history --;
+					--it_history;
 					if (it_history == l_history.begin()) {
 						// no previous commands in history
-						it_history ++;
+						++it_history;
 
 						// remove current command from history
 						if (current_hist) {
-							current_hist=false;
+							current_hist = false;
 							l_history.pop_front();
 						}
 						break;
-					} else it_history --;
+					} else {
+						--it_history;
+					}
 
-					for (;str_index>0; str_index--) {
+					for (; str_index > 0; str_index--) {
 						// removes all characters
-						outc(8); outc(' '); outc(8);
+						outc(8);
+						outc(' ');
+						outc(8);
 					}
 					strcpy(line, it_history->c_str());
 					len = (Bit16u)it_history->length();
 					str_len = str_index = len;
 					size = CMD_MAXLINE - str_index - 2;
 					DOS_WriteFile(STDOUT, (Bit8u *)line, &len);
-					it_history ++;
+					++it_history;
 
 					break;
-				case 0x53:/* DELETE */
+				case 0x53: /* Delete */
 					{
 						if(str_index>=str_len) break;
-						Bit16u a=str_len-str_index-1;
+						auto text_len = static_cast<uint16_t>(str_len - str_index - 1);
 						Bit8u* text=reinterpret_cast<Bit8u*>(&line[str_index+1]);
-						DOS_WriteFile(STDOUT,text,&a);//write buffer to screen
+						DOS_WriteFile(STDOUT, text, &text_len); // write buffer to screen
 						outc(' ');outc(8);
-						for(Bitu i=str_index;i<str_len-1;i++) {
+						for (auto i = str_index; i < str_len-1; i++) {
 							line[i]=line[i+1];
 							outc(8);
 						}
-						line[--str_len]=0;
+						terminate_str_at(line, --str_len);
 						size++;
 					}
 					break;
-				case 15:		/* Shift-Tab */
+				case 15: /* Shift+Tab */
 					if (l_completion.size()) {
-						if (it_completion == l_completion.begin()) it_completion = l_completion.end (); 
-						it_completion--;
+						if (it_completion == l_completion.begin()) {
+							it_completion = l_completion.end ();
+						}
+						--it_completion;
 		
 						if (it_completion->length()) {
 							for (;str_index > completion_index; str_index--) {
@@ -196,25 +247,24 @@ void DOS_Shell::InputCommand(char * line) {
 							DOS_WriteFile(STDOUT, (Bit8u *)it_completion->c_str(), &len);
 						}
 					}
-				default:
-					break;
+				default: break;
 				}
 			};
 			break;
-		case 0x08:				/* BackSpace */
+		case 0x08: /* Backspace */
 			if (str_index) {
 				outc(8);
-				Bit32u str_remain=str_len - str_index;
+				size_t str_remain = str_len - str_index;
 				size++;
 				if (str_remain) {
 					memmove(&line[str_index-1],&line[str_index],str_remain);
-					line[--str_len]=0;
+					terminate_str_at(line, --str_len);
 					str_index --;
 					/* Go back to redraw */
-					for (Bit16u i=str_index; i < str_len; i++)
+					for (size_t i = str_index; i < str_len; i++)
 						outc(line[i]);
 				} else {
-					line[--str_index] = '\0';
+					terminate_str_at(line, --str_index);
 					str_len--;
 				}
 				outc(' ');	outc(8);
@@ -223,10 +273,10 @@ void DOS_Shell::InputCommand(char * line) {
 			}
 			if (l_completion.size()) l_completion.clear();
 			break;
-		case 0x0a:				/* New Line not handled */
+		case 0x0a: /* New Line not handled */
 			/* Don't care */
 			break;
-		case 0x0d:				/* Return */
+		case 0x0d: /* Return */
 			outc('\r');
 			outc('\n');
 			size=0;			//Kill the while loop
@@ -234,11 +284,13 @@ void DOS_Shell::InputCommand(char * line) {
 		case'\t':
 			{
 				if (l_completion.size()) {
-					it_completion ++;
-					if (it_completion == l_completion.end()) it_completion = l_completion.begin();
+					++it_completion;
+					if (it_completion == l_completion.end())
+						it_completion = l_completion.begin();
 				} else {
 					// build new completion list
-					// Lines starting with CD will only get directories in the list
+					// Lines starting with CD will only get
+					// directories in the list
 					bool dir_only = (strncasecmp(line,"CD ",3)==0);
 
 					// get completion mask
@@ -263,7 +315,7 @@ void DOS_Shell::InputCommand(char * line) {
 							//Beep;
 							break;
 						}
-						safe_strncpy(mask, p_completion_start,DOS_PATHLENGTH);
+						safe_strcpy(mask, p_completion_start);
 						char* dot_pos=strrchr(mask,'.');
 						char* bs_pos=strrchr(mask,'\\');
 						char* fs_pos=strrchr(mask,'/');
@@ -327,12 +379,12 @@ void DOS_Shell::InputCommand(char * line) {
 				}
 			}
 			break;
-		case 0x1b:   /* ESC */
+		case 0x1b: /* Esc */
 			//write a backslash and return to the next line
 			outc('\\');
 			outc('\r');
 			outc('\n');
-			*line = 0;      // reset the line.
+			reset_str(line);
 			if (l_completion.size()) l_completion.clear(); //reset the completion list.
 			this->InputCommand(line);	//Get the NEW line.
 			size = 0;       // stop the next loop
@@ -342,22 +394,24 @@ void DOS_Shell::InputCommand(char * line) {
 			if (l_completion.size()) l_completion.clear();
 			if(str_index < str_len && true) { //mem_readb(BIOS_KEYBOARD_FLAGS1)&0x80) dev_con.h ?
 				outc(' ');//move cursor one to the right.
-				Bit16u a = str_len - str_index;
+				auto text_len = static_cast<uint16_t>(str_len - str_index);
 				Bit8u* text=reinterpret_cast<Bit8u*>(&line[str_index]);
-				DOS_WriteFile(STDOUT,text,&a);//write buffer to screen
+				DOS_WriteFile(STDOUT, text, &text_len); // write buffer to screen
 				outc(8);//undo the cursor the right.
-				for(Bitu i=str_len;i>str_index;i--) {
+				for (auto i = str_len; i > str_index; i--) {
 					line[i]=line[i-1]; //move internal buffer
 					outc(8); //move cursor back (from write buffer to screen)
 				}
-				line[++str_len]=0;//new end (as the internal buffer moved one place to the right
+				// new end (as the internal buffer moved one
+				// place to the right
+				terminate_str_at(line, ++str_len);
 				size--;
 			};
-		   
+
 			line[str_index]=c;
 			str_index ++;
 			if (str_index > str_len){ 
-				line[str_index] = '\0';
+				terminate_str_at(line, str_index);
 				str_len++;
 				size--;
 			}
@@ -378,6 +432,47 @@ void DOS_Shell::InputCommand(char * line) {
 	// add command line to history
 	l_history.push_front(line); it_history = l_history.begin();
 	if (l_completion.size()) l_completion.clear();
+
+	/* DOS %variable% substitution */
+	ProcessCmdLineEnvVarStitution(line);
+}
+
+/* Note: Buffer pointed to by "line" must be at least CMD_MAXLINE+1 bytes long! */
+void DOS_Shell::ProcessCmdLineEnvVarStitution(char* line) {
+	constexpr char surrogate_percent = 8;
+	const static std::regex re("\\%([^%0-9][^%]*)?%");
+	std::string text = line;
+	std::smatch match;
+	/* Iterate over potential %var1%, %var2%, etc matches found in the text string */
+	while (std::regex_search(text, match, re)) {
+		// Get the first matching %'s position and length
+		const auto percent_pos = static_cast<size_t>(match.position(0));
+		const auto percent_len = static_cast<size_t>(match.length(0));
+
+		std::string variable_name = match[1].str();
+		if (variable_name.empty()) {
+			/* Replace %% with the character "surrogate_percent", then (eventually) % */
+			text.replace(percent_pos, percent_len,
+			             std::string(1, surrogate_percent));
+			continue;
+		}
+		/* Trim preceding spaces from the variable name */
+		variable_name.erase(0, variable_name.find_first_not_of(' '));
+		std::string variable_value;
+		if (variable_name.size() && GetEnvStr(variable_name.c_str(), variable_value)) {
+			const size_t equal_pos = variable_value.find_first_of('=');
+			/* Replace the original %var% with its corresponding value from the environment */
+			const std::string replacement = equal_pos != std::string::npos
+			                ? variable_value.substr(equal_pos + 1) : "";
+			text.replace(percent_pos, percent_len, replacement);
+		}
+		else {
+			text.replace(percent_pos, percent_len, "");
+		}
+	}
+	std::replace(text.begin(), text.end(), surrogate_percent, '%');
+	assert(text.size() <= CMD_MAXLINE);
+	safe_strncpy(line, text.c_str(), CMD_MAXLINE);
 }
 
 std::string full_arguments = "";
@@ -386,19 +481,19 @@ bool DOS_Shell::Execute(char * name,char * args) {
  * return false =>       check for hardware changes in do_command */
 	char fullname[DOS_PATHLENGTH+4]; //stores results from Which
 	char line[CMD_MAXLINE];
-	if(strlen(args)!= 0){
-		if(*args != ' '){ //put a space in front
-			line[0]=' ';line[1]=0;
-			strncat(line,args,CMD_MAXLINE-2);
-			line[CMD_MAXLINE-1]=0;
+	const bool have_args = args && args[0] != '\0';
+	if (have_args) {
+		if (*args != ' ') { // put a space in front
+			line[0] = ' ';
+			terminate_str_at(line, 1);
+			strncat(line, args, CMD_MAXLINE - 2);
+			terminate_str_at(line, CMD_MAXLINE - 1);
+		} else {
+			safe_strcpy(line, args);
 		}
-		else
-		{
-			safe_strncpy(line,args,CMD_MAXLINE);
-		}
-	}else{
-		line[0]=0;
-	};
+	} else {
+		reset_str(line);
+	}
 
 	/* check for a drive change */
 	if (((strcmp(name + 1, ":") == 0) || (strcmp(name + 1, ":\\") == 0)) && isalpha(*name))
@@ -423,13 +518,16 @@ bool DOS_Shell::Execute(char * name,char * args) {
 	const char *extension = strrchr(fullname, '.');
 	if (!extension) {
 		// Check if the result will fit in the parameters.
-		if (strlen(fullname) > (DOS_PATHLENGTH - 1))
+		if (safe_strlen(fullname) > (DOS_PATHLENGTH - 1)) {
+			WriteOut(MSG_Get("PROGRAM_PATH_TOO_LONG"), fullname,
+			         DOS_PATHLENGTH);
 			return false;
+		}
 
 		// Try to add .COM, .EXE and .BAT extensions to the filename
 		char temp_name[DOS_PATHLENGTH + 4];
 		for (const char *ext : {".COM", ".EXE", ".BAT"}) {
-			snprintf(temp_name, sizeof(temp_name), "%s%s", fullname, ext);
+			safe_sprintf(temp_name, "%s%s", fullname, ext);
 			const char *temp_fullname = Which(temp_name);
 			if (temp_fullname) {
 				extension = ext;
@@ -442,20 +540,35 @@ bool DOS_Shell::Execute(char * name,char * args) {
 			return false;
 	}
 
-	if (strcasecmp(extension, ".bat") == 0) 
+	//--Added 2010-01-21 by Alun Bestor to let Boxer track the executed program
+	char canonicalPath[DOS_PATHLENGTH+4];
+	DOS_Canonicalize(fullname, canonicalPath);
+	//--End of modifications
+	if (strcasecmp(extension, ".bat") == 0)
 	{	/* Run the .bat file */
 		/* delete old batch file if call is not active*/
 		bool temp_echo=echo; /*keep the current echostate (as delete bf might change it )*/
-		if(bf && !call) delete bf;
-		bf=new BatchFile(this,fullname,name,line);
-		echo=temp_echo; //restore it.
-	} 
+		if (bf && !call)
+			bf.reset();
+
+		//--Added 2010-01-21 by Alun Bestor to let Boxer track the launched batch file
+		boxer_shellWillBeginBatchFile(this, canonicalPath, args);
+		
+		bf = std::make_shared<BatchFile>(this, fullname, name, line);
+		echo = temp_echo; // restore it.
+
+		//--Note: boxer_didEndBatchFile will be called once the batch file completes much later, in the batch file's own destructor.
+		//--End of modifications
+	}
 	else 
 	{	/* only .bat .exe .com extensions maybe be executed by the shell */
 		if(strcasecmp(extension, ".com") !=0) 
 		{
 			if(strcasecmp(extension, ".exe") !=0) return false;
 		}
+		//--Added 2010-01-21 by Alun Bestor to let Boxer track the executed program
+		boxer_shellWillExecuteFileAtDOSPath(this, canonicalPath, args);
+		//--End of modifications
 		/* Run the .exe or .com file from the shell */
 		/* Allocate some stack space for tables in physical memory */
 		reg_sp-=0x200;
@@ -464,19 +577,24 @@ bool DOS_Shell::Execute(char * name,char * args) {
 		block.Clear();
 		//Add a filename
 		RealPt file_name=RealMakeSeg(ss,reg_sp+0x20);
-		MEM_BlockWrite(Real2Phys(file_name),fullname,(Bitu)(strlen(fullname)+1));
+		MEM_BlockWrite(Real2Phys(file_name), fullname,
+		               (Bitu)(safe_strlen(fullname) + 1));
 
 		/* HACK: Store full commandline for mount and imgmount */
 		full_arguments.assign(line);
 
 		/* Fill the command line */
-		CommandTail cmdtail;
-		cmdtail.count = 0;
-		memset(&cmdtail.buffer,0,127); //Else some part of the string is unitialized (valgrind)
-		if (strlen(line)>126) line[126]=0;
-		cmdtail.count=(Bit8u)strlen(line);
-		memcpy(cmdtail.buffer,line,strlen(line));
-		cmdtail.buffer[strlen(line)]=0xd;
+		CommandTail cmdtail = {};
+
+		// copy at-most 126 chracters plus the terminating zero
+		safe_strcpy(cmdtail.buffer, line);
+
+		cmdtail.count = check_cast<uint8_t>(safe_strlen(cmdtail.buffer));
+		terminate_str_at(line, cmdtail.count);
+
+		assert(cmdtail.count < sizeof(cmdtail.buffer));
+		cmdtail.buffer[cmdtail.count] = 0xd;
+
 		/* Copy command line in stack block too */
 		MEM_BlockWrite(SegPhys(ss)+reg_sp+0x100,&cmdtail,128);
 
@@ -487,22 +605,29 @@ bool DOS_Shell::Execute(char * name,char * args) {
 		//Prepare string first
 		char parseline[258] = { 0 };
 		for(char *pl = line,*q = parseline; *pl ;pl++,q++) {
-			if (*pl == '=' || *pl == ';' || *pl ==',' || *pl == '\t' || *pl == ' ') *q = 0; else *q = *pl; //Replace command seperators with 0.
+			if (*pl == '=' || *pl == ';' || *pl ==',' || *pl == '\t' || *pl == ' ') 
+				reset_str(q);
+			else
+				*q = *pl; //Replace command seperators with 0.
 		} //No end of string \0 needed as parseline is larger than line
 
 		for(char* p = parseline; (p-parseline) < 250 ;p++) { //Stay relaxed within boundaries as we have plenty of room
 			if (*p == '/') { //Transform /Hello into H\0ello
-				*p = 0;
+				reset_str(p);
 				p++;
 				while ( *p == 0 && (p-parseline) < 250) p++; //Skip empty fields
 				if ((p-parseline) < 250) { //Found something. Lets get the first letter and break it up
 					p++;
 					memmove(static_cast<void*>(p + 1),static_cast<void*>(p),(250-(p-parseline)));
-					if ((p-parseline) < 250) *p = 0;
+					if ((p - parseline) < 250)
+						reset_str(p);
 				}
 			}
 		}
-		parseline[255] = parseline[256] = parseline[257] = 0; //Just to be safe.
+		// Just to be safe
+		terminate_str_at(parseline, 255);
+		terminate_str_at(parseline, 256);
+		terminate_str_at(parseline, 257);
 
 		/* Parse FCB (first two parameters) and put them into the current DOS_PSP */
 		Bit8u add;
@@ -546,6 +671,10 @@ bool DOS_Shell::Execute(char * name,char * args) {
 		reg_eip=oldeip;
 		SegSet16(cs,oldcs);
 #endif
+		
+        //--Added 2010-01-21 by Alun Bestor to let Boxer track the executed program
+        boxer_shellDidExecuteFileAtDOSPath(this, canonicalPath);
+        //--End of modifications
 	}
 	return true; //Executable started
 }
@@ -566,7 +695,7 @@ const char *DOS_Shell::Which(const char *name) const
 
 	/* try to find .com .exe .bat */
 	for (const char *ext_fmt : {"%s.COM", "%s.EXE", "%s.BAT"}) {
-		snprintf(which_ret, sizeof(which_ret), ext_fmt, name);
+		safe_sprintf(which_ret, ext_fmt, name);
 		if (DOS_FileExists(which_ret))
 			return which_ret;
 	}
@@ -575,7 +704,8 @@ const char *DOS_Shell::Which(const char *name) const
 	char path[DOS_PATHLENGTH];std::string temp;
 	if (!GetEnvStr("PATH",temp)) return 0;
 	const char * pathenv=temp.c_str();
-	if (!pathenv) return 0;
+
+	assert(pathenv);
 	pathenv = strchr(pathenv,'=');
 	if (!pathenv) return 0;
 	pathenv++;
@@ -594,12 +724,13 @@ const char *DOS_Shell::Which(const char *name) const
 			/* If max size. move till next ; and terminate path */
 			while(*pathenv && (*pathenv != ';')) 
 				pathenv++;
-			path[DOS_PATHLENGTH - 1] = 0;
-		} else path[i_path] = 0;
-
+			terminate_str_at(path, DOS_PATHLENGTH - 1);
+		} else {
+			terminate_str_at(path, i_path);
+		}
 
 		/* check entry */
-		if(size_t len = strlen(path)){
+		if (size_t len = safe_strlen(path)) {
 			if(len >= (DOS_PATHLENGTH - 2)) continue;
 
 			if(path[len - 1] != '\\') {
@@ -616,7 +747,7 @@ const char *DOS_Shell::Which(const char *name) const
 				return which_ret;
 
 			for (const char *ext_fmt : {"%s.COM", "%s.EXE", "%s.BAT"}) {
-				snprintf(which_ret, sizeof(which_ret), ext_fmt, path);
+				safe_sprintf(which_ret, ext_fmt, path);
 				if (DOS_FileExists(which_ret))
 					return which_ret;
 			}

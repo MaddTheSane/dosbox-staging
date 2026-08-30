@@ -1,5 +1,8 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -27,12 +30,14 @@
 #include "dos_system.h"
 #include "mem.h"
 
+#define EXT_DEVICE_BIT 0x0200
+
 #ifdef _MSC_VER
 #pragma pack (1)
 #endif
 struct CommandTail{
-  Bit8u count;				/* number of bytes returned */
-  char buffer[127];			 /* the buffer itself */
+	uint8_t count = 0;     /* number of bytes returned */
+	char buffer[127] = {}; /* the buffer itself */
 } GCC_ATTRIBUTE(packed);
 #ifdef _MSC_VER
 #pragma pack ()
@@ -71,10 +76,9 @@ union bootSector {
 enum { MCB_FREE=0x0000,MCB_DOS=0x0008 };
 enum { RETURN_EXIT=0,RETURN_CTRLC=1,RETURN_ABORT=2,RETURN_TSR=3};
 
-#define DOS_FILES 127
-#define DOS_DRIVES 26
+#define DOS_FILES   255
+#define DOS_DRIVES  26
 #define DOS_DEVICES 10
-
 
 // dos swappable area is 0x320 bytes beyond the sysvars table
 // device driver chain is inside sysvars
@@ -111,11 +115,18 @@ void DOS_SetupFiles (void);
 bool DOS_ReadFile(Bit16u handle,Bit8u * data,Bit16u * amount, bool fcb = false);
 bool DOS_WriteFile(Bit16u handle,Bit8u * data,Bit16u * amount,bool fcb = false);
 bool DOS_SeekFile(Bit16u handle,Bit32u * pos,Bit32u type,bool fcb = false);
-bool DOS_CloseFile(Bit16u handle,bool fcb = false);
+bool DOS_CloseFile(Bit16u handle,bool fcb = false,Bit8u * refcnt = NULL);
 bool DOS_FlushFile(Bit16u handle);
 bool DOS_DuplicateEntry(Bit16u entry,Bit16u * newentry);
 bool DOS_ForceDuplicateEntry(Bit16u entry,Bit16u newentry);
 bool DOS_GetFileDate(Bit16u entry, Bit16u* otime, Bit16u* odate);
+bool DOS_SetFileDate(uint16_t entry, uint16_t ntime, uint16_t ndate);
+
+// Date and Time Conversion
+uint16_t DOS_PackTime(uint16_t hour, uint16_t min, uint16_t sec) noexcept;
+uint16_t DOS_PackTime(const struct tm &datetime) noexcept;
+uint16_t DOS_PackDate(uint16_t year, uint16_t mon, uint16_t day) noexcept;
+uint16_t DOS_PackDate(const struct tm &datetime) noexcept;
 
 /* Routines for Drive Class */
 bool DOS_OpenFile(char const * name,Bit8u flags,Bit16u * entry,bool fcb = false);
@@ -147,7 +158,8 @@ bool DOS_SetFileAttr(char const * const name,Bit16u attr);
 bool DOS_IOCTL(void);
 bool DOS_GetSTDINStatus();
 Bit8u DOS_FindDevice(char const * name);
-void DOS_SetupDevices(void);
+void DOS_SetupDevices();
+void DOS_ShutDownDevices();
 
 /* Execute and new process creation */
 bool DOS_NewPSP(Bit16u pspseg,Bit16u size);
@@ -209,19 +221,10 @@ enum {
 };
 
 
-static INLINE Bit16u long2para(Bit32u size) {
+static inline Bit16u long2para(Bit32u size) {
 	if (size>0xFFFF0) return 0xffff;
 	if (size&0xf) return (Bit16u)((size>>4)+1);
 	else return (Bit16u)(size>>4);
-}
-
-
-static INLINE Bit16u DOS_PackTime(Bit16u hour,Bit16u min,Bit16u sec) {
-	return (hour&0x1f)<<11 | (min&0x3f) << 5 | ((sec/2)&0x1f);
-}
-
-static INLINE Bit16u DOS_PackDate(Bit16u year,Bit16u mon,Bit16u day) {
-	return ((year-1980)&0x7f)<<9 | (mon&0x3f) << 5 | (day&0x1f);
 }
 
 /* Dos Error Codes */
@@ -303,7 +306,7 @@ protected:
 
 /* Program Segment Prefix */
 
-class DOS_PSP : public MemStruct {
+class DOS_PSP final : public MemStruct {
 public:
 	DOS_PSP(uint16_t segment) : seg(segment) { SetPt(seg); }
 
@@ -386,7 +389,7 @@ public:
 	static	Bit16u rootpsp;
 };
 
-class DOS_ParamBlock : public MemStruct {
+class DOS_ParamBlock final : public MemStruct {
 public:
 	DOS_ParamBlock(PhysPt addr)
 		: exec{0, 0, 0, 0, 0, 0},
@@ -421,7 +424,7 @@ public:
 	sOverlay overlay;
 };
 
-class DOS_InfoBlock : public MemStruct {
+class DOS_InfoBlock final : public MemStruct {
 public:
 	DOS_InfoBlock() : seg(0) {}
 
@@ -439,7 +442,7 @@ public:
 	void SetUMBChainState(uint8_t state) { SSET_BYTE(sDIB, chainingUMB, state); }
 	uint8_t GetUMBChainState() const { return SGET_BYTE(sDIB, chainingUMB); }
 
-	void SetStartOfUMBChain(uint16_t seg) { SSET_WORD(sDIB, startOfUMBChain, seg); }
+	void SetStartOfUMBChain(uint16_t start_seg) { SSET_WORD(sDIB, startOfUMBChain, start_seg); }
 	uint16_t GetStartOfUMBChain() const { return SGET_WORD(sDIB, startOfUMBChain); }
 
 	void SetDiskBufferHeadPt(uint32_t db) { SSET_DWORD(sDIB, diskBufferHeadPt, db); }
@@ -512,7 +515,7 @@ public:
  * Some documents refer to it also as Data Transfer Address or Disk Transfer Area.
  */
 
-class DOS_DTA : public MemStruct {
+class DOS_DTA final : public MemStruct {
 public:
 	DOS_DTA(RealPt addr) : MemStruct(addr) {}
 
@@ -544,7 +547,7 @@ private:
 	struct sDTA {
 		Bit8u sdrive;						/* The Drive the search is taking place */
 		Bit8u sname[8];						/* The Search pattern for the filename */
-		Bit8u sext[3];						/* The Search pattern for the extenstion */
+		Bit8u sext[3];						/* The Search pattern for the extension */
 		Bit8u sattr;						/* The Attributes that need to be found */
 		Bit16u dirID;						/* custom: dir-search ID for multiple searches at the same time */
 		Bit16u dirCluster;					/* custom (drive_fat only): cluster number for multiple searches at the same time */
@@ -562,7 +565,7 @@ private:
 
 /* File Control Block */
 
-class DOS_FCB : public MemStruct {
+class DOS_FCB final : public MemStruct {
 public:
 	DOS_FCB(uint16_t seg, uint16_t off, bool allow_extended = true);
 
@@ -633,7 +636,7 @@ private:
 
 /* Memory Control Block */
 
-class DOS_MCB : public MemStruct {
+class DOS_MCB final : public MemStruct {
 public:
 	DOS_MCB(uint16_t seg) : MemStruct(seg, 0) {}
 
@@ -665,7 +668,7 @@ private:
 	#endif
 };
 
-class DOS_SDA : public MemStruct {
+class DOS_SDA final : public MemStruct {
 public:
 	DOS_SDA(uint16_t seg, uint16_t off) : MemStruct(seg, off) {}
 
@@ -742,11 +745,12 @@ struct DOS_Block {
 		Bit16u dpb; //Fake Disk parameter system using only the first entry so the drive letter matches
 	} tables;
 	Bit16u loaded_codepage;
+	uint16_t dcp;
 };
 
 extern DOS_Block dos;
 
-static INLINE Bit8u RealHandle(Bit16u handle) {
+static inline Bit8u RealHandle(Bit16u handle) {
 	DOS_PSP psp(dos.psp());	
 	return psp.GetFileHandle(handle);
 }

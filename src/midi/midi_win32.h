@@ -1,7 +1,8 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -33,14 +34,17 @@
 
 #include "programs.h"
 
-class MidiHandler_win32: public MidiHandler {
+class MidiHandler_win32 final : public MidiHandler {
 private:
-	HMIDIOUT m_out;
-	MIDIHDR m_hdr;
-	HANDLE m_event;
+	HMIDIOUT m_out = nullptr;
+	MIDIHDR m_hdr = {};
+	HANDLE m_event = nullptr;
 	bool isOpen;
 public:
 	MidiHandler_win32() : MidiHandler(), isOpen(false) {}
+	
+	MidiHandler_win32(const MidiHandler_win32&) = delete;
+	MidiHandler_win32& operator=(const MidiHandler_win32&) = delete;
 
 	const char *GetName() const override { return "win32"; }
 
@@ -86,7 +90,10 @@ public:
 	void Close() override
 	{
 		if (!isOpen) return;
-		isOpen=false;
+
+		HaltSequence();
+
+		isOpen = false;
 		midiOutClose(m_out);
 		CloseHandle (m_event);
 	}
@@ -119,14 +126,15 @@ public:
 		}
 	}
 
-	void ListAll(Program *base) override
+	MIDI_RC ListAll(Program *caller) override
 	{
 		unsigned int total = midiOutGetNumDevs();
 		for(unsigned int i = 0;i < total;i++) {
 			MIDIOUTCAPS mididev;
 			midiOutGetDevCaps(i, &mididev, sizeof(MIDIOUTCAPS));
-			base->WriteOut("%2d\t \"%s\"\n",i,mididev.szPname);
+			caller->WriteOut("  %2d - \"%s\"\n", i, mididev.szPname);
 		}
+		return MIDI_RC::OK;
 	}
 };
 

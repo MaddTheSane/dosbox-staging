@@ -1,4 +1,5 @@
-// license:GPL-2.0+
+// SPDX-License-Identifier: GPL-2.0-or-later
+//
 // copyright-holders:Jarek Burczynski,Tatsuyuki Satoh
 /*
 **
@@ -69,12 +70,11 @@ Revision History:
         verify volume of the FM part on the Y8950
 */
 
+#include "support.h"
+
 #include "emu.h"
 #include "ymdeltat.h"
 #include "fmopl.h"
-
-
-
 /* output final shift */
 #if (OPL_SAMPLE_BITS==16)
 	#define FINAL_SH    (0)
@@ -388,7 +388,7 @@ struct FM_OPL
 	uint8_t statusmask;               /* status mask                  */
 	uint8_t mode;                     /* Reg.08 : CSM,notesel,etc.    */
 
-	uint32_t clock;                   /* master clock  (Hz)           */
+	uint32_t clock;                   /* OPL chip clock speed (Hz)    */
 	uint32_t rate;                    /* sampling rate (Hz)           */
 	double freqbase;                /* frequency base               */
 	//attotime TimerBase;         /* Timer base time (==sampling time)*/
@@ -636,7 +636,9 @@ struct FM_OPL
 		{
 			if (!SLOT->FB)
 				out = 0;
-			SLOT->op1_out[1] = op_calc1(SLOT->Cnt, env, (out<<SLOT->FB), SLOT->wavetable);
+			const auto out_shifted = left_shift_signed(out, SLOT->FB);
+			SLOT->op1_out[1] = op_calc1(SLOT->Cnt, env, out_shifted,
+			                            SLOT->wavetable);
 		}
 
 		/* SLOT 2 */
@@ -716,7 +718,9 @@ struct FM_OPL
 		{
 			if (!SLOT->FB)
 				out = 0;
-			SLOT->op1_out[1] = op_calc1(SLOT->Cnt, env, (out<<SLOT->FB), SLOT->wavetable);
+			const auto out_shifted = left_shift_signed(out, SLOT->FB);
+			SLOT->op1_out[1] = op_calc1(SLOT->Cnt, env, out_shifted,
+			                            SLOT->wavetable);
 		}
 
 		/* SLOT 2 */
@@ -926,7 +930,7 @@ struct FM_OPL
 
 
 	/* lock/unlock for common table */
-	static int LockTable(device_t *device)
+	static int LockTable([[maybe_unused]] device_t *device)
 	{
 		num_lock++;
 		if(num_lock>1) return 0;
@@ -960,7 +964,8 @@ private:
 
 	static inline signed int op_calc(uint32_t phase, unsigned int env, signed int pm, unsigned int wave_tab)
 	{
-		uint32_t const p = (env<<4) + sin_tab[wave_tab + ((((signed int)((phase & ~FREQ_MASK) + (pm<<16))) >> FREQ_SH) & SIN_MASK) ];
+		const auto pm_shifted = left_shift_signed(pm, 16);
+		uint32_t const p = (env<<4) + sin_tab[wave_tab + ((((signed int)((phase & ~FREQ_MASK) + pm_shifted)) >> FREQ_SH) & SIN_MASK) ];
 
 		return (p >= TL_TAB_LEN) ? 0 : tl_tab[p];
 	}
@@ -1465,17 +1470,17 @@ void FM_OPL::initialize()
 
 	/* Amplitude modulation: 27 output levels (triangle waveform); 1 level takes one of: 192, 256 or 448 samples */
 	/* One entry from LFO_AM_TABLE lasts for 64 samples */
-	lfo_am_inc = (1.0 / 64.0) * (1<<LFO_SH) * freqbase;
+	lfo_am_inc = static_cast<uint32_t>((1.0 / 64.0) * (1<<LFO_SH) * freqbase);
 
 	/* Vibrato: 8 output levels (triangle waveform); 1 level takes 1024 samples */
-	lfo_pm_inc = (1.0 / 1024.0) * (1<<LFO_SH) * freqbase;
+	lfo_pm_inc = static_cast<uint32_t>((1.0 / 1024.0) * (1<<LFO_SH) * freqbase);
 
 	/*logerror ("lfo_am_inc = %8x ; lfo_pm_inc = %8x\n", lfo_am_inc, lfo_pm_inc);*/
 
 	/* Noise generator: a step takes 1 sample */
-	noise_f = (1.0 / 1.0) * (1<<FREQ_SH) * freqbase;
+	noise_f = static_cast<uint32_t>((1.0 / 1.0) * (1<<FREQ_SH) * freqbase);
 
-	eg_timer_add  = (1<<EG_SH)  * freqbase;
+	eg_timer_add  = static_cast<uint32_t>((1<<EG_SH)  * freqbase);
 	eg_timer_overflow = (1) * (1<<EG_SH);
 	/*logerror("OPLinit eg_timer_add=%8x eg_timer_overflow=%8x\n", eg_timer_add, eg_timer_overflow);*/
 }
@@ -1600,7 +1605,8 @@ void FM_OPL::WriteReg(int r, int v)
 			break;
 #endif
 		default:
-			device->logerror("FMOPL.C: write to unknown register: %02x\n",r);
+			if (device)
+				device->logerror("FMOPL.C: write to unknown register: %02x\n", r);
 			break;
 		}
 		break;
@@ -1991,7 +1997,11 @@ static FM_OPL *OPLCreate(device_t *device, uint32_t clock, uint32_t rate, int ty
 static void OPLDestroy(FM_OPL *OPL)
 {
 	FM_OPL::UnLockTable();
-	auto_free(OPL->device->machine(), OPL);
+	if (!OPL)
+		return;
+
+	free(OPL);
+	OPL = nullptr;
 }
 
 /* Optional handlers */

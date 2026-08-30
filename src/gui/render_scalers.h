@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,9 +26,9 @@
 #define SCALER_MAX_MUL_HEIGHT 3
 
 #if RENDER_USE_ADVANCED_SCALERS>0
-#define SCALER_MAXWIDTH 	1280 
-#define SCALER_MAXHEIGHT	1024
-#define SCALER_MAXX     	4096
+#define SCALER_MAXWIDTH  1600
+#define SCALER_MAXHEIGHT 1200
+#define SCALER_MAXX      8192
 #else
 // reduced to save some memory
 #define SCALER_MAXWIDTH 	800 
@@ -97,7 +97,7 @@ extern scalerSourceCache_t scalerSourceCache;
 #if RENDER_USE_ADVANCED_SCALERS>1
 extern scalerChangeCache_t scalerChangeCache;
 #endif
-typedef ScalerLineHandler_t ScalerLineBlock_t[5][4];
+typedef ScalerLineHandler_t ScalerLineBlock_t[6][4];
 
 typedef struct {
 	const char *name;

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,17 +16,19 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "dosbox.h"
 
 #include <string.h>
 #include <ctype.h>
-#include "dosbox.h"
-#include "mem.h"
-#include "dos_inc.h"
-#include "regs.h"
+
+#include "cpu.h"
 #include "callback.h"
 #include "debug.h"
-#include "cpu.h"
+#include "dos_inc.h"
+#include "mem.h"
 #include "programs.h"
+#include "regs.h"
+#include "string_utils.h"
 
 const char * RunningProgram="DOSBOX";
 
@@ -154,6 +156,9 @@ void DOS_Terminate(Bit16u pspseg,bool tsr,Bit8u exitcode) {
 		cpudecoder=&CPU_Core_Normal_Run;
 		CPU_CycleLeft=0;
 		CPU_Cycles=0;
+		//--Added 2010-07-02 by Alun Bestor to notify Boxer when the core mode changes
+		GFX_SetTitle(-1,-1,false);
+		//--End of modifications
 	}
 #endif
 
@@ -199,7 +204,7 @@ static bool MakeEnv(char * name,Bit16u * segment) {
 	envwrite+=2;
 	char namebuf[DOS_PATHLENGTH];
 	if (DOS_Canonicalize(name,namebuf)) {
-		MEM_BlockWrite(envwrite,namebuf,(Bitu)(strlen(namebuf)+1));
+		MEM_BlockWrite(envwrite,namebuf,(Bitu)(safe_strlen(namebuf)+1));
 		return true;
 	} else return false;
 }
@@ -410,7 +415,12 @@ bool DOS_Execute(char * name,PhysPt block_pt,Bit8u flags) {
 		SetupCMDLine(pspseg,block);
 	};
 	CALLBACK_SCF(false);		/* Carry flag cleared for caller if successfull */
-	if (flags==OVERLAY) return true;			/* Everything done for overlays */
+	if (flags==OVERLAY) {
+		/* Changed registers */
+		reg_ax=0;
+		reg_dx=0;
+		return true;			/* Everything done for overlays */
+	}
 	RealPt csip,sssp;
 	if (iscom) {
 		csip=RealMake(pspseg,0x100);
@@ -423,6 +433,8 @@ bool DOS_Execute(char * name,PhysPt block_pt,Bit8u flags) {
 		csip=RealMake(loadseg+head.initCS,head.initIP);
 		sssp=RealMake(loadseg+head.initSS,head.initSP);
 		if (head.initSP<4) LOG(LOG_EXEC,LOG_ERROR)("stack underflow/wrap at EXEC");
+		if ((pspseg+memsize)<(RealSeg(sssp)+(RealOff(sssp)>>4)))
+			LOG(LOG_EXEC,LOG_ERROR)("stack outside memory block at EXEC");
 
 		Program::ResetLastWrittenChar('\0'); // triggers newline injection after DOS programs
 	}
@@ -510,7 +522,7 @@ bool DOS_Execute(char * name,PhysPt block_pt,Bit8u flags) {
 		reg_di=RealOff(sssp);
 		reg_bp=0x91c;	/* DOS internal stack begin relict */
 		SegSet16(ds,pspseg);SegSet16(es,pspseg);
-#if C_DEBUG		
+#if C_DEBUG
 		/* Started from debug.com, then set breakpoint at start */
 		DEBUG_CheckExecuteBreakpoint(RealSeg(csip),RealOff(csip));
 #endif

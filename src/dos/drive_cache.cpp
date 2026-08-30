@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,7 +26,12 @@
 #include "cross.h"
 #include "dos_inc.h"
 #include "drives.h"
+#include "string_utils.h"
 #include "support.h"
+
+//--Added 2009-12-26 by Alun Bestor to allow Boxer to hook into DOSBox internals
+#include "BXCoalface.h"
+//--End of modifications
 
 int fileInfoCounter = 0;
 
@@ -107,7 +112,7 @@ void DOS_Drive_Cache::EmptyCache(void) {
 	dirBase		= new CFileInfo;
 	save_dir	= nullptr;
 	srchNr		= 0;
-	SetBaseDir(basePath);
+	if (basePath[0] != 0) SetBaseDir(basePath);
 }
 
 void DOS_Drive_Cache::SetLabel(const char* vname,bool cdrom,bool allowupdate) {
@@ -135,7 +140,11 @@ Bit16u DOS_Drive_Cache::GetFreeID(CFileInfo* dir) {
 	return 0;
 }
 
-void DOS_Drive_Cache::SetBaseDir(const char* baseDir) {
+void DOS_Drive_Cache::SetBaseDir(const char *baseDir)
+{
+	if (is_empty(baseDir))
+		return;
+
 	// Guard if source and destination are the same
 	if (basePath == baseDir) {
 		return;
@@ -186,7 +195,7 @@ char* DOS_Drive_Cache::GetExpandName(const char* path) {
 	}
 
 	if (*work) {
-		size_t len = strlen(work);
+		size_t len = safe_strlen(work);
 #if defined (WIN32)
 		if((work[len-1] == CROSS_FILESPLIT ) && (len >= 2) && (work[len-2] != ':')) {
 #else
@@ -386,10 +395,10 @@ int DOS_Drive_Cache::CompareShortname(const char* compareName, const char* short
 /* the following code is replaced as it's not safe when char* is 64 bits */
 /*		Bits compareCount1	= (int)cpos - (int)shortName;
 		char* endPos		= strchr(cpos,'.');
-		Bitu numberSize		= endPos ? int(endPos)-int(cpos) : strlen(cpos);
+		Bitu numberSize		= endPos ? int(endPos)-int(cpos) : safe_strlen(cpos);
 		
 		char* lpos			= strchr(compareName,'.');
-		Bits compareCount2	= lpos ? int(lpos)-int(compareName) : strlen(compareName);
+		Bits compareCount2	= lpos ? int(lpos)-int(compareName) : safe_strlen(compareName);
 		if (compareCount2>8) compareCount2 = 8;
 
 		compareCount2 -= numberSize;
@@ -561,14 +570,10 @@ void DOS_Drive_Cache::CreateShortName(CFileInfo* curDir, CFileInfo* info) {
 	Bits	len			= 0;
 	bool	createShort = false;
 
-	char tmpNameBuffer[CROSS_LEN];
-
-	char* tmpName = tmpNameBuffer;
-
 	// Remove Spaces
-	// avoid using safe_strncpy to prevent GCC warning about truncation on an incomplete copy
-	strncpy(tmpName, info->orgname, CROSS_LEN);
-	tmpName[CROSS_LEN - 1] = '\0'; // zero-terminate even if the source wasn't
+	char tmpNameBuffer[CROSS_LEN];
+	safe_strcpy(tmpNameBuffer, info->orgname);
+	char* tmpName = tmpNameBuffer;
 	upcase(tmpName);
 	createShort = RemoveSpaces(tmpName);
 
@@ -609,11 +614,12 @@ void DOS_Drive_Cache::CreateShortName(CFileInfo* curDir, CFileInfo* info) {
 		// TODO: modify MOUNT/IMGMOUNT to exit with an error when encountering
 		// a directory having more than 65534 files, which is FAT32's limit.
 		char short_nr[8] = {'\0'};
-		snprintf(short_nr, sizeof(short_nr), "%u", info->shortNr);
+		if (GCC_UNLIKELY(info->shortNr > 9999999)) E_Exit("~9999999 same name files overflow");
+		safe_sprintf(short_nr, "%u", info->shortNr);
 
 		// Copy first letters
 		Bits tocopy = 0;
-		size_t buflen = strlen(short_nr);
+		size_t buflen = safe_strlen(short_nr);
 		if (len + buflen + 1 > 8)
 			tocopy = (Bits)(8 - buflen - 1);
 		else
@@ -631,7 +637,7 @@ void DOS_Drive_Cache::CreateShortName(CFileInfo* curDir, CFileInfo* info) {
 			// Step to last extension...
 			pos = strrchr(tmpName, '.'); // extensions are at-most 3 chars (4 with terminator)
 			// add extension
-			unsigned int remaining_space = DOS_NAMELENGTH_ASCII - strlen(info->shortname) - 1;
+			unsigned int remaining_space = DOS_NAMELENGTH_ASCII - safe_strlen(info->shortname) - 1;
 			strncat(info->shortname, pos, 4 < remaining_space ? 4 : remaining_space);
 			info->shortname[DOS_NAMELENGTH] = 0;
 		}
@@ -660,7 +666,7 @@ void DOS_Drive_Cache::CreateShortName(CFileInfo* curDir, CFileInfo* info) {
 			curDir->longNameList.push_back(info);
 		}
 	} else {
-		safe_strncpy(info->shortname, tmpName, DOS_NAMELENGTH_ASCII);
+		safe_strcpy(info->shortname, tmpName);
 	}
 	RemoveTrailingDot(info->shortname);
 }
@@ -684,7 +690,7 @@ DOS_Drive_Cache::CFileInfo* DOS_Drive_Cache::FindDirInfo(const char* path, char*
 //	LOG_DEBUG("DIR: Find %s",path);
 
 	// Remove base dir path
-	start += strlen(basePath);
+	start += safe_strlen(basePath);
 	safe_strncpy(expandedPath, basePath, CROSS_LEN);
 
 	// hehe, baseDir should be cached in... 
@@ -771,7 +777,8 @@ bool DOS_Drive_Cache::OpenDir(CFileInfo* dir, const char* expand, Bit16u& id) {
 	safe_strcpy(expandcopy, expand);
 	// Add "/"
 	char end[2]={CROSS_FILESPLIT,0};
-	if (expandcopy[strlen(expandcopy)-1] != CROSS_FILESPLIT) {
+	const size_t expandcopylen = safe_strlen(expandcopy);
+	if (expandcopylen > 0 && expandcopy[expandcopylen - 1] != CROSS_FILESPLIT) {
 		safe_strcat(expandcopy, end);
 	}
 	// open dir
@@ -793,6 +800,10 @@ bool DOS_Drive_Cache::OpenDir(CFileInfo* dir, const char* expand, Bit16u& id) {
 }
 
 void DOS_Drive_Cache::CreateEntry(CFileInfo* dir, const char* name, bool is_directory) {
+    //--Added 2009-12-26 by Alun Bestor to allow Boxer to hide OSX metadata files
+    if (!boxer_shouldShowFileWithName(name)) return;
+    //--End of modifications
+
 	CFileInfo* info = new CFileInfo;
 	safe_strcpy(info->orgname, name);
 	info->shortNr = 0;

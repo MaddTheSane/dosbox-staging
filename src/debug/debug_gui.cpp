@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "cross.h"
+#include "string_utils.h"
 #include "support.h"
 #include "regs.h"
 #include "debug.h"
@@ -57,13 +58,13 @@ void DEBUG_ShowMsg(char const* format,...) {
 	char buf[512];
 	va_list msg;
 	va_start(msg,format);
-	vsnprintf(buf,sizeof(buf),format,msg);
+	vsprintf(buf, format, msg);
 	va_end(msg);
 
 	buf[sizeof(buf) - 1] = '\0';
 
 	/* Add newline if not present */
-	size_t len = strlen(buf);
+	size_t len = safe_strlen(buf);
 	if(buf[len - 1] != '\n' && len + 1 < sizeof(buf) ) strcat(buf,"\n");
 
 	if (debuglog) {
@@ -217,7 +218,7 @@ static void LOG_Init(Section * sec) {
 	sect->AddDestroyFunction(&LOG_Destroy);
 	char buf[64];
 	for (Bitu i = LOG_ALL + 1;i < LOG_MAX;i++) { //Skip LOG_ALL, it is always enabled
-		safe_strncpy(buf,loggrp[i].front,sizeof(buf));
+		safe_strcpy(buf, loggrp[i].front);
 		lowcase(buf);
 		loggrp[i].enabled=sect->Get_bool(buf);
 	}
@@ -262,7 +263,7 @@ void LOG_StartUp(void) {
 	Pstring->Set_help("file where the log messages will be saved to");
 	char buf[64];
 	for (Bitu i = LOG_ALL + 1;i < LOG_MAX;i++) {
-		safe_strncpy(buf,loggrp[i].front, sizeof(buf));
+		safe_strcpy(buf, loggrp[i].front);
 		lowcase(buf);
 		Prop_bool* Pbool = sect->Add_bool(buf,Property::Changeable::Always,true);
 		Pbool->Set_help("Enable/Disable logging of this type.");
@@ -281,7 +282,7 @@ void DBGUI_StartUp(void) {
 	nodelay(dbg.win_main,true);
 	keypad(dbg.win_main,true);
 	#ifndef WIN32
-	printf("\e[8;50;80t");
+	printf("\033[8;50;80t");
 	fflush(NULL);
 	resizeterm(50,80);
 	touchwin(dbg.win_main);

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -19,22 +19,32 @@
 #include "setup.h"
 
 #include <algorithm>
-
-#include "dosbox.h"
-#include "cross.h"
-#include "control.h"
-#include "support.h"
+#include <climits>
+#include <cstdlib>
 #include <fstream>
-#include <string>
-#include <sstream>
-#include <list>
-#include <stdlib.h>
-#include <stdio.h>
 #include <limits>
-#include <limits.h>
+#include <regex>
+#include <sstream>
+#include <string_view>
+
+#include "control.h"
+#include "string_utils.h"
+#include "support.h"
+#include "cross.h"
+
+#if defined(_MSC_VER) || (defined(__MINGW32__) && defined(__clang__))
+_CRTIMP extern char **_environ;
+#else
+extern char **environ;
+#endif
 
 using namespace std;
-static std::string current_config_dir; // Set by parseconfigfile so Prop_path can use it to construct the realpath
+
+// Commonly accessed global that holds configuration records
+std::unique_ptr<Config> control = {};
+
+// Set by parseconfigfile so Prop_path can use it to construct the realpath
+static std::string current_config_dir;
 void Value::destroy() throw(){
 	if (type == V_STRING) delete _string;
 }
@@ -147,7 +157,7 @@ bool Value::SetValue(string const& in,Etype _type) {
 bool Value::set_hex(std::string const& in) {
 	istringstream input(in);
 	input.flags(ios::hex);
-	Bits result = INT_MIN;
+	int result = INT_MIN;
 	input >> result;
 	if(result == INT_MIN) return false;
 	_hex = result;
@@ -156,7 +166,7 @@ bool Value::set_hex(std::string const& in) {
 
 bool Value::set_int(string const &in) {
 	istringstream input(in);
-	Bits result = INT_MIN;
+	int result = INT_MIN;
 	input >> result;
 	if(result == INT_MIN) return false;
 	_int = result;
@@ -220,6 +230,17 @@ string Value::ToString() const {
 			break;
 	}
 	return oss.str();
+}
+
+Property::Property(const std::string &name, Changeable::Value when)
+        : propname(name),
+          value(),
+          suggested_values{},
+          default_value(),
+          change(when)
+{
+	assertm(std::regex_match(name, std::regex{"[a-zA-Z0-9_]+"}),
+	        "Only letters, digits, and underscores are allowed in property name");
 }
 
 bool Property::CheckValue(Value const& in, bool warn){
@@ -337,13 +358,13 @@ bool Prop_string::SetValue(std::string const& input) {
 }
 bool Prop_string::CheckValue(Value const& in, bool warn) {
 	if (suggested_values.empty()) return true;
-	for(const_iter it = suggested_values.begin();it != suggested_values.end();++it) {
-		if ( (*it) == in) { //Match!
+	for (const auto &val : suggested_values) {
+		if (val == in) { // Match!
 			return true;
 		}
-		if ((*it).ToString() == "%u") {
-			unsigned int value;
-			if(sscanf(in.ToString().c_str(),"%u",&value) == 1) {
+		if (val.ToString() == "%u") {
+			unsigned int v;
+			if (sscanf(in.ToString().c_str(), "%u", &v) == 1) {
 				return true;
 			}
 		}
@@ -382,11 +403,12 @@ bool Prop_hex::SetValue(std::string const& input) {
 	return SetVal(val,false,true);
 }
 
-void Prop_multival::make_default_value() {
-	Bitu i = 1;
+void Prop_multival::make_default_value()
+{
 	Property *p = section->Get_prop(0);
 	if (!p) return;
 
+	int i = 1;
 	std::string result = p->Get_Default_Value().ToString();
 	while( (p = section->Get_prop(i++)) ) {
 		std::string props = p->Get_Default_Value().ToString();
@@ -697,8 +719,10 @@ void Section_prop::PrintData(FILE* outfile) const {
 
 	// Determine maximum length of the props in this section
 	int len = 0;
-	for (const auto &tel : properties)
-		len = std::max<int>(len, tel->propname.length());
+	for (const auto &tel : properties) {
+		const auto prop_length = check_cast<int>(tel->propname.length());
+		len = std::max<int>(len, prop_length);
+	}
 
 	for (const auto &tel : properties) {
 
@@ -749,24 +773,24 @@ bool Config::PrintConfig(const std::string &filename) const
 	fprintf(outfile, MSG_Get("CONFIGFILE_INTRO"), VERSION);
 	fprintf(outfile, "\n");
 
-	for (const_it tel = sectionlist.begin(); tel != sectionlist.end(); ++tel){
+	for (auto tel = sectionlist.cbegin(); tel != sectionlist.cend(); ++tel) {
 		/* Print out the Section header */
-		safe_strncpy(temp,(*tel)->GetName(),sizeof(temp));
+		safe_strcpy(temp, (*tel)->GetName());
 		lowcase(temp);
 		fprintf(outfile,"[%s]\n",temp);
 
 		Section_prop *sec = dynamic_cast<Section_prop *>(*tel);
 		if (sec) {
 			Property *p;
-			size_t i = 0, maxwidth = 0;
+			int i = 0;
+			size_t maxwidth = 0;
 			while ((p = sec->Get_prop(i++))) {
-				size_t w = strlen(p->propname.c_str());
-				if (w > maxwidth) maxwidth = w;
+				maxwidth = std::max(maxwidth, p->propname.length());
 			}
 			i=0;
 			char prefix[80];
-			int intmaxwidth = std::min<int>(60, maxwidth);
-			snprintf(prefix, sizeof(prefix), "\n# %*s  ", intmaxwidth , "");
+			int intmaxwidth = std::min<int>(60, check_cast<int>(maxwidth));
+			safe_sprintf(prefix, "\n# %*s  ", intmaxwidth, "");
 			while ((p = sec->Get_prop(i++))) {
 
 				if (p->IsDeprecated())
@@ -822,11 +846,26 @@ bool Config::PrintConfig(const std::string &filename) const
 	return true;
 }
 
-Section_prop* Config::AddSection_prop(char const * const _name,void (*_initfunction)(Section*),bool canchange) {
-	Section_prop* blah = new Section_prop(_name);
-	blah->AddInitFunction(_initfunction,canchange);
-	sectionlist.push_back(blah);
-	return blah;
+Section_prop *Config::AddEarlySectionProp(const char *name,
+                                          SectionFunction func,
+                                          bool changeable_at_runtime)
+{
+	Section_prop *s = new Section_prop(name);
+	s->AddEarlyInitFunction(func, changeable_at_runtime);
+	sectionlist.push_back(s);
+	return s;
+}
+
+Section_prop *Config::AddSection_prop(const char *section_name,
+                                      SectionFunction func,
+                                      bool changeable_at_runtime)
+{
+	assertm(std::regex_match(section_name, std::regex{"[a-zA-Z0-9]+"}),
+	        "Only letters and digits are allowed in section name");
+	Section_prop *s = new Section_prop(section_name);
+	s->AddInitFunction(func, changeable_at_runtime);
+	sectionlist.push_back(s);
+	return s;
 }
 
 Section_prop::~Section_prop()
@@ -838,154 +877,218 @@ Section_prop::~Section_prop()
 		delete (*prop);
 }
 
-Section_line* Config::AddSection_line(char const * const _name,void (*_initfunction)(Section*)) {
-	Section_line* blah = new Section_line(_name);
-	blah->AddInitFunction(_initfunction);
+Section_line *Config::AddSection_line(const char *section_name, SectionFunction func)
+{
+	assertm(std::regex_match(section_name, std::regex{"[a-zA-Z0-9]+"}),
+	        "Only letters and digits are allowed in section name");
+	Section_line *blah = new Section_line(section_name);
+	blah->AddInitFunction(func);
 	sectionlist.push_back(blah);
 	return blah;
 }
 
-
-void Config::Init() {
-	for (const_it tel=sectionlist.begin(); tel!=sectionlist.end(); ++tel) {
-		(*tel)->ExecuteInit();
-	}
-}
-
-void Section::AddInitFunction(SectionFunction func, bool canchange)
+void Config::Init() const
 {
-	initfunctions.emplace_back(func, canchange);
+	for (const auto &sec : sectionlist)
+		sec->ExecuteEarlyInit();
+
+	for (const auto &sec : sectionlist)
+		sec->ExecuteInit();
 }
 
-void Section::AddDestroyFunction(SectionFunction func, bool canchange)
+void Section::AddEarlyInitFunction(SectionFunction func, bool changeable_at_runtime)
 {
-	destroyfunctions.emplace_front(func, canchange);
+	early_init_functions.emplace_back(func, changeable_at_runtime);
 }
 
-void Section::ExecuteInit(bool initall) {
-	typedef std::list<Function_wrapper>::iterator func_it;
-	for (func_it tel = initfunctions.begin(); tel != initfunctions.end(); ++tel) {
-		if (initall || (*tel).canchange) (*tel).function(this);
-	}
+void Section::AddInitFunction(SectionFunction func, bool changeable_at_runtime)
+{
+	initfunctions.emplace_back(func, changeable_at_runtime);
+}
+
+void Section::AddDestroyFunction(SectionFunction func, bool changeable_at_runtime)
+{
+	destroyfunctions.emplace_front(func, changeable_at_runtime);
+}
+
+void Section::ExecuteEarlyInit(bool init_all)
+{
+	for (const auto &fn : early_init_functions)
+		if (init_all || fn.changeable_at_runtime)
+			fn.function(this);
+}
+
+void Section::ExecuteInit(bool initall)
+{
+	for (const auto &fn : initfunctions)
+		if (initall || fn.changeable_at_runtime)
+			fn.function(this);
 }
 
 void Section::ExecuteDestroy(bool destroyall) {
-	typedef std::list<Function_wrapper>::iterator func_it;
+	typedef std::deque<Function_wrapper>::iterator func_it;
 	for (func_it tel = destroyfunctions.begin(); tel != destroyfunctions.end(); ) {
-		if (destroyall || (*tel).canchange) {
+		if (destroyall || (*tel).changeable_at_runtime) {
 			(*tel).function(this);
 			tel = destroyfunctions.erase(tel); //Remove destroyfunction once used
-		} else ++tel;
+		} else
+			++tel;
 	}
 }
 
-Config::~Config() {
-	reverse_it cnt = sectionlist.rbegin();
-	while (cnt != sectionlist.rend()) {
+Config::~Config()
+{
+	for (auto cnt = sectionlist.rbegin(); cnt != sectionlist.rend(); ++cnt)
 		delete (*cnt);
-		cnt++;
-	}
 }
 
-Section* Config::GetSection(int index) {
-	for (it tel = sectionlist.begin(); tel != sectionlist.end(); ++tel){
-		if (!index--) return (*tel);
+Section *Config::GetSection(const std::string &section_name) const
+{
+	for (auto *el : sectionlist) {
+		if (!strcasecmp(el->GetName(), section_name.c_str()))
+			return el;
 	}
-	return NULL;
+	return nullptr;
 }
 
-Section* Config::GetSection(string const& _sectionname) const {
-	for (const_it tel = sectionlist.begin(); tel != sectionlist.end(); ++tel){
-		if (!strcasecmp((*tel)->GetName(),_sectionname.c_str())) return (*tel);
+Section *Config::GetSectionFromProperty(const char *prop) const
+{
+	for (auto *el : sectionlist) {
+		if (el->GetPropValue(prop) != NO_SUCH_PROPERTY)
+			return el;
 	}
-	return NULL;
+	return nullptr;
 }
 
-Section* Config::GetSectionFromProperty(char const * const prop) const {
-   	for (const_it tel = sectionlist.begin(); tel != sectionlist.end(); ++tel){
-		if ((*tel)->GetPropValue(prop) != NO_SUCH_PROPERTY) return (*tel);
+void Config::OverwriteAutoexec(const std::string &conf, const std::string &line)
+{
+	// If we're in a new config file, then record that filename and reset
+	// the section
+	if (overwritten_autoexec_conf != conf) {
+		overwritten_autoexec_conf = conf;
+		overwritten_autoexec_section.data.clear();
 	}
-	return NULL;
+	overwritten_autoexec_section.HandleInputline(line);
 }
 
-bool Config::ParseConfigFile(char const * const configfilename) {
-	//static bool first_configfile = true;
+const std::string &Config::GetOverwrittenAutoexecConf() const
+{
+	return overwritten_autoexec_conf;
+}
+
+const Section_line &Config::GetOverwrittenAutoexecSection() const
+{
+	return overwritten_autoexec_section;
+}
+
+bool Config::ParseConfigFile(const std::string &type, const std::string &configfilename)
+{
+	// static bool first_configfile = true;
 	ifstream in(configfilename);
-	if (!in) return false;
+	if (!in)
+		return false;
 	configfiles.push_back(configfilename);
 
-	LOG_MSG("CONFIG: Loading %s file %s",
-	        configfiles.size() == 1 ? "primary" : "additional",
-	        configfilename);
-
-	//Get directory from configfilename, used with relative paths.
-	current_config_dir=configfilename;
-	std::string::size_type pos = current_config_dir.rfind(CROSS_FILESPLIT);
-	if(pos == std::string::npos) pos = 0; //No directory then erase string
-	current_config_dir.erase(pos);
+	// Get directory from configfilename, used with relative paths.
+	current_config_dir = configfilename;
+	auto split_pos = current_config_dir.rfind(CROSS_FILESPLIT);
+	if (split_pos == std::string::npos)
+		split_pos = 0; // No directory then erase string
+	current_config_dir.erase(split_pos);
 
 	string gegevens;
-	Section* currentsection = NULL;
-	Section* testsec = NULL;
-	while (getline(in,gegevens)) {
+	Section *currentsection = nullptr;
 
+	while (getline(in, gegevens)) {
 		/* strip leading/trailing whitespace */
 		trim(gegevens);
-		if(!gegevens.size()) continue;
+		if (gegevens.empty())
+			continue;
 
-		switch(gegevens[0]){
+		switch (gegevens[0]) {
 		case '%':
 		case '\0':
 		case '#':
 		case ' ':
-		case '\n':
-			continue;
-			break;
-		case '[':
-		{
-			string::size_type loc = gegevens.find(']');
-			if(loc == string::npos) continue;
-			gegevens.erase(loc);
-			testsec = GetSection(gegevens.substr(1));
-			if(testsec != NULL ) currentsection = testsec;
-			testsec = NULL;
-		}
-			break;
+		case '\n': continue; break;
+		case '[': {
+			const auto bracket_pos = gegevens.find(']');
+			if (bracket_pos == string::npos)
+				continue;
+			gegevens.erase(bracket_pos);
+			const auto section_name = gegevens.substr(1);
+			if (const auto sec = GetSection(section_name); sec)
+				currentsection = sec;
+		} break;
 		default:
-			try {
-				if(currentsection) currentsection->HandleInputline(gegevens);
-			} catch(const char* message) {
-				message=0;
-				//EXIT with message
+			if (currentsection) {
+				currentsection->HandleInputline(gegevens);
+
+				// If this is an autoexec section, the above takes care of the joining
+				// while this handles the overwrriten mode.
+				// We need to be prepared for either scenario to play out because we
+				// won't know the users final preferance until the very last configuration
+				// file is processed.
+				if (std::string_view(currentsection->GetName()) == "autoexec") {
+					OverwriteAutoexec(configfilename, gegevens);
+				}
 			}
 			break;
 		}
 	}
 	current_config_dir.clear();//So internal changes don't use the path information
+
+	LOG_INFO("CONFIG: Loaded %s conf file %s", type.c_str(), configfilename.c_str());
+
 	return true;
 }
 
-/*const char* Config::GetPrimaryConfigFile() {
-	return configfile.c_str();
-}*/
+parse_environ_result_t parse_environ(const char * const * envp) noexcept
+{
+	assert(envp);
 
-void Config::ParseEnv(char ** envp) {
-	for(char** env=envp; *env;env++) {
-		char copy[1024];
-		safe_strncpy(copy,*env,1024);
-		if(strncasecmp(copy,"DOSBOX_",7))
+	// Filter envirnment variables in following format:
+	// DOSBOX_SECTIONNAME_PROPNAME=VALUE (prefix, section, and property
+	// names are case-insensitive).
+	std::list<std::tuple<std::string, std::string>> props_to_set;
+	for (const char * const *str = envp; *str; str++) {
+		const char *env_var = *str;
+		if (strncasecmp(env_var, "DOSBOX_", 7) != 0)
 			continue;
-		char* sec_name = &copy[7];
-		if(!(*sec_name))
+		const std::string rest = (env_var + 7);
+		const auto section_delimiter = rest.find('_');
+		if (section_delimiter == string::npos)
 			continue;
-		char* prop_name = strrchr(sec_name,'_');
-		if(!prop_name || !(*prop_name))
+		const auto section_name = rest.substr(0, section_delimiter);
+		if (section_name.empty())
 			continue;
-		*prop_name++=0;
-		Section* sect = GetSection(sec_name);
-		if(!sect)
+		const auto prop_name_and_value = rest.substr(section_delimiter + 1);
+		if (prop_name_and_value.empty() || !isalpha(prop_name_and_value[0]))
 			continue;
-		sect->HandleInputline(prop_name);
+		props_to_set.emplace_back(std::make_tuple(section_name,
+		                                          prop_name_and_value));
+	}
+
+	return props_to_set;
+}
+
+void Config::ParseEnv()
+{
+#if defined(_MSC_VER) || (defined(__MINGW32__) && defined(__clang__))
+	const char *const *envp = _environ;
+#else
+	const char *const *envp = environ;
+#endif
+	if (envp == nullptr)
+		return;
+
+	for (const auto &set_prop_desc : parse_environ(envp)) {
+		const auto section_name = std::get<0>(set_prop_desc);
+		Section *sec = GetSection(section_name);
+		if (!sec)
+			continue;
+		const auto prop_name_and_value = std::get<1>(set_prop_desc);
+		sec->HandleInputline(prop_name_and_value);
 	}
 }
 
@@ -1010,28 +1113,24 @@ Verbosity Config::GetStartupVerbosity() const
 		return Verbosity::Medium;
 	if (user_choice == "low")
 		return Verbosity::Low;
+	if (user_choice == "splash_only")
+		return Verbosity::SplashOnly;
 	if (user_choice == "quiet")
 		return Verbosity::Quiet;
-	// auto-mode
-	if (cmdline->HasDirectory() || cmdline->HasExecutableName())
-		return Verbosity::Low;
-	else
-		return Verbosity::High;
+	if (user_choice == "auto")
+		return (cmdline->HasDirectory() || cmdline->HasExecutableName())
+		               ? Verbosity::InstantLaunch
+		               : Verbosity::High;
+
+	LOG_WARNING("SETUP: Unknown verbosity mode '%s', defaulting to 'high'",
+	            user_choice.c_str());
+	return Verbosity::High;
 }
 
 bool CommandLine::FindExist(char const * const name,bool remove) {
 	cmd_it it;
 	if (!(FindEntry(name,it,false))) return false;
 	if (remove) cmds.erase(it);
-	return true;
-}
-
-bool CommandLine::FindHex(char const * const name,unsigned int & value,bool remove) {
-	cmd_it it,it_next;
-	if (!(FindEntry(name,it,true))) return false;
-	it_next=it;++it_next;
-	sscanf((*it_next).c_str(),"%X",&value);
-	if (remove) cmds.erase(it,++it_next);
 	return true;
 }
 
@@ -1167,12 +1266,14 @@ void CommandLine::FillVector(std::vector<std::string> & vector) {
 	for(cmd_it it = cmds.begin(); it != cmds.end(); ++it) {
 		vector.push_back((*it));
 	}
+#ifdef WIN32
 	// add back the \" if the parameter contained a space
 	for(Bitu i = 0; i < vector.size(); i++) {
 		if(vector[i].find(' ') != std::string::npos) {
 			vector[i] = "\""+vector[i]+"\"";
 		}
 	}
+#endif
 }
 
 int CommandLine::GetParameterFromList(const char* const params[], std::vector<std::string> & output) {
@@ -1186,7 +1287,7 @@ int CommandLine::GetParameterFromList(const char* const params[], std::vector<st
 	cmd_it it = cmds.begin();
 	while(it != cmds.end()) {
 		bool found = false;
-		for(Bitu i = 0; *params[i]!=0; i++) {
+		for (int i = 0; *params[i] != 0; ++i) {
 			if (!strcasecmp((*it).c_str(),params[i])) {
 				// found a parameter
 				found = true;
@@ -1258,12 +1359,20 @@ CommandLine::CommandLine(int argc, char const *const argv[])
 	}
 }
 
-Bit16u CommandLine::Get_arglength() {
-	if (cmds.empty()) return 0;
-	Bit16u i=1;
-	for(cmd_it it = cmds.begin();it != cmds.end(); ++it)
-		i+=(*it).size() + 1;
-	return --i;
+Bit16u CommandLine::Get_arglength()
+{
+	if (cmds.empty())
+		return 0;
+
+	size_t total_length = 0;
+	for (const auto &cmd : cmds)
+		total_length += cmd.size() + 1;
+
+	if (total_length > UINT16_MAX) {
+		LOG_MSG("SETUP: Command line length too long, truncating");
+		total_length = UINT16_MAX;
+	}
+	return static_cast<uint16_t>(total_length);
 }
 
 CommandLine::CommandLine(const char *name, const char *cmdline)
@@ -1301,5 +1410,52 @@ void CommandLine::Shift(unsigned int amount) {
 	while(amount--) {
 		file_name = cmds.size()?(*(cmds.begin())):"";
 		if(cmds.size()) cmds.erase(cmds.begin());
+	}
+}
+
+// Parse the user's configuration files starting with the primary, then custom
+// -conf's, and finally the local dosbox.conf
+void SETUP_ParseConfigFiles(const std::string &config_path)
+{
+	std::string config_file;
+
+	// First: parse the user's primary config file
+	const bool wants_primary_conf = !control->cmdline->FindExist("-noprimaryconf", true);
+	if (wants_primary_conf) {
+		Cross::GetPlatformConfigName(config_file);
+		const std::string config_combined = config_path + config_file;
+		control->ParseConfigFile("primary", config_combined);
+	}
+
+	// Second: parse the local 'dosbox.conf', if present
+	const bool wants_local_conf = !control->cmdline->FindExist("-nolocalconf", true);
+	if (wants_local_conf) {
+		control->ParseConfigFile("local", "dosbox.conf");
+	}
+
+	// Finally: layer on custom -conf <files>
+	while (control->cmdline->FindString("-conf", config_file, true)) {
+		if (!control->ParseConfigFile("custom", config_file)) {
+			// try to load it from the user directory
+			if (!control->ParseConfigFile("custom", config_path + config_file)) {
+				LOG_MSG("CONFIG: Can't open custom conf file: %s",
+				        config_file.c_str());
+			}
+		}
+	}
+
+	// Create a new primary if permitted and no other conf was loaded
+	if (wants_primary_conf && !control->configfiles.size()) {
+		std::string new_config_path = config_path;
+		Cross::CreatePlatformConfigDir(new_config_path);
+		Cross::GetPlatformConfigName(config_file);
+		const std::string config_combined = new_config_path + config_file;
+		if (control->PrintConfig(config_combined)) {
+			LOG_MSG("CONFIG: Wrote new primary conf file '%s'", config_combined.c_str());
+			control->ParseConfigFile("new primary", config_combined);
+		} else {
+			LOG_WARNING("CONFIG: Unable to write a new primary conf file '%s'",
+						config_combined.c_str());
+		}
 	}
 }

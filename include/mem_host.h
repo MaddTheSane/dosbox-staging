@@ -1,7 +1,7 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2020  The dosbox-staging team
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  * byte-arrays using DOS/little-endian byte ordering.
  *
  * Values returned or passed to these functions are expected to be integers
- * using native endianess representation for the host machine.
+ * using native endianness representation for the host machine.
  *
  * They are safe to use even when byte-array address is not aligned according
  * to desired integer width.

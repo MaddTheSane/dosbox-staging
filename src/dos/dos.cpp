@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,22 +16,30 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
-
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include "dosbox.h"
-#include "bios.h"
-#include "mem.h"
-#include "callback.h"
-#include "regs.h"
 #include "dos_inc.h"
-#include "setup.h"
-#include "support.h"
+
+#include <cctype>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+
+#include "bios.h"
+#include "callback.h"
+#include "mem.h"
+#include "regs.h"
+#include "parport.h"
 #include "serialport.h"
+#include "setup.h"
+#include "string_utils.h"
+#include "support.h"
+
+#if defined(WIN32)
+#include <winsock2.h> // for gethostname
+#endif
 
 DOS_Block dos;
 DOS_InfoBlock dos_infoblock;
+unsigned int result_errorcode = 0;
 
 #define DOS_COPYBUFSIZE 0x10000
 Bit8u dos_copybuf[DOS_COPYBUFSIZE];
@@ -44,7 +52,40 @@ const Bit8u DOS_DATE_months[] = {
 	0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
 };
 
-static void DOS_AddDays(Bitu days) {
+uint16_t DOS_PackTime(uint16_t hour, uint16_t min, uint16_t sec) noexcept
+{
+	const auto h_bits = 0b1111100000000000 & (hour << 11);
+	const auto m_bits = 0b0000011111100000 & (min << 5);
+	const auto s_bits = 0b0000000000011111 & (sec / 2);
+	const auto packed = h_bits | m_bits | s_bits;
+	return static_cast<uint16_t>(packed);
+}
+
+uint16_t DOS_PackTime(const struct tm &datetime) noexcept
+{
+	return DOS_PackTime(static_cast<uint16_t>(datetime.tm_hour),
+	                    static_cast<uint16_t>(datetime.tm_min),
+	                    static_cast<uint16_t>(datetime.tm_sec));
+}
+
+uint16_t DOS_PackDate(uint16_t year, uint16_t mon, uint16_t day) noexcept
+{
+	const auto y_bits = 0b1111111000000000 & ((year - 1980) << 9);
+	const auto m_bits = 0b0000000111100000 & (mon << 5);
+	const auto d_bits = 0b0000000000011111 & day;
+	const auto packed = y_bits | m_bits | d_bits;
+	return static_cast<uint16_t>(packed);
+}
+
+uint16_t DOS_PackDate(const struct tm &datetime) noexcept
+{
+	return DOS_PackDate(static_cast<uint16_t>(datetime.tm_year + 1900),
+	                    static_cast<uint16_t>(datetime.tm_mon + 1),
+	                    static_cast<uint16_t>(datetime.tm_mday));
+}
+
+static void DOS_AddDays(Bitu days)
+{
 	dos.date.day += days;
 	Bit8u monthlimit = DOS_DATE_months[dos.date.month];
 
@@ -66,6 +107,18 @@ static void DOS_AddDays(Bitu days) {
 			dos.date.year++;
 		}
 	}
+}
+
+static Bit16u DOS_GetAmount(void) {
+	Bit16u amount = reg_cx;
+	if (amount > 0xfff1) {
+		Bit16u overflow = (amount & 0xf) + (reg_dx & 0xf);
+		if (overflow > 0x10) {
+			amount -= (overflow & 0xf);
+			LOG(LOG_DOSMISC,LOG_WARN)("DOS:0x%X:Amount reduced from %X to %X",reg_ah,reg_cx,amount);
+		}
+	}
+	return amount;
 }
 
 #define DATA_TRANSFERS_TAKE_CYCLES 1
@@ -160,8 +213,18 @@ static Bitu DOS_21Handler(void) {
 		}
 		break;
 	case 0x05:		/* Write Character to PRINTER */
-		E_Exit("DOS:Unhandled call %02X",reg_ah);
-		break;
+        //--Added 2012-09-11 by Alun Bestor for printer emulation 
+        {
+            for(int i = 0; i < 3; i++) {
+                // look up a parallel port
+                if(parallelPortObjects[i] != NULL) {
+                    parallelPortObjects[i]->Putchar(reg_dl);
+                    break;
+                }
+            }
+            break;
+        }
+        //--End of modifications
 	case 0x06:		/* Direct Console Output / Input */
 		switch (reg_dl) {
 		case 0xFF:	/* Input */
@@ -457,13 +520,23 @@ static Bitu DOS_21Handler(void) {
 		break;
 	}
 	case 0x2d:		/* Set System Time */
-		LOG(LOG_DOSMISC,LOG_ERROR)("DOS:Set System Time not supported");
-		//Check input parameters nonetheless
 		if( reg_ch > 23 || reg_cl > 59 || reg_dh > 59 || reg_dl > 99 )
 			reg_al = 0xff; 
 		else { //Allow time to be set to zero. Restore the orginal time for all other parameters. (QuickBasic)
 			if (reg_cx == 0 && reg_dx == 0) {time_start = mem_readd(BIOS_TIMER);LOG_MSG("Warning: game messes with DOS time!");}
 			else time_start = 0;
+			// Original IBM PC used ~1.19MHz crystal for timer,
+			// because at 1.19MHz, 2^16 ticks is ~1 hour, making it
+			// easy to count hours and days. More precisely:
+			//
+			// clock updates at 1193180/65536 ticks per second.
+			// ticks per second ≈ 18.2
+			// ticks per hour   ≈ 65543
+			// ticks per day    ≈ 1573040
+			constexpr uint64_t ticks_per_day = 1573040;
+			const auto seconds = reg_ch * 3600 + reg_cl * 60 + reg_dh;
+			const auto ticks = ticks_per_day * seconds / (24 * 3600);
+			mem_writed(BIOS_TIMER, check_cast<uint32_t>(ticks));
 			reg_al = 0;
 		}
 		break;
@@ -633,8 +706,8 @@ static Bitu DOS_21Handler(void) {
 		}
 		break;
 	case 0x3e:		/* CLOSE Close file */
-		if (DOS_CloseFile(reg_bx)) {
-//			reg_al=0x01;	/* al destroyed. Refcount */
+		if (DOS_CloseFile(reg_bx,false,&reg_al)) {
+			/* al destroyed with pre-close refcount from sft */
 			CALLBACK_SCF(false);
 		} else {
 			reg_ax=dos.errorcode;
@@ -643,7 +716,7 @@ static Bitu DOS_21Handler(void) {
 		break;
 	case 0x3f:		/* READ Read from file or device */
 		{ 
-			Bit16u toread=reg_cx;
+			Bit16u toread=DOS_GetAmount();
 			dos.echo=true;
 			if (DOS_ReadFile(reg_bx,dos_copybuf,&toread)) {
 				MEM_BlockWrite(SegPhys(ds)+reg_dx,dos_copybuf,toread);
@@ -659,7 +732,7 @@ static Bitu DOS_21Handler(void) {
 		}
 	case 0x40:					/* WRITE Write to file or device */
 		{
-			Bit16u towrite=reg_cx;
+			Bit16u towrite=DOS_GetAmount();
 			MEM_BlockRead(SegPhys(ds)+reg_dx,dos_copybuf,towrite);
 			if (DOS_WriteFile(reg_bx,dos_copybuf,&towrite)) {
 				reg_ax=towrite;
@@ -753,7 +826,7 @@ static Bitu DOS_21Handler(void) {
 		break;
 	case 0x47:					/* CWD Get current directory */
 		if (DOS_GetCurrentDir(reg_dl,name1)) {
-			MEM_BlockWrite(SegPhys(ds)+reg_si,name1,(Bitu)(strlen(name1)+1));	
+			MEM_BlockWrite(SegPhys(ds)+reg_si,name1,(Bitu)(safe_strlen(name1)+1));	
 			reg_ax=0x0100;
 			CALLBACK_SCF(false);
 		} else {
@@ -796,7 +869,8 @@ static Bitu DOS_21Handler(void) {
 			break;
 		}
 	case 0x4b:					/* EXEC Load and/or execute program */
-		{ 
+		{
+			result_errorcode = 0;
 			MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
 			LOG(LOG_EXEC,LOG_ERROR)("Execute %s %d",name1,reg_al);
 			if (!DOS_Execute(name1,SegPhys(es)+reg_bx,reg_al)) {
@@ -808,6 +882,8 @@ static Bitu DOS_21Handler(void) {
 //TODO Check for use of execution state AL=5
 	case 0x4c:					/* EXIT Terminate with return code */
 		DOS_Terminate(dos.psp(),false,reg_al);
+		if (result_errorcode)
+			dos.return_code = result_errorcode;
 		break;
 	case 0x4d:					/* Get Return code */
 		reg_al=dos.return_code;/* Officially read from SDA and clear when read */
@@ -872,15 +948,20 @@ static Bitu DOS_21Handler(void) {
 		}
 		break;		
 	case 0x57:					/* Get/Set File's Date and Time */
-		if (reg_al==0x00) {
-			if (DOS_GetFileDate(reg_bx,&reg_cx,&reg_dx)) {
+		if (reg_al == 0x00) {
+			if (DOS_GetFileDate(reg_bx, &reg_cx, &reg_dx)) {
 				CALLBACK_SCF(false);
 			} else {
+				reg_ax = dos.errorcode;
 				CALLBACK_SCF(true);
 			}
-		} else if (reg_al==0x01) {
-			LOG(LOG_DOSMISC,LOG_ERROR)("DOS:57:Set File Date Time Faked");
-			CALLBACK_SCF(false);		
+		} else if (reg_al == 0x01) {
+			if (DOS_SetFileDate(reg_bx, reg_cx, reg_dx)) {
+				CALLBACK_SCF(false);
+			} else {
+				reg_ax = dos.errorcode;
+				CALLBACK_SCF(true);
+			}
 		} else {
 			LOG(LOG_DOSMISC,LOG_ERROR)("DOS:57:Unsupported subtion %X",reg_al);
 		}
@@ -922,7 +1003,7 @@ static Bitu DOS_21Handler(void) {
 			reg_bh=0;	//Unspecified error class
 		}
 		reg_bl=1;	//Retry retry retry
-		reg_ch=0;	//Unkown error locus
+		reg_ch = 0;     // Unknown error locus
 		break;
 	case 0x5a:					/* Create temporary file */
 		{
@@ -930,7 +1011,7 @@ static Bitu DOS_21Handler(void) {
 			MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
 			if (DOS_CreateTempFile(name1,&handle)) {
 				reg_ax=handle;
-				MEM_BlockWrite(SegPhys(ds)+reg_dx,name1,(Bitu)(strlen(name1)+1));
+				MEM_BlockWrite(SegPhys(ds)+reg_dx,name1,(Bitu)(safe_strlen(name1)+1));
 				CALLBACK_SCF(false);
 			} else {
 				reg_ax=dos.errorcode;
@@ -972,14 +1053,29 @@ static Bitu DOS_21Handler(void) {
 			LOG(LOG_DOSMISC,LOG_ERROR)("Get SDA, Let's hope for the best!");
 		}
 		break;
-	case 0x5f:					/* Network redirection */
-		reg_ax=0x0001;		//Failing it
+	case 0x5e:             /* Network and printer functions */
+		if (!reg_al) { // Get machine name
+			int result = gethostname(name1, DOSNAMEBUF);
+			if (!result) {
+				strcat(name1, "               ");
+				name1[15] = 0;
+				MEM_BlockWrite(SegPhys(ds) + reg_dx, name1, 16);
+				reg_cx = 0x1ff;
+				CALLBACK_SCF(false);
+				break;
+			}
+		}
+		reg_al = 1;
+		CALLBACK_SCF(true);
+		break;
+	case 0x5f:               /* Network redirection */
+		reg_ax = 0x0001; // Failing it
 		CALLBACK_SCF(true);
 		break; 
 	case 0x60:					/* Canonicalize filename or path */
 		MEM_StrCopy(SegPhys(ds)+reg_si,name1,DOSNAMEBUF);
 		if (DOS_Canonicalize(name1,name2)) {
-				MEM_BlockWrite(SegPhys(es)+reg_di,name2,(Bitu)(strlen(name2)+1));	
+				MEM_BlockWrite(SegPhys(es)+reg_di,name2,(Bitu)(safe_strlen(name2)+1));	
 				CALLBACK_SCF(false);
 			} else {
 				reg_ax=dos.errorcode;
@@ -1149,7 +1245,6 @@ static Bitu DOS_21Handler(void) {
 	case 0x6b:		            /* NULL Function */
 	case 0x61:		            /* UNUSED */
 	case 0xEF:                  /* Used in Ancient Art Of War CGA */
-	case 0x5e:					/* More Network Functions */
 	default:
 		if (reg_ah < 0x6d) LOG(LOG_DOSMISC,LOG_ERROR)("DOS:Unhandled call %02X al=%02X. Set al to default of 0",reg_ah,reg_al); //Less errors. above 0x6c the functions are simply always skipped, only al is zeroed, all other registers untouched
 		reg_al=0x00; /* default value */
@@ -1308,7 +1403,17 @@ public:
 		}
 	}
 	~DOS(){
-		for (Bit16u i=0;i<DOS_DRIVES;i++) delete Drives[i];
+		//--Modified 2009-12-20 by Alun Bestor to properly clear drives on shutdown.
+		//We could also do this with Files, but DOS_SetupFiles() already does this.
+		for (Bit16u i = 0; i < DOS_DRIVES; i++) {
+			delete Drives[i];
+			Drives[i] = 0;
+		}
+		//--End of modifications
+		// de-init devices, this allows DOSBox to cleanly re-initialize
+		// without throwing an inevitable `DOS: Too many devices added`
+		// exception
+		DOS_ShutDownDevices();
 	}
 };
 

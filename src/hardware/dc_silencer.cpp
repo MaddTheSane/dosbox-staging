@@ -1,8 +1,8 @@
 /*
  *  SPDX-License-Identifier: GPL-2.0-or-later
  *
- *  Copyright (C) 2020-2020  The dosbox-staging team
- *  Copyright (c) 2019-2020  Kevin R Croft <krcroft@gmail.com>
+ *  Copyright (C) 2020-2021  The DOSBox Staging Team
+ *  Copyright (C) 2019-2021  kcgen <kcgen@users.noreply.github.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -20,6 +20,7 @@
  */
 
 #include "dc_silencer.h"
+
 #include "support.h"
 
 void DCSilencer::Configure(const uint32_t sequence_hz,
@@ -51,7 +52,7 @@ void DCSilencer::Configure(const uint32_t sequence_hz,
 bool DCSilencer::Generate(const int16_t dc_offset, const size_t samples, int16_t *buffer)
 {
 	assertm(rad_dt > 0 && vol_dt > 0, "Configure the silencer first");
-	uint16_t i = 0;
+	size_t i = 0;
 	while (vol_pos > 0 && i < samples) {
 		vol_pos -= vol_dt; // keep turning down the volume ..
 		rad_pos += rad_dt; // keep walking around our circle ..

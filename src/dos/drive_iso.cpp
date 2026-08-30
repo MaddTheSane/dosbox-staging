@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,20 +16,21 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "drives.h"
 
 #include <cctype>
 #include <cstring>
+
 #include "cdrom.h"
-#include "dosbox.h"
 #include "dos_mscdex.h"
 #include "dos_system.h"
+#include "string_utils.h"
 #include "support.h"
-#include "drives.h"
 
 #define FLAGS1	((iso) ? de.fileFlags : de.timeZone)
 #define FLAGS2	((iso) ? de->fileFlags : de->timeZone)
 
-class isoFile : public DOS_File {
+class isoFile final : public DOS_File {
 public:
 	isoFile(isoDrive *drive, const char *name, FileStat_Block *stat, uint32_t offset);
 	isoFile(const isoFile &) = delete;            // prevent copying
@@ -143,20 +144,21 @@ Bit16u isoFile::GetInformation(void) {
 }
 
 isoDrive::isoDrive(char driveLetter, const char *fileName, Bit8u mediaid, int &error)
-         :iso(false),
+        : nextFreeDirIterator(0),
+          iso(false),
           dataCD(false),
+          rootEntry{},
           mediaid(0),
           subUnit(0),
           driveLetter('\0')
- {
+{
 	this->fileName[0]  = '\0';
 	this->discLabel[0] = '\0';
-	nextFreeDirIterator = 0;
 	memset(dirIterators, 0, sizeof(dirIterators));
 	memset(sectorHashEntries, 0, sizeof(sectorHashEntries));
 	memset(&rootEntry, 0, sizeof(isoDirEntry));
 
-	safe_strncpy(this->fileName, fileName, CROSS_LEN);
+	safe_strcpy(this->fileName, fileName);
 	error = UpdateMscdex(driveLetter, fileName, subUnit);
 
 	if (!error) {
@@ -179,6 +181,10 @@ isoDrive::isoDrive(char driveLetter, const char *fileName, Bit8u mediaid, int &e
 			Set_Label(buffer,discLabel,true);
 		} else error = 6; //Corrupt image
 	}
+
+    //--Added 2009-10-25 by Alun Bestor to allow Boxer to track the system path for DOSBox drives
+    safe_strcpy(systempath, fileName);
+    //--End of modifications
 }
 
 isoDrive::~isoDrive() { }
@@ -190,7 +196,7 @@ int isoDrive::UpdateMscdex(char drive_letter, const char *path, uint8_t &sub_uni
 		CDROM_Interface_Image *oldCdrom = CDROM_Interface_Image::images[sub_unit];
 		CDROM_Interface *cdrom = new CDROM_Interface_Image(sub_unit);
 		char pathCopy[CROSS_LEN];
-		safe_strncpy(pathCopy, path, CROSS_LEN);
+		safe_strcpy(pathCopy, path);
 		if (!cdrom->SetDevice(pathCopy)) {
 			CDROM_Interface_Image::images[sub_unit] = oldCdrom;
 			delete cdrom;
@@ -543,7 +549,7 @@ bool isoDrive :: lookup(isoDirEntry *de, const char *path) {
 	if (!strcmp(path, "")) return true;
 
 	char isoPath[ISO_MAXPATHNAME];
-	safe_strncpy(isoPath, path, ISO_MAXPATHNAME);
+	safe_strcpy(isoPath, path);
 	strreplace(isoPath, '\\', '/');
 
 	// iterate over all path elements (name), and search each of them in the current de

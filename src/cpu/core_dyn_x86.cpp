@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -21,26 +21,28 @@
 
 #if (C_DYNAMIC_X86)
 
-#include <assert.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
-#include <stddef.h>
-#include <stdlib.h>
+#include <cassert>
+#include <cstdarg>
+#include <cstdio>
+#include <cstring>
+#include <cstddef>
+#include <cstdlib>
 
 #if defined (WIN32)
 #include <windows.h>
 #include <winbase.h>
 #endif
 
-#if (C_HAVE_MPROTECT)
+#if defined(HAVE_MPROTECT) || defined(HAVE_MMAP)
 #include <sys/mman.h>
 
 #include <limits.h>
+
 #ifndef PAGESIZE
 #define PAGESIZE 4096
 #endif
-#endif /* C_HAVE_MPROTECT */
+
+#endif // HAVE_MPROTECT
 
 #include "callback.h"
 #include "regs.h"
@@ -114,9 +116,6 @@ enum BlockReturn {
 	BR_Cycles,
 	BR_Link1,BR_Link2,
 	BR_Opcode,
-#if (C_DEBUG)
-	BR_OpcodeFull,
-#endif
 	BR_Iret,
 	BR_CallBack,
 	BR_SMCBlock
@@ -133,7 +132,6 @@ enum BlockReturn {
 #define DYNFLG_ACTIVE		0x20	//Register has an active value
 
 class GenReg;
-class CodePageHandler;
 
 struct DynReg {
 	Bitu flags;
@@ -160,7 +158,8 @@ static struct {
 
 #define IllegalOption(msg) E_Exit("DYNX86: illegal option in " msg)
 
-#include "dyn_cache.h" 
+#define dyn_return(a,b) gen_return(a)
+#include "dyn_cache.h"
 
 static struct {
 	Bitu callback;
@@ -342,24 +341,20 @@ run_block:
 	case BR_CallBack:
 		return core_dyn.callback;
 	case BR_SMCBlock:
-//		LOG_MSG("selfmodification of running block at %x:%x",SegValue(cs),reg_eip);
+		// LOG_MSG("selfmodification of running block at %x:%x",
+		//         SegValue(cs), reg_eip);
 		cpu.exception.which=0;
-		// fallthrough, let the normal core handle the block-modifying instruction
+		FALLTHROUGH; // let the normal core handle the block-modifying
+		             // instruction
 	case BR_Opcode:
 		CPU_CycleLeft+=CPU_Cycles;
 		CPU_Cycles=1;
 		return CPU_Core_Normal_Run();
-#if (C_DEBUG)
-	case BR_OpcodeFull:
-		CPU_CycleLeft+=CPU_Cycles;
-		CPU_Cycles=1;
-		return CPU_Core_Full_Run();
-#endif
 	case BR_Link1:
 	case BR_Link2:
 		{
 			Bit32u temp_ip=SegPhys(cs)+reg_eip;
-			CodePageHandler * temp_handler=(CodePageHandler *)get_tlb_readhandler(temp_ip);
+			CodePageHandler* temp_handler = reinterpret_cast<CodePageHandler *>(get_tlb_readhandler(temp_ip));
 			if (temp_handler->flags & (cpu.code.big ? PFLAG_HASCODE32:PFLAG_HASCODE16)) {
 				block=temp_handler->FindCacheBlock(temp_ip & 4095);
 				if (!block || !cache.block.running) goto restart_core;
@@ -378,7 +373,7 @@ Bits CPU_Core_Dyn_X86_Trap_Run(void) {
 	cpu.trap_skip = false;
 
 	Bits ret=CPU_Core_Normal_Run();
-	if (!cpu.trap_skip) CPU_HW_Interrupt(1);
+	if (!cpu.trap_skip) CPU_DebugException(DBINT_STEP,reg_eip);
 	CPU_Cycles = oldCycles-1;
 	cpudecoder = &CPU_Core_Dyn_X86_Run;
 

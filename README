@@ -1,4 +1,4 @@
-DOSBox (dosbox-staging) 0.76.0 Manual
+DOSBox (dosbox-staging) 0.78.1 Manual
 
 ======
 INDEX:
@@ -49,6 +49,8 @@ MOUSE:      The mouse doesn't work.
 SOUND:      There is no sound.
 SOUND:      What sound hardware does DOSBox presently emulate?
 SOUND:      The sound stutters or sounds stretched/weird.
+KEYBOARD:   My keyboard's F1-F12 keys don't work.
+KEYBOARD:   Common key-presses conflict with system actions on macOS.
 KEYBOARD:   I can't type \ or : in DOSBox.
 KEYBOARD:   Right Shift and "\" doesn't work in DOSBox. (Windows only)
 KEYBOARD:   The keyboard lags.
@@ -75,9 +77,34 @@ START: How to start?
 
 
 AUTOMATION: Do I always have to type these commands?
-    In the DOSBox configuration file is an [autoexec] section. The commands
-    present there are run when DOSBox starts, so you can use this section
-    for the mounting. Look at Section 13: "The configuration (options) file".
+    DOSBox configuration files contain an [autoexec] section that holds
+    one or more commands, listed line by line, just as you would type them
+    into the DOSBox command prompt. The [autoexec] section is run on startup.
+
+    When multiple configuration files are loaded that each have [autoexec]
+    sections, DOSBox Staging by default joins these sections into a combined
+    [autoexec] that's run.
+
+    If you prefer to only run the most recently processed [autoexec] when
+    multiple configuration files are provided, you can set the "autoexec_section"
+    setting to "overwrite", in the [dosbox] section.  When in this mode, the
+    the overwrite-order is as follows:
+
+    1. Highest priority are those command(s) provided on the command line.
+    2. Second is the [autoexec] section from the last processed custom conf file.
+       This would be custom2 if: dosbox -conf custom1.conf -conf custom2.conf
+    3. Third is the [autoexec] section from the local conf, ie: when
+       dosbox.conf is present in the current directory
+    4. Last is the [autoexec] section from the user's portable or primary conf,
+       where:
+        - The portable conf is dosbox-staging.conf that (may) reside along-side
+          the DOSBox executable.
+        - The primary conf is dosbox-staging.conf that (may) reside in the
+          user's configuration directory, which varies by operating system.
+
+    This ordering of configuration files is also discussed in Section 3:
+    "Command Line Parameters", and specific configuration file settings are
+    discussed in Section 13: "The configuration (options) file".
 
 
 FULLSCREEN: How do I change to fullscreen?
@@ -94,7 +121,7 @@ FULLSCREEN: My fullscreen is too large.
     on top of dosbox resizing the screen, which can happen for the output:
     texture, texturenb, opengl, openglnb. You can disable this Windows behaviour
     by enabling a specific compatibility setting:
- 
+
     - Right-click the DOSBox icon and select "Properties".
     - Go to the "Compatibility" tab.
     - Click on "Change high DPI settings".
@@ -102,8 +129,9 @@ FULLSCREEN: My fullscreen is too large.
     - Apply the changes by clicking on "OK".
 
     Unfortunately, this compatibility option causes some side effects in
-    windowed mode, and in this case you will need to change the resolution
-    in the config/Options file for windowresolution (e.g. 1024x768).
+    windowed mode, and in this case you will need to change the windowresolution
+    setting in your config file to either a fixed size (e.g. 1024x768) or
+    a relative size: (e.g. small, medium, or large).
 
     Alternatively, you can disable the display scaling and or use a lower
     fullresolution value.
@@ -139,7 +167,8 @@ MOUSE: The mouse doesn't work.
     Usually, DOSBox detects when a game uses mouse control. When you click on
     the screen it should get locked (confined to the DOSBox window) and work.
     With certain games, the DOSBox mouse detection doesn't work. In that case
-    you will have to lock the mouse manually by pressing CTRL-F10.
+    you will have to lock the mouse manually by pressing Ctrl+F10 (or Cmd+F10
+    on macOS).
 
 
 SOUND: There is no sound.
@@ -196,9 +225,9 @@ SOUND: What sound hardware does DOSBox presently emulate?
     - MPU-401
       A MIDI passthrough interface is also emulated. This method of sound
       output will only work when used with external device/emulator.
-      Every Windows XP/Vista/7 and Mac OS X has got a default emulator 
-      compatible with: Sound Canvas/SCC/General Standard/General MIDI/Wave 
-      Blaster. A different device/emulator is needed for 
+      Every Windows XP/Vista/7 and Mac OS X has got a default emulator
+      compatible with: Sound Canvas/SCC/General Standard/General MIDI/Wave
+      Blaster. A different device/emulator is needed for
       Roland LAPC/CM-32L/MT-32 compatibility.
 
 
@@ -213,12 +242,52 @@ SOUND: The sound stutters or sounds stretched/weird.
     Section 11: "Troubleshooting".
 
 
+KEYBOARD: My keyboard's F1-F12 keys don't work.
+    This can happen on macOS, mini-keyboards, and some laptops.
+
+    Find and hold the 'Function' or 'Fn' key while pressing an F-key.
+    The 'Fn' key is often located in the lower-left corner of the keyboard.
+
+    On macOS, you can change the top row of keys to work as standard F-keys
+    without holding the 'Fn' key. In your system's keyboard preferences:
+    select "Use F1, F2, etc. keys as standard function keys". Learn more
+    here: https://support.apple.com/en-us/HT204436
+
+    Note: some custom keyboards might still intercept one or more F-keys, even
+    after the above steps have been performed. Please refer to your keyboard's
+    documentation for more information.
+
+KEYBOARD: Common key-presses conflict with system actions on macOS
+
+    Conflict: Command+F5
+    Where: Settings > Keyboard > Shortcuts > Accessibility
+    What: Disable the "Turn VoiceOver on or off" shortcut
+
+    Conflict: F11
+    Where: Settings > Keyboard > Shortcuts > Mission Control
+    What: Disable the "Show Desktop" shortcut
+
+    Conflict: Control+arrow keys
+    Where: Settings > Keyboard > Shortcuts > Mission Control
+    What: Disable the following shortcuts:
+     - "Mission Control" to deconflict Control+Up
+     - "Application windows" to deconflict Control+Down
+     - "Move left a space" to deconflict Control+Left
+     - "Move right a space" to deconflict Control+Right
+
+KEYBOARD: The numlock and capslock state isn't correct.
+    A known issue prevents SDL from reading the numlock and capslock
+    states on startup. Until this is resolved, we recommend toggling these
+    off prior to starting DOSBox. After startup, you may use numlock and
+    capslock as desired.
+
 KEYBOARD: I can't type \ or : in DOSBox.
     This can happen in various cases, like your host keyboard layout does not
     have a matching DOS layout representation (or it was not correctly
     detected), or the key mapping is wrong.
     Some possible fixes:
-      1. Use / instead, or ALT-58 for : and ALT-92 for \.
+      1. Use / instead, or Alt+58 for : and Alt+92 for \.
+         On macOS, use the Option key, for example: Opt+58 and Opt+92.
       2. Change the DOS keyboard layout (see Section 8: "Keyboard Layout").
       3. Add the commands you want to execute to the [autoexec] section
          of the DOSBox configuration file.
@@ -227,9 +296,9 @@ KEYBOARD: I can't type \ or : in DOSBox.
 
     Note that if the host layout can not be identified, or keyboardlayout is
     set to none in the DOSBox configuration file, the standard US layout is
-    used. In this configuration try the keys around "enter" for the key \
-    (backslash), and for the key : (colon) use shift and the keys between
-    "enter" and "L".
+    used. In this configuration try the keys around "Enter" for the key \
+    (backslash), and for the key : (colon) use Shift and the keys between
+    "Enter" and "L".
 
 
 KEYBOARD: The keyboard lags.
@@ -239,12 +308,14 @@ KEYBOARD: The keyboard lags.
 
 
 CONTROL: The character/cursor/mouse pointer always moves into one direction!
-    See if it still happens if you disable the joystick emulation,
-    set joysticktype=none in the [joystick] section of your DOSBox
-    configuration file. Maybe also try unplugging any joystick/gamepad.
-    If you want to use the joystick in the game, try setting timed=false
-    and be sure to calibrate the joystick (both in your OS as well as
-    in the game or the game's setup program).
+    See if it still happens if you disable the joystick emulation:
+    First try setting joysticktype=none or joysticktype=disabled in
+    the [joystick] section of your DOSBox configuration file.
+    Also try unplugging any joysticks or gamepads.
+
+    If you want to use the joystick in the game, try setting
+    timed=false and be sure to calibrate the joystick (both in your OS
+    as well as in the game or the game's setup program).
 
 
 SPEED: The game/application runs much too slow/too fast!
@@ -304,9 +375,10 @@ To be able to use Command Line Parameters:
 The options are valid for all operating systems unless noted in the option
 description:
 
-dosbox [-fullscreen] [-startmapper] [-noautoexec] [-securemode] [-userconf]
-       [-scaler scaler | -forcescaler scaler] [-conf congfigfile]
-       [-lang langfile] [-machine machine-type] [-socket socketnumber]
+dosbox [-fullscreen] [-startmapper] [-noautoexec] [-securemode]
+       [-noprimaryconf] [-nolocalconf] [-conf congfigfile]
+       [-scaler scaler | -forcescaler scaler] [-lang langfile]
+       [-machine machine-type] [-socket socketnumber]
        [-c command] [-noconsole] [-exit] [NAME]
 
 dosbox --version
@@ -327,8 +399,16 @@ dosbox -opencaptures program
         If "NAME" is an executable it will mount the directory of "NAME"
         as the C: drive and execute "NAME".
 
+        If "NAME" in an execuatble and the startup_verbosity configurable
+        setting is "auto" (or "low" or "quiet"), then the introductory
+        splash-screen and text help banner will not be shown.  This is known
+        as instant-launch.
+
   -exit
         DOSBox will close itself when the DOS application "name" ends.
+        If the above conditions for instant-launch are true, then the -exit
+        flag is implied, and DOSBox will quit as soon as the executable
+        "NAME" terminates.
 
   -c command
         Runs the specified command before running "name". Multiple commands
@@ -339,15 +419,52 @@ dosbox -opencaptures program
   -fullscreen
         Starts DOSBox in fullscreen mode.
 
-  -userconf
-        Start DOSBox with the users specific configuration file. Can be used
-        together with multiple -conf parameters, but -userconf will always be 
-        loaded before them.
+  -noprimaryconf, -nolocal, and -conf:
 
-  -conf configfilelocation
-        Start DOSBox with the options specified in "configfilelocation".
-        Multiple -conf options may be present.
-        See Section 13: "The configuration (options) file" for more details.
+        DOSBox Staging uses a layered configuration approach, as follows:
+
+        1. If a dosbox-staging.conf file is found along-side the
+           DOSBox executable, known as a portable layout, then this
+           configuration file is loaded first. In this case, the
+           executable's directory is used to load other assets such as
+           glshaders, mt32-roms, and soundfonts.
+
+           If a portable layout isn't found, the user's primary
+           configuration file is loaded from the operating system's
+           user configuration directory. This can be thought of as
+           your "global" configuration file, The -noprimaryconf flag
+           can be used in cases where you want to avoid loading your
+           primary conf file.
+
+        2. Second, if the local directory contains a dosbox.conf file,
+           its settings override those previously set by your portable
+           or primary file. The -nolocalconf flag can be used in cases
+           where you want to avoid loading the local dosbox.conf file.
+
+        3. Finally, custom configurations are layered on, in order,
+           using one or more -conf <filename> arguments. For example:
+           dosbox -conf myshader.conf -conf myaudio.conf
+           These settings override those previously set by either the
+           Local or Primary configurations.
+
+        This layered approach means you can start with general settings
+        (from your Primary conf) and increasingly fine-tune them for a specific
+        game.
+
+        If the [dosbox] "autoexec_section" setting is "overwrite", then
+        the same priority order applies when multiple configuration files
+        provide the [autoexec] section: DOSBox Staging will execute [autoexec]
+        only from the end-most (or highest priority) configuration file.
+
+        Additionally, if you've passed commands as arguments directly on the
+        command line, ie: dosbox /path/game/run.bat, then these take priority
+        over any prior [autoexec] sections - to avoid mount and launch
+        conflicts.
+
+        If you wish to use the original behavior where [autoexec] sections
+        are joined into a combined set of commands, then set the [dosbox]
+        "autoexec_section" setting to "join". This is also the default.
+
 
   -lang languagefilelocation
         Start DOSBox using the language specified in "languagefilelocation".
@@ -355,12 +472,26 @@ dosbox -opencaptures program
 
   -machine machinetype
         Setup DOSBox to emulate a specific type of machine. Valid choices are:
-        hercules, cga, ega, pcjr, tandy, svga_s3 (default) as well as
-        the additional SVGA chipsets listed in the DOSBox configuration file.
-        svga_s3 enables VESA emulation as well.
+        - hercules      - Hercules Graphics Card (monochrome)
+        - cga           - IBM Color Graphics Adapter
+        - cga_mono      - IBM CGA attached to monochrome display (monochrome)
+        - pcjr          - IBM PCjr
+        - tandy         - Tandy Graphics Adapter (Tandy 1000)
+        - ega           - IBM Enhanced Graphics Adapter
+        - vgaonly       - IBM Video Graphics Array (see below)
+        - vesa_oldvbe   - VESA SVGA - VESA BIOS Extensions (VBE) 1.2
+        - vesa_nolfb    - VESA SVGA - VBE 2.0 with Linear Frame Buffer disabled
+        - svga_paradise - VESA SVGA - Paradise Systems PVGA1A - VBE 2.0
+        - svga_et3000   - VESA SVGA - Tseng ET3000 - VBE 2.0
+        - svga_et4000   - VESA SVGA - Tseng ET4000 - VBE 2.0
+        - svga_s3       - VESA SVGA - S3 Trio - VBE 2.0
+
+        The default is svga_s3.
+
         For some special VGA effects the machinetype vgaonly can be used,
         note that this disables SVGA capabilities and might be slower due to the
         higher emulation precision.
+
         The machinetype affects the video card and the available sound cards.
 
   -noconsole (Windows Only)
@@ -429,6 +560,17 @@ dosbox D:\folder\file.exe -c "MOUNT Y H:\MyFolder"
 
 In Windows, you can also drag directories/files onto the DOSBox executable.
 
+
+Environment variables
+---------------------
+
+Any configuration option can be overridden using an environment variable.
+Environment variables starting with prefix "DOSBOX" are processed and
+interpreted as follows: DOSBOX_SECTIONNAME_PROPERTYNAME=value
+
+For example, you can override render aspect with:
+
+  $ DOSBOX_RENDER_ASPECT=false dosbox
 
 
 =====================
@@ -603,10 +745,10 @@ CONFIG -get "section property"
   -writeconf filelocation
      (or -wc filelocation)
      Write the current configuration settings to a file in a specified location
-     relative to the DOSBox config directory. Relative and absolute paths are 
-     possible. "filelocation" is located on the local drive, not a mounted 
+     relative to the DOSBox config directory. Relative and absolute paths are
+     possible. "filelocation" is located on the local drive, not a mounted
      drive in DOSBox.
-     
+
      The configuration file controls various settings of DOSBox:
      the amount of emulated memory, the emulated sound cards and many more
      things. It allows access to AUTOEXEC.BAT as well.
@@ -617,16 +759,16 @@ CONFIG -get "section property"
      Write the configuration to the primary loaded config file.
 
   -wcp filelocation
-     Write the current configuration settings to the specified file in or 
-     relative to the DOSBox program start directory. Realtive and absolute 
+     Write the current configuration settings to the specified file in or
+     relative to the DOSBox program start directory. Relative and absolute
      paths are possible. This is located on a drive on the host, not a mounted
      drive in DOSBox. It is useful if you keep DOSBox on a removable media.
      If file is omitted, the configuration will be written to dosbox.conf.
-     
+
   -wcd
      Write the current configuration to the default config file.
-        
-     
+
+
   -writelang filelocation
      (or -wl filelocation)
      Write the current language settings to a file in a specified location.
@@ -640,7 +782,7 @@ CONFIG -get "section property"
 
   -axclear
      Clears the autoexec section.
-     
+
   -axtype
      Prints the content of the autoexec section.
 
@@ -648,7 +790,7 @@ CONFIG -get "section property"
      Restart DOSBox, either with the parameters that were used to start the
      current instance or any that are appended.
 
-  -l 
+  -l
      lists DOSBox parameters:
      - the configuration directory
      - the config files that were used when starting this session
@@ -659,16 +801,16 @@ CONFIG -get "section property"
 
   -h, -help, -? sections
      Displays the list of sections in the config file.
-  
+
   -h, -help, -? section
      Displays the list of properties contained in the specified section.
-     
+
   -h, -help, -? section property
      Shows information about the specified property in the specified section:
      - purpose of the property
      - possible values, current value, default value
-     - wether it can definitely not be changed at runtime
-       
+     - whether it can definitely not be changed at runtime
+
   -securemode
      Switches DOSBox to a more secure mode. In this mode the internal
      commands MOUNT, IMGMOUNT and BOOT won't work. It's not possible either
@@ -738,17 +880,18 @@ LOADFIX -f
 
 RESCAN [Drive:] [-All]
   Make DOSBox reread the directory structure. Useful if you changed something
-  on a mounted drive outside of DOSBox. (CTRL - F4 does this as well!)
-  
-  Drive: 
+  on a mounted drive outside of DOSBox. Ctrl+F4 (or Cmd+F4 on macOS) does
+  this as well!
+
+  Drive:
         Drive to refresh.
 
   -All
         Refresh all drives.
 
-  if both a Drive: and -All are missing, then the current drive will be 
+  if both a Drive: and -All are missing, then the current drive will be
   refreshed.
-  
+
 
 MIXER
   Makes DOSBox display its current volume settings.
@@ -770,15 +913,15 @@ MIXER
      of the volume levels.
 
   /LISTMIDI
-     In Windows lists the available midi devices on your PC. To select a device
-     other than the Windows default midi-mapper, change the line 'midiconfig='
-     in the [midi] section of the configuration file to 'midiconfig=id', where
-     'id' is the number for the device as listed by LISTMIDI. eg. midiconfig=2
+     Lists your PC's MIDI devices. To use one, set the 'midiconfig' attribute 
+     in your configuration file to the device's numerical ID or any part of
+     its textual name. For example:
 
-     In Linux this option doesn't work, but you get similar results by using
-     'pmidi -l' in console. Then change the line 'midiconfig=' to 
-     'midiconfig=port', where 'port' is the port for the device as listed by 
-     'pmidi -l'. eg. midiconfig=128:0
+     Examples:
+
+     (any OS)  midiconfig = name   # matches any part of name, case-insensitive
+     (Linux)   midiconfig = 128:0  # connects to specific port
+     (Windows) midiconfig = 2      # connects to specific port
 
 
 IMGMOUNT
@@ -801,7 +944,7 @@ IMGMOUNT
   imagefile1 imagefile2 .. imagefileN
       Location of the image files to mount in DOSBox. Specifying a number
       of image files is only allowed for CD-ROM images.
-      The CD's can be swapped with CTRL-F4 at any time.
+      The CD's can be swapped with Ctrl+F4 (or Cmd+F4 on macOS) at any time.
       This is required for games which use multiple CD-ROMs and require the CD
       to be switched during the gameplay at some point.
 
@@ -823,15 +966,24 @@ IMGMOUNT
               the files available from inside DOSBox.
         none: DOSBox will make no attempt to read the file system on the disk.
               This is useful if you need to format it or if you want to boot
-              the disk using the BOOT command. When using the "none"
-              filesystem, you must specify the drive number (2 or 3,
-              where 2 = master, 3 = slave) rather than a drive letter.
-              For example, to mount a 70MB image as the slave drive device,
-              you would type (without the quotes):
-                "imgmount 3 d:\test.img -size 512,63,16,142 -fs none"
-                Compare this with a mount to be able to access the drive
-                within DOSBox, which would read as:
-                "imgmount e: d:\test.img -size 512,63,16,142"
+              the disk using the BOOT command.
+
+              When using the "none" filesystem, you must specify a drive number:
+
+              Drive number  Will be mounted as ...
+              ------------  ----------------------
+              0             A: in DOS
+              1             B: in DOS, if A: is already mounted
+              2             C: in DOS
+              3             D: in DOS, if C: is already mounted
+
+              For example, if C: has already been mounted and you want
+              to mount a 70MB image as D:, you would use:
+                imgmount 3 d:\test.img -size 512,63,16,142 -fs none
+
+              Note how this differs versus imgmount'ing an image with
+              read-only access, which is:
+                imgmount e: d:\test.img -size 512,63,16,142
 
   -size
      The Cylinders, Heads and Sectors of the drive.
@@ -857,7 +1009,7 @@ BOOT
   the operating system emulation offered by DOSBox. This will allow you to
   play booter floppies or boot other operating systems inside DOSBox.
   If the target emulated system is PCjr (machine=pcjr) the boot command
-  can be used to load PCjr cartridges (.jrc). 
+  can be used to load PCjr cartridges (.jrc).
 
   BOOT [diskimg1.img diskimg2.img .. diskimgN.img] [-l driveletter]
   BOOT [cart.jrc]  (PCjr only)
@@ -865,15 +1017,15 @@ BOOT
   diskimg1.img diskimg2.img .. diskimgN.img
      This can be any number of floppy disk images one wants mounted after
      DOSBox boots the specified drive letter.
-     To swap between images, hit CTRL-F4 to change from the current disk
-     to the next disk in the list. The list will loop back from the last
-     disk image to the beginning.
+     To swap between images, hit Ctrl+F4 (or Cmd+F4 on macOS) to change from
+     the current disk to the next disk in the list. The list will loop back
+     from the last disk image to the beginning.
 
   [-l driveletter]
      This parameter allows you to specify the drive to boot from.
      The default is the A drive, the floppy drive. You can also boot
-     a hard drive image mounted as master by specifying "-l C"
-     without the quotes, or the drive as slave by specifying "-l D"
+     a hard drive image mounted as primary by specifying "-l C"
+     without the quotes, or the drive as secondary by specifying "-l D"
 
    cart.jrc (PCjr only)
      When emulation of a PCjr is enabled, cartridges can be loaded with
@@ -993,10 +1145,11 @@ KEYB [keyboardlayoutcode [codepage [codepagefile]]]
   Examples:
     1. To load the polish typist keys layout (automatically uses codepage 852):
          keyb pl214
-    2. To load one of russian keyboard layouts with codepage 866:
+    2. To load one of Russian keyboard layouts with codepage 866:
          keyb ru441 866
-       In order to type russian characters press ALT+RIGHT-SHIFT.
-    3. To load one of french keyboard layouts with codepage 850 (where the
+       In order to type Russian characters press Alt+Right+Shift.
+       On macOS, use the Option key intead of Alt: Opt+Right+Shift.
+    3. To load one of French keyboard layouts with codepage 850 (where the
        codepage is defined in EGACPI.DAT):
          keyb fr189 850 EGACPI.DAT
     4. To load codepage 858 (without a keyboard layout):
@@ -1012,11 +1165,11 @@ AUTOTYPE [-list] [-w WAIT] [-p PACE] button_1 [button_2 [...]]
 
   It can be used to reliably skip intros, answer Q&A style questions that
   some games ask on startup, or to script a simple demo.
-  
+
   Typing is initially delayed by the WAIT time, which defaults to 2 seconds.
   The delay between keystrokes is defined by the PACE time, which defaults
   to 0.5 seconds.
-  
+
   The comma character "," adds an extra delay similar to modern phone numbers.
 
   -list: prints all available button names.
@@ -1043,44 +1196,40 @@ For more information use the /? command line switch with the programs.
 5. Special Keys:
 ================
 
-ALT-ENTER     Switch to full screen and back.
-ALT-PAUSE     Pause emulation (hit ALT-PAUSE again to continue).
-CTRL-F1       Start the keymapper.
-CTRL-F4       Change between mounted floppy/CD images. Update directory cache 
-              for all drives.
-CTRL-ALT-F5   Start/Stop creating a movie of the screen. (avi video capturing)
-CTRL-F5       Save a screenshot. (PNG format)
-CTRL-F6       Start/Stop recording sound output to a wave file.
-CTRL-ALT-F7   Start/Stop recording of OPL commands. (DRO format)
-CTRL-ALT-F8   Start/Stop the recording of raw MIDI commands.
-CTRL-F7       Decrease frameskip.
-CTRL-F8       Increase frameskip.
-CTRL-F9       Kill DOSBox.
-CTRL-F10      Capture/Release the mouse.
-CTRL-F11      Slow down emulation (Decrease DOSBox Cycles).
-CTRL-F12      Speed up emulation (Increase DOSBox Cycles)*.
-ALT-F12       Unlock speed (turbo button/fast forward)**.
-CTRL-ALT-HOME Restart DOSBox.
-F11, ALT-F11  (machine=cga) change tint in NTSC output modes***.
-F11           (machine=hercules) cycle through amber, green, white colouring***.
+Alt+Enter     Switch between fullscreen and window mode.*
+Alt+Pause     Pause/Unpause emulator.*
+Ctrl+F1       Start the keymapper*.
+Ctrl+F4       Change between mounted floppy/CD images. Update directory cache
+              for all drives*.
+Ctrl+F5       Save a screenshot*. (PNG format)
+Ctrl+F6       Start/Stop recording sound output to a wave file*.
+Ctrl+F7       Start/Stop recording video output to a zmbv file*.
+Ctrl+F9       Shutdown emulator*.
+Ctrl+F10      Capture/Release the mouse*.
+Ctrl+F11      Slow down emulation (Decrease DOSBox Cycles)*.
+Ctrl+F12      Speed up emulation (Increase DOSBox Cycles)* and **.
+Alt+F12       Unlock speed (turbo button/fast forward)***.
+Ctrl+Alt+Home Restart DOSBox.*
+F11, Alt+F11  (machine=cga) change tint in NTSC output modes* and ****.
+F11           (machine=hercules) cycle through amber, green, white colouring****.
 
-*NOTE: Once you increase your DOSBox cycles beyond your computer CPU resources,
-       it will produce the same effect as slowing down the emulation.
-       This maximum will vary from computer to computer.
+*NOTE: On macOS, use Command+F<key> instead of Ctrl+F<key>, and the Option key
+       instead of the Alt key. For help enabling or pressing your top-row F-keys,
+       see the FAQ at the top.
 
-**NOTE: You need free CPU resources for this (the more you have, the faster
-        it goes), so it won't work at all with cycles=max or a too high amount
-        of fixed cycles. You have to keep the keys pressed for it to work!
+**NOTE: Once you increase your DOSBox cycles beyond your computer CPU resources,
+        it will produce the same effect as slowing down the emulation.
+        This maximum will vary from computer to computer.
 
-***NOTE: These keys won't work if you saved a mapper file earlier with
-         a different machine type. So either reassign them or reset the mapper.
+***NOTE: You need free CPU resources for this (the more you have, the faster
+         it goes), so it won't work at all with cycles=max or a too high amount
+         of fixed cycles. You have to keep the keys pressed for it to work!
+
+****NOTE: These keys won't work if you saved a mapper file earlier with
+          a different machine type. So either reassign them or reset the mapper.
 
 These are the default keybindings. They can be changed in the keymapper
-(see Section 7: "KeyMapper"). 
-
-In Mac OS X you can try using cmd(applekey) together with Ctrl (and/or ) Fn, 
-if the key doesn't work i.e. fn-cmd-ctrl-F1, but some keys may still need 
-remapping (in Linux too).
+(see Section 7: "KeyMapper").
 
 Saved/recorded files can be found in:
 
@@ -1132,8 +1281,9 @@ inside DOSBox, try a different 'timed' setting in DOSBox's configuration file.
 7. KeyMapper:
 =============
 
-Start the DOSBox mapper either with CTRL-F1 (see Section 5: "Special Keys") or
--startmapper (see Section 3: "Command Line Parameters"). 
+Start the DOSBox mapper either with Ctrl+F1 (Cmd+F1 on macOS) also see
+Section 5: "Special Keys") or pass the -startmapper argument to the DOSBox
+executable (see Section 3: "Command Line Parameters").
 You are presented with a virtual keyboard and a virtual joystick.
 
 These virtual devices correspond to the keys and events DOSBox will
@@ -1158,7 +1308,7 @@ BIND
     joystick(s) (as reported by SDL), which is connected to the EVENT.
 mod1,2,3
     Modifiers. These are keys you need to have to be pressed while pressing
-    BIND. mod1 = CTRL and mod2 = ALT. These are generally only used when you
+    BIND. mod1 = Ctrl and mod2 = Alt. These are generally only used when you
     want to change the special keys of DOSBox.
 Add
     Add a new BIND to this EVENT. Basically add a key from your keyboard or an
@@ -1247,9 +1397,11 @@ Layout switching
 
   Some keyboard layouts (for example layout GK319 codepage 869 and layout RU441
   codepage 808) have support for dual layouts that can be accessed by pressing
-  LeftALT+RrightSHIFT for one layout and LeftALT+LeftSHIFT for the other.
+  Left Alt+Right Shift for one layout and Left Alt+Left Shift for the other.
+  (on macOS, use Option+Right Shift and Option+Left Shift).
   Some keyboard layouts (for example layout LT456 codepage 771) have support
-  for three layouts, third can be accessed by pressing LeftALT+LeftCTRL
+  for three layouts, third can be accessed by pressing Left Alt+Left Ctrl
+  (on macOS: Left Option+Left Ctrl).
 
 Supported external files
   The FreeDOS .kl files are supported (FreeDOS keyb2 keyboard layoutfiles) as
@@ -1282,22 +1434,24 @@ by DOSBox.
 
 
 
-===========================================
-9. Serial Modem: Multiplayer and BBS Gaming
-===========================================
+============================================
+9. Serial Modem: Multiplayer and BBS Support
+============================================
 
-DOSBox can emulate a serial nullmodem cable over network and internet.
-It can be configured through the [serialports] section in the DOSBox
-configuration file.
+Multiplayer Gaming: nullmodem connection over TCP
+-------------------------------------------------
+
+DOSBox can emulate a serial nullmodem cable allowing connectivity over
+a TCP/IP network. It can be configured through the [serialports] section
+in the configuration file.
 
 To create a nullmodem connection, one side needs to act as the server and
-one as the client.
+the other as the client.
+  - The server-side is configured as follows:
+      serial1 = nullmodem
 
-The server needs to be set up in the DOSBox configuration file like this:
-   serial1=nullmodem
-
-The client:
-   serial1=nullmodem server:<IP or name of the server>
+  - The client-side:
+      serial1 = nullmodem server:<IP or name of the server>
 
 Now start your game and choose nullmodem / serial cable / already connected
 as multiplayer method on COM1. Set the same baudrate on both computers.
@@ -1316,7 +1470,8 @@ of the nullmodem connection. These are all parameters:
  * transparent:1 - Only send the serial data, no RTS/DTR handshake. Use this
                    when connecting to anything other than a nullmodem.
  * telnet:1      - Interpret Telnet data from the remote site. Automatically
-                   sets transparent.
+                   sets transparent.  This should only be used when the server
+                   is being hosted behind a Telnet server.
  * usedtr:1      - The connection will not be established until DTR is switched
                    on by the DOS program. Useful for modem terminals.
                    Automatically sets transparent.
@@ -1327,23 +1482,73 @@ of the nullmodem connection. These are all parameters:
 Example: Be a server listening on TCP port 5000.
    serial1=nullmodem server:<IP or name of the server> port:5000 rxdelay:1000
 
-BBS Gaming
-----------
-DOSBox's serial interface can emulate a telephone modem, which allows original
-DOS terminal applications to either dial or host a BBS on the Internet 
-via the Telnet protocol.
 
-First, configure DOSBox with a serial port emulating a modem:
+BBS Support: softmodem connection over TCP
+------------------------------------------
+DOSBox emulates a hardware modem allowing one to either host or dial a BBS
+across the Internet.
 
-   [serial]
-   serial1 = modem listenport:2323
+To host a BBS:
 
-Next, launch your favorite DOS terminal or BBS hosting software and configure
-its corresponding serial port with default settings, as follows:
+ 1) Configure DOSBox's serial port as follows:
+
+    [serial]
+    serial1 = modem telnet:1 listenport:2323
+
+    A port greater than 1024 allows you to run DOSBox as a normal user instead
+    of requiring root or administrator rights.
+
+ 2) Launch and configure your preferred DOS-based BBS software such as Renegade,
+    Synchronet, or WWIV.
+
+ 3) To allow someone on the Internet to connect to your DOSBox BBS,
+    you will (likely) need to open a port on your router/firewall and
+    forward it into your DOSBox BBS machine.  We suggest opening port 23,
+    the standard Telnet port, and forwarding it into your DOSBox machine's
+    IP listening on port 2323. Consult your router's manual or a How-to
+    guide for more information regarding port-forwarding and service hosting.
+
+To "dial" a BBS:
+
+ 1) Configure DOSBox's serial port as follows:
+
+    [serial]
+    serial1 = modem listenport:2323
+
+    If you're positive that all the BBSes you plan to dial are hosted
+    behind Telnet servers, then Configure DOSBox's serial port as
+    follows:
+
+    [serial]
+    serial1 = modem telnet:1 listenport:2323
+
+ 2) Set the phone number of the BBS to its hostname or IP, optionally
+    followed by the port number, as follows:
+
+      - BBS on standard Telnet port (23): remote.bbs.com
+      - BBS on a non-standard port: remote.bbs.com:10024
+
+ 3) If the BBS is hosted behind a Telnet interface and the telnet:1
+    configuration option is not applied to your serial port (described
+    in step 1), then customize your dial-prefix to enable telnet-mode
+    as follows:
+
+      AT+NET1DT
+
+    If file-transfers fail or are corrupted for a particular, BBS then it's
+    likely hosted directly on the Internet using a TCP-to-serial gateway as
+    used by vintage BBSes (e.g. Commodore, Apple, Atari, etc.). In this case,
+    use the default dial-prefix or explicitly disable telnet-mode for this BBS:
+
+      ATDT       (default)
+      AT+NET0DT  (explicitly disable telnet-mode)
+
+In general, the default communication port settings should be left as-is.
+Typically these are:
 
   COM1:
     - COM port 1
-    - 8N1 data-bits, stop-bits, and parity
+    - 8N1, meaning: data-bits (8), parity (none), and stop-bits (1).
     - 57600 baud
     - 03F8 address
     - IRQ4 interrupt
@@ -1352,38 +1557,11 @@ its corresponding serial port with default settings, as follows:
     - Hardware flow control (CTS/RTS) enabled
     - Hardware flow control (DSR/DTR) disabled
 
-To dial BBSes on the Internet:
 
-  1) Set your dialing prefix to: ATNET1^MATDT to ensure file-transfers
-     and command mode transitions and handled properly.
-
-  2) Set the phone number of the BBS to its hostname or IP, optionally
-     followed by the Telnet port number, for example:
-
-      - Phone number on non-standard port: remote.bbs.com:2323
-      - Phone number on standard port 23: remote.bbs.com
-
-To host a DOS-based BBS:
-
- 1) Configure your DOSBox serial port to listen on a Telnet port greater
-    than 1024. This allows you to run DOSbox with normal user privileges
-    as opposed to granting it root or administrator privileges, for example:
- 
-    [serial]
-    serial1 = modem listenport:2323
-
- 2) Configure your DOSBox machine to use a static IP address or be assigned
-    a static IP via DHCP, which can typically be configured in your router.
-
- 3) If your DOSBox machine is behind a router/firewall, add a port-
-    fowarding entry to listen on TCP port 23 and pass it through to
-    port 2323 to your DOSBox machine's IP address.  This allows Internet
-    users to "dial" your BBS using the default Telnet port.
-	
 Phone book
 ----------
 You can map fake phone numbers to Internet addresses which is useful for programs
-where limitations on phone number input field are too strict.
+where limitations on the phone number input field are too strict.
 Create a text file with the name specified in "phonebookfile" entry in [serial]
 section in the DOSBox configuration file and add phone-address pairs per line,
 for example:
@@ -1415,9 +1593,9 @@ CPU Cycles (speed up/slow down)
   You can force the slow or fast behavior by setting a fixed amount of cycles
   in the DOSBox's configuration file. If you set for example cycles=10000, the
   DOSBox window will display a line "CPU speed: fixed 10000 cycles" at the top.
-  In this mode you can reduce the amount of cycles even more by hitting CTRL-F11
-  (you can go as low as you want) or raise it by hitting CTRL-F12 as much as you
-  want, but you will be limited by the power of one core of your computer's CPU.
+  In this mode you can reduce the amount of cycles even more by hitting Ctrl+F11
+  (Cmd+F11 on macOS), as low as needed, or raise it with Ctrl+F12 (Cmd+F12 on
+  macOS) but you will be limited by you PC's single-threaded performance. 
   You can see how much free time your real CPU's cores have by looking at
   the Task Manager in Windows 2000/XP/Vista/7 and the System Monitor
   in Windows 95/98/ME. Once 100% of the power of your computer's real CPU's one
@@ -1432,7 +1610,8 @@ CPU Cycles (speed up/slow down)
   "CPU speed: max 100% cycles" at the top then. This time you won't have to care
   how much free time your real CPU cores have, because DOSBox will always use
   100% of your real CPU's one core. In this mode you can reduce the amount
-  of your real CPU's core usage by CTRL-F11 or raise it with CTRL-F12.
+  of your real CPU's core usage by Ctrl+F11 or raise it with Ctrl+F12 (or
+  Cmd+F11 and Cmd+F12 on macOS).
 
 CPU Core (speed up)
   On x86 architectures you can try to force the usage of a dynamically
@@ -1445,12 +1624,16 @@ CPU Core (speed up)
 
 Graphics emulation (speed up)
   VGA emulation is a demanding part of DOSBox in terms of actual CPU usage.
-  Increase the number of frames skipped (in increments of one) by pressing
-  CTRL-F8. Your CPU usage should decrease when using a fixed cycle setting,
-  and you will be able to increase cycles with CTRL-F12.
+  On systems with limited CPU performance, consider binding a hotkey to the
+  "Increase frameskip" action ("Inc Fskip") using the keymapper. Skipping
+  frames generally frees up your CPU, providing faster emulation when using
+  max cycles or affording a greater number of fixed cycles with Ctrl+F12
+  (or Cmd+F12 on macOS).
+
   You can repeat this until the game runs fast enough for you.
   Please note that this is a trade-off: you lose in fluidity of video what
-  you gain in speed.
+  you gain in speed.  Once you'll find the perfect combination for the
+  game and your hardware, you can save it in game-specific conf file.
 
 Sound emulation (speed up)
   You can also try to disable the sound through the setup utility of the game
@@ -1593,6 +1776,26 @@ Alternatively, you can setup the filename in the configuration file
 in the [dosbox] section. There's a language= entry that can be changed with
 the filelocation.
 
+The DOSBox Staging release is bundled with a "translations" directory
+containing translated language files. Translations are provided for
+German (de), Spanish (es), Fench (fr), Italian (it), Polish (pl), and
+Russian (ru).  Select your prefered language using short-hand notation,
+as shown in these examples:
+
+Via LANG environment variable:
+  set LANG de     (on Windows)
+  export LANG=it  (on macOS and Linux)
+
+Via conf setting:
+  [dosbox]
+  language = es
+
+Via command-line flag:
+  dosbox -lang pl
+  dosbox -lang ru
+
+Note: macOS users can find the "translations" directory inside the
+      "./Resources/" directory, after expanding the .dmg package.
 
 
 ========================================
@@ -1600,7 +1803,7 @@ the filelocation.
 ========================================
 
 Download the source.
-Check the INSTALL in the source distribution.
+Check the README.md and BUILD.md files in the source distribution.
 
 
 

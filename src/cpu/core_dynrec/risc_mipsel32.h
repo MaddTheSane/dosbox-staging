@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -28,9 +28,6 @@
 #define DRC_FLAGS_INVALIDATION
 // try to replace _simple functions by code
 #define DRC_FLAGS_INVALIDATION_DCODE
-
-// type with the same size as a pointer
-#define DRC_PTR_SIZE_IM Bit32u
 
 // calling convention modifier
 #define DRC_CALL_CONV	/* nothing */
@@ -123,7 +120,7 @@ static void gen_mov_dword_to_reg_imm(HostReg dest_reg,Bit32u imm) {
 }
 
 // this is the only place temp1 should be modified
-static void INLINE mov_imm_to_temp1(Bit32u imm) {
+static void inline mov_imm_to_temp1(Bit32u imm) {
 	if (temp1_valid && (temp1_value == imm)) return;
 	gen_mov_dword_to_reg_imm(temp1, imm);
 	temp1_valid = true;
@@ -228,7 +225,7 @@ static void gen_mov_byte_to_reg_low(HostReg dest_reg,void* data) {
 // the upper 24bit of the destination register can be destroyed
 // this function can use FC_OP1/FC_OP2 as dest_reg which are
 // not directly byte-accessible on some architectures
-static void INLINE gen_mov_byte_to_reg_low_canuseword(HostReg dest_reg,void* data) {
+static void inline gen_mov_byte_to_reg_low_canuseword(HostReg dest_reg,void* data) {
 	gen_mov_byte_to_reg_low(dest_reg, data);
 }
 
@@ -236,7 +233,7 @@ static void INLINE gen_mov_byte_to_reg_low_canuseword(HostReg dest_reg,void* dat
 // the upper 24bit of the destination register can be destroyed
 // this function does not use FC_OP1/FC_OP2 as dest_reg as these
 // registers might not be directly byte-accessible on some architectures
-static void INLINE gen_mov_byte_to_reg_low_imm(HostReg dest_reg,Bit8u imm) {
+static void inline gen_mov_byte_to_reg_low_imm(HostReg dest_reg,Bit8u imm) {
 	gen_mov_word_to_reg_imm(dest_reg, imm);
 }
 
@@ -244,7 +241,7 @@ static void INLINE gen_mov_byte_to_reg_low_imm(HostReg dest_reg,Bit8u imm) {
 // the upper 24bit of the destination register can be destroyed
 // this function can use FC_OP1/FC_OP2 as dest_reg which are
 // not directly byte-accessible on some architectures
-static void INLINE gen_mov_byte_to_reg_low_imm_canuseword(HostReg dest_reg,Bit8u imm) {
+static void inline gen_mov_byte_to_reg_low_imm_canuseword(HostReg dest_reg,Bit8u imm) {
 	gen_mov_byte_to_reg_low_imm(dest_reg, imm);
 }
 
@@ -323,18 +320,18 @@ static void gen_and_imm(HostReg reg,Bit32u imm) {
 
 
 // move a 32bit constant value into memory
-static void INLINE gen_mov_direct_dword(void* dest,Bit32u imm) {
+static void inline gen_mov_direct_dword(void* dest,Bit32u imm) {
 	gen_mov_dword_to_reg_imm(temp2, imm);
 	gen_mov_word_from_reg(temp2, dest, 1);
 }
 
 // move an address into memory
-static void INLINE gen_mov_direct_ptr(void* dest,DRC_PTR_SIZE_IM imm) {
-	gen_mov_direct_dword(dest,(Bit32u)imm);
+static void inline gen_mov_direct_ptr(void* dest,Bit32u imm) {
+	gen_mov_direct_dword(dest,imm);
 }
 
 // add a 32bit (dword==true) or 16bit (dword==false) constant value to a memory value
-static void INLINE gen_add_direct_word(void* dest,Bit32u imm,bool dword) {
+static void inline gen_add_direct_word(void* dest,Bit32u imm,bool dword) {
 	if(!imm) return;
 	gen_mov_word_to_reg(temp2, dest, dword);
 	gen_add_imm(temp2, imm);
@@ -342,24 +339,24 @@ static void INLINE gen_add_direct_word(void* dest,Bit32u imm,bool dword) {
 }
 
 // add an 8bit constant value to a dword memory value
-static void INLINE gen_add_direct_byte(void* dest,Bit8s imm) {
+static void inline gen_add_direct_byte(void* dest,Bit8s imm) {
 	gen_add_direct_word(dest, (Bit32s)imm, 1);
 }
 
 // subtract an 8bit constant value from a dword memory value
-static void INLINE gen_sub_direct_byte(void* dest,Bit8s imm) {
+static void inline gen_sub_direct_byte(void* dest,Bit8s imm) {
 	gen_add_direct_word(dest, -((Bit32s)imm), 1);
 }
 
 // subtract a 32bit (dword==true) or 16bit (dword==false) constant value from a memory value
-static void INLINE gen_sub_direct_word(void* dest,Bit32u imm,bool dword) {
+static void inline gen_sub_direct_word(void* dest,Bit32u imm,bool dword) {
 	gen_add_direct_word(dest, -(Bit32s)imm, dword);
 }
 
 // effective address calculation, destination is dest_reg
 // scale_reg is scaled by scale (scale_reg*(2^scale)) and
 // added to dest_reg, then the immediate value is added
-static INLINE void gen_lea(HostReg dest_reg,HostReg scale_reg,Bitu scale,Bits imm) {
+static inline void gen_lea(HostReg dest_reg,HostReg scale_reg,Bitu scale,Bits imm) {
 	if (scale) {
 		cache_addw((scale_reg<<11)+(scale<<6));		// sll scale_reg, scale_reg, scale
 		cache_addw(scale_reg);
@@ -372,7 +369,7 @@ static INLINE void gen_lea(HostReg dest_reg,HostReg scale_reg,Bitu scale,Bits im
 // effective address calculation, destination is dest_reg
 // dest_reg is scaled by scale (dest_reg*(2^scale)),
 // then the immediate value is added
-static INLINE void gen_lea(HostReg dest_reg,Bitu scale,Bits imm) {
+static inline void gen_lea(HostReg dest_reg,Bitu scale,Bits imm) {
 	if (scale) {
 		cache_addw((dest_reg<<11)+(scale<<6));		// sll dest_reg, dest_reg, scale
 		cache_addw(dest_reg);
@@ -383,9 +380,9 @@ static INLINE void gen_lea(HostReg dest_reg,Bitu scale,Bits imm) {
 #define DELAY cache_addd(0)			// nop
 
 // generate a call to a parameterless function
-static void INLINE gen_call_function_raw(void * func) {
+static void inline gen_call_function_raw(void * func) {
 #if C_DEBUG
-	if ((cache.pos ^ func) & 0xf0000000) LOG_MSG("jump overflow\n");
+	if (((Bit32u)cache.pos ^ (Bit32u)func) & 0xf0000000) LOG_MSG("jump overflow\n");
 #endif
 	temp1_valid = false;
 	cache_addd(0x0c000000+(((Bit32u)func>>2)&0x3ffffff));		// jal func
@@ -395,8 +392,8 @@ static void INLINE gen_call_function_raw(void * func) {
 // generate a call to a function with paramcount parameters
 // note: the parameters are loaded in the architecture specific way
 // using the gen_load_param_ functions below
-static Bit32u INLINE gen_call_function_setup(void * func,Bitu paramcount,bool fastcall=false) {
-	Bit32u proc_addr = (Bit32u)cache.pos;
+static inline const Bit8u* gen_call_function_setup(void * func,Bitu paramcount,bool fastcall=false) {
+	const Bit8u* proc_addr = cache.pos;
 	gen_call_function_raw(func);
 	return proc_addr;
 }
@@ -405,22 +402,22 @@ static Bit32u INLINE gen_call_function_setup(void * func,Bitu paramcount,bool fa
 // max of 8 parameters in $a0-$a3 and $t0-$t3
 
 // load an immediate value as param'th function parameter
-static void INLINE gen_load_param_imm(Bitu imm,Bitu param) {
+static void inline gen_load_param_imm(Bitu imm,Bitu param) {
 	gen_mov_dword_to_reg_imm(param+4, imm);
 }
 
 // load an address as param'th function parameter
-static void INLINE gen_load_param_addr(Bitu addr,Bitu param) {
+static void inline gen_load_param_addr(Bitu addr,Bitu param) {
 	gen_mov_dword_to_reg_imm(param+4, addr);
 }
 
 // load a host-register as param'th function parameter
-static void INLINE gen_load_param_reg(Bitu reg,Bitu param) {
+static void inline gen_load_param_reg(Bitu reg,Bitu param) {
 	gen_mov_regs(param+4, reg);
 }
 
 // load a value from memory as param'th function parameter
-static void INLINE gen_load_param_mem(Bitu mem,Bitu param) {
+static void inline gen_load_param_mem(Bitu mem,Bitu param) {
 	gen_mov_word_to_reg(param+4, (void *)mem, 1);
 }
 #else
@@ -428,7 +425,7 @@ static void INLINE gen_load_param_mem(Bitu mem,Bitu param) {
 #endif
 
 // jump to an address pointed at by ptr, offset is in imm
-static void INLINE gen_jmp_ptr(void * ptr,Bits imm=0) {
+static void inline gen_jmp_ptr(void * ptr,Bits imm=0) {
 	gen_mov_word_to_reg(temp2, ptr, 1);
 	if((imm < -32768) || (imm >= 32768)) {
 		gen_add_imm(temp2, imm);
@@ -443,7 +440,7 @@ static void INLINE gen_jmp_ptr(void * ptr,Bits imm=0) {
 
 // short conditional jump (+-127 bytes) if register is zero
 // the destination is set by gen_fill_branch() later
-static Bit32u INLINE gen_create_branch_on_zero(HostReg reg,bool dword) {
+static inline const Bit8u* gen_create_branch_on_zero(HostReg reg,bool dword) {
 	temp1_valid = false;
 	if(!dword) { 
 		cache_addw(0xffff);	// andi temp1, reg, 0xffff
@@ -452,12 +449,12 @@ static Bit32u INLINE gen_create_branch_on_zero(HostReg reg,bool dword) {
 	cache_addw(0);			// beq $0, reg, 0
 	cache_addw(0x1000+(dword?reg:temp1));
 	DELAY;
-	return ((Bit32u)cache.pos-8);
+	return (cache.pos-8);
 }
 
 // short conditional jump (+-127 bytes) if register is nonzero
 // the destination is set by gen_fill_branch() later
-static Bit32u INLINE gen_create_branch_on_nonzero(HostReg reg,bool dword) {
+static inline const Bit8u* gen_create_branch_on_nonzero(HostReg reg,bool dword) {
 	temp1_valid = false;
 	if(!dword) { 
 		cache_addw(0xffff);	// andi temp1, reg, 0xffff
@@ -466,18 +463,18 @@ static Bit32u INLINE gen_create_branch_on_nonzero(HostReg reg,bool dword) {
 	cache_addw(0);			// bne $0, reg, 0
 	cache_addw(0x1400+(dword?reg:temp1));
 	DELAY;
-	return ((Bit32u)cache.pos-8);
+	return (cache.pos-8);
 }
 
 // calculate relative offset and fill it into the location pointed to by data
-static void INLINE gen_fill_branch(DRC_PTR_SIZE_IM data) {
+static void inline gen_fill_branch(const Bit8u* data) {
 #if C_DEBUG
-	Bits len=(Bit32u)cache.pos-data;
+	Bits len=cache.pos-data;
 	if (len<0) len=-len;
 	if (len>126) LOG_MSG("Big jump %d",len);
 #endif
 	temp1_valid = false;			// this is a branch target
-	*(Bit16u*)data=((Bit16u)((Bit32u)cache.pos-data-4)>>2);
+	cache_addw((Bit16u)(cache.pos-data-4)>>2,data);
 }
 
 #if 0	// assume for the moment no branch will go farther then +/- 128KB
@@ -485,7 +482,7 @@ static void INLINE gen_fill_branch(DRC_PTR_SIZE_IM data) {
 // conditional jump if register is nonzero
 // for isdword==true the 32bit of the register are tested
 // for isdword==false the lowest 8bit of the register are tested
-static Bit32u gen_create_branch_long_nonzero(HostReg reg,bool isdword) {
+static const Bit8u* gen_create_branch_long_nonzero(HostReg reg,bool isdword) {
 	temp1_valid = false;
 	if (!isdword) {
 		cache_addw(0xff);	// andi temp1, reg, 0xff
@@ -496,31 +493,31 @@ static Bit32u gen_create_branch_long_nonzero(HostReg reg,bool isdword) {
 	DELAY;
 	cache_addd(0x00000000);		// fill j
 	DELAY;
-	return ((Bit32u)cache.pos-8);
+	return (cache.pos-8);
 }
 
 // compare 32bit-register against zero and jump if value less/equal than zero
-static Bit32u INLINE gen_create_branch_long_leqzero(HostReg reg) {
+static inline const Bit8u* gen_create_branch_long_leqzero(HostReg reg) {
 	temp1_valid = false;
 	cache_addw(3);				// bgtz reg, +12
 	cache_addw(0x1c00+(reg<<5));
 	DELAY;
 	cache_addd(0x00000000);			// fill j 
 	DELAY;
-	return ((Bit32u)cache.pos-8);
+	return (cache.pos-8);
 }
 
 // calculate long relative offset and fill it into the location pointed to by data
-static void INLINE gen_fill_branch_long(Bit32u data) {
+static void inline gen_fill_branch_long(const Bit8u* data) {
 	temp1_valid = false;
 	// this is an absolute branch
-	*(Bit32u*)data=0x08000000+(((Bit32u)cache.pos>>2)&0x3ffffff);
+	cache_addd(0x08000000+(((Bit32u)cache.pos>>2)&0x3ffffff),data);
 }
 #else		
 // conditional jump if register is nonzero
 // for isdword==true the 32bit of the register are tested
 // for isdword==false the lowest 8bit of the register are tested
-static Bit32u gen_create_branch_long_nonzero(HostReg reg,bool isdword) {
+static const Bit8u* gen_create_branch_long_nonzero(HostReg reg,bool isdword) {
 	temp1_valid = false;
 	if (!isdword) {
 		cache_addw(0xff);	// andi temp1, reg, 0xff
@@ -529,20 +526,20 @@ static Bit32u gen_create_branch_long_nonzero(HostReg reg,bool isdword) {
 	cache_addw(0);			// bne $0, reg, 0
 	cache_addw(0x1400+(isdword?reg:temp1));	
 	DELAY;
-	return ((Bit32u)cache.pos-8);
+	return (cache.pos-8);
 }
 
 // compare 32bit-register against zero and jump if value less/equal than zero
-static Bit32u INLINE gen_create_branch_long_leqzero(HostReg reg) {
+static inline const Bit8u* gen_create_branch_long_leqzero(HostReg reg) {
 	temp1_valid = false;
 	cache_addw(0);			// blez reg, 0
 	cache_addw(0x1800+(reg<<5));
 	DELAY;
-	return ((Bit32u)cache.pos-8);
+	return (cache.pos-8);
 }
 
 // calculate long relative offset and fill it into the location pointed to by data
-static void INLINE gen_fill_branch_long(Bit32u data) {
+static void inline gen_fill_branch_long(const Bit8u* data) {
 	gen_fill_branch(data);
 }
 #endif
@@ -567,34 +564,34 @@ static void gen_return_function(void) {
 #ifdef DRC_FLAGS_INVALIDATION
 // called when a call to a function can be replaced by a
 // call to a simpler function
-static void gen_fill_function_ptr(Bit8u * pos,void* fct_ptr,Bitu flags_type) {
+static void gen_fill_function_ptr(const Bit8u * pos,void* fct_ptr,Bitu flags_type) {
 #ifdef DRC_FLAGS_INVALIDATION_DCODE
 	// try to avoid function calls but rather directly fill in code
 	switch (flags_type) {
 		case t_ADDb:
 		case t_ADDw:
 		case t_ADDd:
-			*(Bit32u*)pos=0x00851021;					// addu $v0, $a0, $a1
+			cache_addd(0x00851021,pos);					// addu $v0, $a0, $a1
 			break;
 		case t_ORb:
 		case t_ORw:
 		case t_ORd:
-			*(Bit32u*)pos=0x00851025;					// or $v0, $a0, $a1
+			cache_addd(0x00851025,pos);					// or $v0, $a0, $a1
 			break;
 		case t_ANDb:
 		case t_ANDw:
 		case t_ANDd:
-			*(Bit32u*)pos=0x00851024;					// and $v0, $a0, $a1
+			cache_addd(0x00851024,pos);					// and $v0, $a0, $a1
 			break;
 		case t_SUBb:
 		case t_SUBw:
 		case t_SUBd:
-			*(Bit32u*)pos=0x00851023;					// subu $v0, $a0, $a1
+			cache_addd(0x00851023,pos);					// subu $v0, $a0, $a1
 			break;
 		case t_XORb:
 		case t_XORw:
 		case t_XORd:
-			*(Bit32u*)pos=0x00851026;					// xor $v0, $a0, $a1
+			cache_addd(0x00851026,pos);					// xor $v0, $a0, $a1
 			break;
 		case t_CMPb:
 		case t_CMPw:
@@ -602,52 +599,52 @@ static void gen_fill_function_ptr(Bit8u * pos,void* fct_ptr,Bitu flags_type) {
 		case t_TESTb:
 		case t_TESTw:
 		case t_TESTd:
-			*(Bit32u*)pos=0;							// nop
+			cache_addd(0,pos);							// nop
 			break;
 		case t_INCb:
 		case t_INCw:
 		case t_INCd:
-			*(Bit32u*)pos=0x24820001;					// addiu $v0, $a0, 1
+			cache_addd(0x24820001,pos);					// addiu $v0, $a0, 1
 			break;
 		case t_DECb:
 		case t_DECw:
 		case t_DECd:
-			*(Bit32u*)pos=0x2482ffff;					// addiu $v0, $a0, -1
+			cache_addd(0x2482ffff,pos);					// addiu $v0, $a0, -1
 			break;
 		case t_SHLb:
 		case t_SHLw:
 		case t_SHLd:
-			*(Bit32u*)pos=0x00a41004;					// sllv $v0, $a0, $a1
+			cache_addd(0x00a41004,pos);					// sllv $v0, $a0, $a1
 			break;
 		case t_SHRb:
 		case t_SHRw:
 		case t_SHRd:
-			*(Bit32u*)pos=0x00a41006;					// srlv $v0, $a0, $a1
+			cache_addd(0x00a41006,pos);					// srlv $v0, $a0, $a1
 			break;
 		case t_SARd:
-			*(Bit32u*)pos=0x00a41007;					// srav $v0, $a0, $a1
+			cache_addd(0x00a41007,pos);					// srav $v0, $a0, $a1
 			break;
 #if (_MIPS_ISA==MIPS32R2) || defined(PSP)
 		case t_RORd:
-			*(Bit32u*)pos=0x00a41046;					// rotr $v0, $a0, $a1
+			cache_addd(0x00a41046,pos);					// rotr $v0, $a0, $a1
 			break;
 #endif
 		case t_NEGb:
 		case t_NEGw:
 		case t_NEGd:
-			*(Bit32u*)pos=0x00041023;					// subu $v0, $0, $a0
+			cache_addd(0x00041023,pos);					// subu $v0, $0, $a0
 			break;
 		default:
-			*(Bit32u*)pos=0x0c000000+((((Bit32u)fct_ptr)>>2)&0x3ffffff);		// jal simple_func
+			cache_addd(0x0c000000+(((Bit32u)fct_ptr)>>2)&0x3ffffff,pos);		// jal simple_func
 			break;
 	}
 #else
-	*(Bit32u*)pos=0x0c000000+(((Bit32u)fct_ptr)>>2)&0x3ffffff);		// jal simple_func
+	cache_addd(0x0c000000+(((Bit32u)fct_ptr)>>2)&0x3ffffff,pos);	// jal simple_func
 #endif
 }
 #endif
 
-static void cache_block_closing(Bit8u* block_start,Bitu block_size) {
+static void cache_block_closing(const Bit8u* block_start,Bitu block_size) {
 #ifdef PSP
 // writeback dcache and invalidate icache
 	Bit32u inval_start = ((Bit32u)block_start) & ~63;
@@ -713,7 +710,7 @@ static void gen_mov_regbyte_to_reg_low(HostReg dest_reg,Bitu index) {
 // the upper 24bit of the destination register can be destroyed
 // this function can use FC_OP1/FC_OP2 as dest_reg which are
 // not directly byte-accessible on some architectures
-static void INLINE gen_mov_regbyte_to_reg_low_canuseword(HostReg dest_reg,Bitu index) {
+static void inline gen_mov_regbyte_to_reg_low_canuseword(HostReg dest_reg,Bitu index) {
 // stub
 }
 

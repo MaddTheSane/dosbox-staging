@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 
-# Copyright (C) 2019-2020  Patryk Obara <patryk.obara@gmail.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Copyright (C) 2019-2021  Patryk Obara <patryk.obara@gmail.com>
 
 """
 This script prints a summary snippet of information out of reports
@@ -41,7 +42,7 @@ def summary_values(summary_table):
 
 
 def read_soup(index_html):
-    with open(index_html) as index:
+    with open(index_html, encoding='utf-8') as index:
         soup = BeautifulSoup(index, 'html5lib')
         tables = soup.find_all('table')
         summary = tables[1]

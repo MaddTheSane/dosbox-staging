@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -134,6 +134,19 @@
 #endif
 #endif
 #define SRCTYPE Bit16u
+#endif
+
+#if SBPP == 24
+#define SC scalerSourceCache.b32
+#if DBPP == 15
+#define PMAKE(_VAL) (PTYPE)(((_VAL & (31 << 19)) >> 9) | ((_VAL & (31 << 11)) >> 6) | ((_VAL & (31 << 3)) >> 3))
+#elif DBPP == 16
+#define PMAKE(_VAL) (PTYPE)(((_VAL & (31 << 19)) >> 8) | ((_VAL & (63 << 10)) >> 4) | ((_VAL & (31 << 3)) >> 3))
+#elif DBPP == 32
+#define PMAKE(_VAL) (_VAL)
+#endif
+#include "rgb24.h"
+#define SRCTYPE rgb24
 #endif
 
 #if SBPP == 32

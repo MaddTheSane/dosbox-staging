@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2020  The DOSBox Team
+ *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -23,10 +23,10 @@ static PhysPt EA_16_00_n(void) { return BaseDS+(Bit16u)(reg_bx+(Bit16s)reg_si); 
 static PhysPt EA_16_01_n(void) { return BaseDS+(Bit16u)(reg_bx+(Bit16s)reg_di); }
 static PhysPt EA_16_02_n(void) { return BaseSS+(Bit16u)(reg_bp+(Bit16s)reg_si); }
 static PhysPt EA_16_03_n(void) { return BaseSS+(Bit16u)(reg_bp+(Bit16s)reg_di); }
-static PhysPt EA_16_04_n(void) { return BaseDS+(Bit16u)(reg_si); }
-static PhysPt EA_16_05_n(void) { return BaseDS+(Bit16u)(reg_di); }
-static PhysPt EA_16_06_n(void) { return BaseDS+(Bit16u)(Fetchw());}
-static PhysPt EA_16_07_n(void) { return BaseDS+(Bit16u)(reg_bx); }
+static PhysPt EA_16_04_n() { return BaseDS + reg_si; }
+static PhysPt EA_16_05_n() { return BaseDS + reg_di; }
+static PhysPt EA_16_06_n() { return BaseDS + Fetchw(); }
+static PhysPt EA_16_07_n() { return BaseDS + reg_bx; }
 
 static PhysPt EA_16_40_n(void) { return BaseDS+(Bit16u)(reg_bx+(Bit16s)reg_si+Fetchbs()); }
 static PhysPt EA_16_41_n(void) { return BaseDS+(Bit16u)(reg_bx+(Bit16s)reg_di+Fetchbs()); }
@@ -49,7 +49,7 @@ static PhysPt EA_16_87_n(void) { return BaseDS+(Bit16u)(reg_bx+Fetchws()); }
 static Bit32u SIBZero=0;
 static Bit32u * SIBIndex[8]= { &reg_eax,&reg_ecx,&reg_edx,&reg_ebx,&SIBZero,&reg_ebp,&reg_esi,&reg_edi };
 
-static INLINE PhysPt Sib(Bitu mode) {
+static inline PhysPt Sib(Bitu mode) {
 	Bit8u sib=Fetchb();
 	PhysPt base;
 	switch (sib&7) {
